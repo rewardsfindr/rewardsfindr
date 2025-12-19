@@ -175,7 +175,7 @@ function App() {
               <CreditCard style={{ color: 'white' }} size={28} />
             </div>
             <h1 style={{ fontSize: '1.875rem', fontWeight: 'bold', background: 'linear-gradient(to right, #4f46e5, #7c3aed)', WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent' }}>
-              RewardsFindR
+              RewardsFindr
             </h1>
           </div>
           <p style={{ color: '#6b7280', marginLeft: '4rem' }}>Find the best credit card rewards for any store</p>
