@@ -263,7 +263,7 @@ function App() {
             No login. No tracking. Data from public card terms.
           </p>
           <div style={{ fontSize: '0.875rem', color: '#9ca3af', marginTop: '0.75rem' }}>
-            Hobby project • <a href="mailto:rewardsfindr.app@gmail.com" style={{color: '#4f46e5'}}>rewardsfindr.app@gmail.com</a>
+            Hobby project • <a href="mailto:rewardsfindr@gmail.com" style={{color: '#4f46e5'}}>rewardsfindr.app@gmail.com</a>
           </div>
         </div>
 
