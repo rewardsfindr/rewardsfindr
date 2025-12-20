@@ -255,7 +255,7 @@ function App() {
           </div>
         </div>
 
-        {/* How it works - ADD THIS */}
+        {/* How it works */}
         <div style={{ background: 'white', borderRadius: '1.5rem', boxShadow: '0 10px 15px -3px rgba(0, 0, 0, 0.1)', padding: '1.5rem', marginBottom: '1.5rem' }}>
           <h3 style={{ fontSize: '1.25rem', fontWeight: 'bold', color: '#1f2937', marginBottom: '0.75rem' }}>How it works</h3>
           <p style={{ color: '#6b7280', lineHeight: '1.6' }}>
@@ -263,10 +263,9 @@ function App() {
             No login. No tracking. Data from public card terms.
           </p>
           <div style={{ fontSize: '0.875rem', color: '#9ca3af', marginTop: '0.75rem' }}>
-            Hobby project • <a href="mailto:rewardsfindr@gmail.com" style={{color: '#4f46e5'}}>rewardsfindr.app@gmail.com</a>
+            Hobby project • <a href="mailto:rewardsfindr@gmail.com" style={{color: '#4f46e5', textDecoration: 'none'}}>rewardsfindr@gmail.com</a>
           </div>
         </div>
-
 
         {/* No results + suggestion */}
         {selectedStore && results.length === 0 && !searching && (
