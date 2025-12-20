@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { Search, TrendingUp, Store, CreditCard, Info, Loader, AlertCircle } from 'lucide-react';
 import { collection, getDocs } from 'firebase/firestore';
 import { db } from './firebase';
-
+import './App.css';
 
 const POPULAR_STORES = [
   { name: "Whole Foods", category: "grocery" },
@@ -22,37 +22,43 @@ function App() {
   const [loading, setLoading] = useState(true);
   const [searching, setSearching] = useState(false);
   const [error, setError] = useState(null);
-  
+
   const [allCards, setAllCards] = useState([]);
   const [storeCategories, setStoreCategories] = useState({});
+  const [storeNames, setStoreNames] = useState([]);
 
   useEffect(() => {
     const fetchFirebaseData = async () => {
       try {
         setLoading(true);
-        
+
         // Fetch cards
         const cardsSnapshot = await getDocs(collection(db, 'cards'));
         const cards = cardsSnapshot.docs.map(doc => ({
           id: doc.id,
           ...doc.data()
         }));
-        
+
         // Fetch stores
         const storesSnapshot = await getDocs(collection(db, 'stores'));
         const stores = storesSnapshot.docs.map(doc => doc.data());
-        
+
         const storeLookup = {};
+        const names = [];
+
         stores.forEach(store => {
           if (store.storeName) {
-            storeLookup[store.storeName.toLowerCase()] = store.category;
+            const key = store.storeName.toLowerCase();
+            storeLookup[key] = store.category;
+            names.push(store.storeName);
           }
         });
-        
+
         setAllCards(cards);
         setStoreCategories(storeLookup);
+        setStoreNames(names);
         setLoading(false);
-        
+
       } catch (err) {
         console.error('Firebase error:', err);
         setError(err.message);
@@ -63,8 +69,50 @@ function App() {
     fetchFirebaseData();
   }, []);
 
+  // Basic fuzzy-ish match: case-insensitive, trims, and allows partials.
+  const findBestStoreMatch = (input) => {
+    if (!input) return null;
+    const query = input.toLowerCase().trim();
+
+    // 1) Exact key match
+    if (storeCategories[query]) {
+      return query;
+    }
+
+    // 2) Starts-with match
+    const startsWith = storeNames.find(name =>
+      name.toLowerCase().startsWith(query)
+    );
+    if (startsWith) {
+      return startsWith.toLowerCase();
+    }
+
+    // 3) Contains match
+    const contains = storeNames.find(name =>
+      name.toLowerCase().includes(query)
+    );
+    if (contains) {
+      return contains.toLowerCase();
+    }
+
+    return null;
+  };
+
   const getStoreCategory = (storeName) => {
-    return storeCategories[storeName.toLowerCase().trim()] || null;
+    const key = findBestStoreMatch(storeName);
+    if (!key) return null;
+    return storeCategories[key] || null;
+  };
+
+  const buildResultsForCategory = (category) => {
+    const cardResults = allCards.map(card => ({
+      ...card,
+      rate: card.categoryRates[category] || card.categoryRates.default || 0,
+      category: category
+    }));
+
+    cardResults.sort((a, b) => b.rate - a.rate);
+    return cardResults;
   };
 
   const handleSearch = async () => {
@@ -74,7 +122,7 @@ function App() {
     await new Promise(resolve => setTimeout(resolve, 200));
 
     const category = getStoreCategory(searchTerm);
-    
+
     if (!category) {
       setSelectedStore(searchTerm);
       setResults([]);
@@ -82,13 +130,7 @@ function App() {
       return;
     }
 
-    const cardResults = allCards.map(card => ({
-      ...card,
-      rate: card.categoryRates[category] || card.categoryRates.default || 0,
-      category: category
-    }));
-
-    cardResults.sort((a, b) => b.rate - a.rate);
+    const cardResults = buildResultsForCategory(category);
     setSelectedStore(searchTerm);
     setResults(cardResults);
     setSearching(false);
@@ -97,28 +139,28 @@ function App() {
   const handleQuickSearch = async (storeName) => {
     setSearchTerm(storeName);
     setSearching(true);
-    
+
     await new Promise(resolve => setTimeout(resolve, 200));
-    
+
     const category = getStoreCategory(storeName);
-    
+
     if (!category) {
       setSelectedStore(storeName);
       setResults([]);
       setSearching(false);
       return;
     }
-    
-    const cardResults = allCards.map(card => ({
-      ...card,
-      rate: card.categoryRates[category] || card.categoryRates.default || 0,
-      category: category
-    }));
 
-    cardResults.sort((a, b) => b.rate - a.rate);
+    const cardResults = buildResultsForCategory(category);
     setSelectedStore(storeName);
     setResults(cardResults);
     setSearching(false);
+  };
+
+  const getSuggestedStoreName = () => {
+    const key = findBestStoreMatch(selectedStore);
+    if (!key) return null;
+    return storeNames.find(name => name.toLowerCase() === key) || null;
   };
 
   if (loading) {
@@ -150,10 +192,14 @@ function App() {
     );
   }
 
+  const suggestedStore = selectedStore && !searching && results.length === 0
+    ? getSuggestedStoreName()
+    : null;
+
   return (
     <div style={{ minHeight: '100vh', background: 'linear-gradient(to bottom right, #eef2ff, #fae8ff)' }}>
       <div style={{ maxWidth: '80rem', margin: '0 auto', padding: '1rem', paddingBottom: '6rem' }}>
-        
+
         {/* Header */}
         <div style={{ background: 'white', borderRadius: '1.5rem', boxShadow: '0 20px 25px -5px rgba(0, 0, 0, 0.1)', padding: '1.5rem', marginBottom: '1.5rem', marginTop: '1.5rem' }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', marginBottom: '0.5rem' }}>
@@ -172,6 +218,7 @@ function App() {
             </span>
           </div>
         </div>
+
         {/* Search Section */}
         <div style={{ background: 'white', borderRadius: '1.5rem', boxShadow: '0 20px 25px -5px rgba(0, 0, 0, 0.1)', padding: '1.5rem', marginBottom: '1.5rem' }}>
           <div style={{ position: 'relative', marginBottom: '1rem' }}>
@@ -208,15 +255,37 @@ function App() {
           </div>
         </div>
 
-        {/* Results */}
+        {/* No results + suggestion */}
         {selectedStore && results.length === 0 && !searching && (
           <div style={{ background: '#fef3c7', border: '2px solid #fbbf24', borderRadius: '1.5rem', padding: '1.5rem', textAlign: 'center' }}>
             <Info style={{ margin: '0 auto 0.75rem', color: '#d97706' }} size={48} />
             <h3 style={{ fontSize: '1.25rem', fontWeight: 'bold', color: '#1f2937', marginBottom: '0.5rem' }}>Store Not Found</h3>
-            <p style={{ color: '#6b7280' }}>We don't have "{selectedStore}" in our database yet.</p>
+            <p style={{ color: '#6b7280', marginBottom: '0.75rem' }}>
+              We don't have "{selectedStore}" in our database yet.
+            </p>
+            {suggestedStore && (
+              <p style={{ color: '#6b7280' }}>
+                Did you mean{" "}
+                <button
+                  onClick={() => handleQuickSearch(suggestedStore)}
+                  style={{
+                    background: 'none',
+                    border: 'none',
+                    color: '#4f46e5',
+                    fontWeight: 600,
+                    cursor: 'pointer',
+                    textDecoration: 'underline'
+                  }}
+                >
+                  {suggestedStore}
+                </button>
+                ?
+              </p>
+            )}
           </div>
         )}
 
+        {/* Results */}
         {results.length > 0 && !searching && (
           <>
             <div style={{ background: 'linear-gradient(to right, #4f46e5, #7c3aed)', borderRadius: '1.5rem', boxShadow: '0 20px 25px -5px rgba(0, 0, 0, 0.1)', padding: '1.5rem', marginBottom: '1.5rem', color: 'white' }}>
@@ -239,7 +308,11 @@ function App() {
                   <div
                     key={card.id}
                     style={{
-                      background: idx === 0 ? 'linear-gradient(to bottom right, #10b981, #059669)' : idx === 1 ? 'linear-gradient(to bottom right, #3b82f6, #4f46e5)' : 'linear-gradient(to bottom right, #a855f7, #ec4899)',
+                      background: idx === 0
+                        ? 'linear-gradient(to bottom right, #10b981, #059669)'
+                        : idx === 1
+                        ? 'linear-gradient(to bottom right, #3b82f6, #4f46e5)'
+                        : 'linear-gradient(to bottom right, #a855f7, #ec4899)',
                       borderRadius: '1rem',
                       boxShadow: '0 10px 15px -3px rgba(0, 0, 0, 0.1)',
                       padding: '1.25rem',
