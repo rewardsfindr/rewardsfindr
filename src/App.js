@@ -255,6 +255,19 @@ function App() {
           </div>
         </div>
 
+        {/* How it works - ADD THIS */}
+        <div style={{ background: 'white', borderRadius: '1.5rem', boxShadow: '0 10px 15px -3px rgba(0, 0, 0, 0.1)', padding: '1.5rem', marginBottom: '1.5rem' }}>
+          <h3 style={{ fontSize: '1.25rem', fontWeight: 'bold', color: '#1f2937', marginBottom: '0.75rem' }}>How it works</h3>
+          <p style={{ color: '#6b7280', lineHeight: '1.6' }}>
+            Search any store → see which credit cards give the best rewards there. 
+            No login. No tracking. Data from public card terms.
+          </p>
+          <div style={{ fontSize: '0.875rem', color: '#9ca3af', marginTop: '0.75rem' }}>
+            Hobby project • <a href="mailto:rewardsfindr.app@gmail.com" style={{color: '#4f46e5'}}>rewardsfindr.app@gmail.com</a>
+          </div>
+        </div>
+
+
         {/* No results + suggestion */}
         {selectedStore && results.length === 0 && !searching && (
           <div style={{ background: '#fef3c7', border: '2px solid #fbbf24', borderRadius: '1.5rem', padding: '1.5rem', textAlign: 'center' }}>
