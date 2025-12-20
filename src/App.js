@@ -1,22 +1,8 @@
 import React, { useState, useEffect } from 'react';
 import { Search, TrendingUp, Store, CreditCard, Info, Loader, AlertCircle } from 'lucide-react';
-import { initializeApp } from 'firebase/app';
-import { getFirestore, collection, getDocs } from 'firebase/firestore';
-import './App.css';
+import { collection, getDocs } from 'firebase/firestore';
+import { db } from './firebase';
 
-// Your Firebase configuration
-const firebaseConfig = {
-  apiKey: "AIzaSyD4h8rB-L_er1puaI9foZEJNnnqCvc2jpI",
-  authDomain: "rewardsfinder1810.firebaseapp.com",
-  projectId: "rewardsfinder1810",
-  storageBucket: "rewardsfinder1810.firebasestorage.app",
-  messagingSenderId: "793000507982",
-  appId: "1:793000507982:web:2886320130981dddd2211f"
-};
-
-// Initialize Firebase
-const app = initializeApp(firebaseConfig);
-const db = getFirestore(app);
 
 const POPULAR_STORES = [
   { name: "Whole Foods", category: "grocery" },
