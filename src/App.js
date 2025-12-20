@@ -163,6 +163,10 @@ function App() {
     return storeNames.find(name => name.toLowerCase() === key) || null;
   };
 
+  const suggestedStore = selectedStore && !searching && results.length === 0
+    ? getSuggestedStoreName()
+    : null;
+
   if (loading) {
     return (
       <div style={{ minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'linear-gradient(to bottom right, #eef2ff, #fae8ff)' }}>
@@ -191,10 +195,6 @@ function App() {
       </div>
     );
   }
-
-  const suggestedStore = selectedStore && !searching && results.length === 0
-    ? getSuggestedStoreName()
-    : null;
 
   return (
     <div style={{ minHeight: '100vh', background: 'linear-gradient(to bottom right, #eef2ff, #fae8ff)' }}>
@@ -259,11 +259,11 @@ function App() {
         <div style={{ background: 'white', borderRadius: '1.5rem', boxShadow: '0 10px 15px -3px rgba(0, 0, 0, 0.1)', padding: '1.5rem', marginBottom: '1.5rem' }}>
           <h3 style={{ fontSize: '1.25rem', fontWeight: 'bold', color: '#1f2937', marginBottom: '0.75rem' }}>How it works</h3>
           <p style={{ color: '#6b7280', lineHeight: '1.6' }}>
-            Search any store → see which credit cards give the best rewards there. 
+            Search any store → see which credit cards give the best rewards there.
             No login. No tracking. Data from public card terms.
           </p>
           <div style={{ fontSize: '0.875rem', color: '#9ca3af', marginTop: '0.75rem' }}>
-            Hobby project • <a href="mailto:rewardsfindr@gmail.com" style={{color: '#4f46e5', textDecoration: 'none'}}>rewardsfindr@gmail.com</a>
+            Hobby project • <a href="mailto:rewardsfindr@gmail.com" style={{ color: '#4f46e5', textDecoration: 'none' }}>rewardsfindr@gmail.com</a>
           </div>
         </div>
 
