@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { Search, TrendingUp, Store, CreditCard, Info, Loader, AlertCircle } from 'lucide-react';
 import { collection, getDocs } from 'firebase/firestore';
+import { findBestStoreMatch, buildResultsForCategory } from './searchUtils';
 import { db } from './firebase';
 import './App.css';
 
@@ -69,50 +70,10 @@ function App() {
     fetchFirebaseData();
   }, []);
 
-  // Basic fuzzy-ish match: case-insensitive, trims, and allows partials.
-  const findBestStoreMatch = (input) => {
-    if (!input) return null;
-    const query = input.toLowerCase().trim();
-
-    // 1) Exact key match
-    if (storeCategories[query]) {
-      return query;
-    }
-
-    // 2) Starts-with match
-    const startsWith = storeNames.find(name =>
-      name.toLowerCase().startsWith(query)
-    );
-    if (startsWith) {
-      return startsWith.toLowerCase();
-    }
-
-    // 3) Contains match
-    const contains = storeNames.find(name =>
-      name.toLowerCase().includes(query)
-    );
-    if (contains) {
-      return contains.toLowerCase();
-    }
-
-    return null;
-  };
-
   const getStoreCategory = (storeName) => {
     const key = findBestStoreMatch(storeName);
     if (!key) return null;
     return storeCategories[key] || null;
-  };
-
-  const buildResultsForCategory = (category) => {
-    const cardResults = allCards.map(card => ({
-      ...card,
-      rate: card.categoryRates[category] || card.categoryRates.default || 0,
-      category: category
-    }));
-
-    cardResults.sort((a, b) => b.rate - a.rate);
-    return cardResults;
   };
 
   const handleSearch = async () => {
