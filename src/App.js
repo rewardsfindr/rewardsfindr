@@ -115,7 +115,8 @@ function App() {
     const category = getStoreCategory(searchTerm);
 
     if (!category) {
-      setSelectedStore(searchTerm);
+      const matchedName = storeNames.find(n => n.toLowerCase() === findBestStoreMatch(searchTerm, storeCategories)) || searchTerm;
+      setSelectedStore(matchedName);
       setResults([]);
       setSearching(false);
       return;
@@ -136,7 +137,8 @@ function App() {
     const category = getStoreCategory(storeName);
 
     if (!category) {
-      setSelectedStore(storeName);
+      const matchedName = storeNames.find(n => n.toLowerCase() === findBestStoreMatch(searchTerm, storeCategories)) || searchTerm;
+      setSelectedStore(matchedName);
       setResults([]);
       setSearching(false);
       return;
@@ -149,12 +151,16 @@ function App() {
   };
 
   const getSuggestedStoreName = () => {
-    const key = findBestStoreMatch(selectedStore);
-    if (!key) return null;
-    return storeNames.find(name => name.toLowerCase() === key) || null;
-  };
+  const term = searchTerm.toLowerCase().trim();
+  const exactMatch = storeCategories[term];
+  if (exactMatch) return null;
+  const key = findBestStoreMatch(searchTerm, storeCategories);
+  if (!key) return null;
+  return storeNames.find(name => name.toLowerCase() === key) || null;
+};
 
-  const suggestedStore = selectedStore && !searching && results.length === 0
+
+  const suggestedStore = selectedStore && !searching
     ? getSuggestedStoreName()
     : null;
 
@@ -215,7 +221,11 @@ function App() {
             <input
               type="text"
               value={searchTerm}
-              onChange={(e) => setSearchTerm(e.target.value)}
+              onChange={(e) => {
+                setSearchTerm(e.target.value);
+                setSelectedStore(null);
+                setResults([]);
+              }}
               onKeyPress={(e) => e.key === 'Enter' && handleSearch()}
               placeholder="Search for any store..."
               disabled={searching}
@@ -245,45 +255,31 @@ function App() {
           </div>
         </div>
 
-        {/* How it works */}
-        <div style={{ background: 'white', borderRadius: '1.5rem', boxShadow: '0 10px 15px -3px rgba(0, 0, 0, 0.1)', padding: '1.5rem', marginBottom: '1.5rem' }}>
-          <h3 style={{ fontSize: '1.25rem', fontWeight: 'bold', color: '#1f2937', marginBottom: '0.75rem' }}>How it works</h3>
-          <p style={{ color: '#6b7280', lineHeight: '1.6' }}>
-            Search any store → see which credit cards give the best rewards there.
-            No login. No tracking. Data from public card terms.
-          </p>
-          <div style={{ fontSize: '0.875rem', color: '#9ca3af', marginTop: '0.75rem' }}>
-            Hobby project • <a href="mailto:rewardsfindr@gmail.com" style={{ color: '#4f46e5', textDecoration: 'none' }}>rewardsfindr@gmail.com</a>
-          </div>
-        </div>
-
         {/* No results + suggestion */}
-        {selectedStore && results.length === 0 && !searching && (
-          <div style={{ background: '#fef3c7', border: '2px solid #fbbf24', borderRadius: '1.5rem', padding: '1.5rem', textAlign: 'center' }}>
+        {suggestedStore && !searching && results.length > 0 && (
+          <div style={{ background: '#fef3c7', border: '2px solid #fbbf24', borderRadius: '1.5rem', padding: '1.5rem', textAlign: 'center', marginBottom: '1.5rem' }}>
             <Info style={{ margin: '0 auto 0.75rem', color: '#d97706' }} size={48} />
             <h3 style={{ fontSize: '1.25rem', fontWeight: 'bold', color: '#1f2937', marginBottom: '0.5rem' }}>Store Not Found</h3>
             <p style={{ color: '#6b7280', marginBottom: '0.75rem' }}>
               We don't have "{selectedStore}" in our data yet.
             </p>
-            {suggestedStore && (
-              <p style={{ color: '#6b7280' }}>
-                Did you mean{' '}
-                <button
-                  onClick={() => handleQuickSearch(suggestedStore)}
-                  style={{
-                    background: 'none',
-                    border: 'none',
-                    color: '#4f46e5',
-                    fontWeight: 600,
-                    cursor: 'pointer',
-                    textDecoration: 'underline'
-                  }}
-                >
-                  {suggestedStore}
-                </button>
-                ?
-              </p>
-            )}
+            <p style={{ color: '#6b7280' }}>
+              Did you mean{' '}
+              <button
+                onClick={() => handleQuickSearch(suggestedStore)}
+                style={{
+                  background: 'none',
+                  border: 'none',
+                  color: '#4f46e5',
+                  fontWeight: 600,
+                  cursor: 'pointer',
+                  textDecoration: 'underline'
+                }}
+              >
+                {suggestedStore}
+              </button>
+              ?
+            </p>
           </div>
         )}
 
@@ -319,15 +315,9 @@ function App() {
                       borderRadius: '1rem',
                       boxShadow: '0 10px 15px -3px rgba(0, 0, 0, 0.1)',
                       padding: '1.25rem',
-                      color: 'white',
-                      position: 'relative'
+                      color: 'white'
                     }}
                   >
-                    {idx === 0 && (
-                      <div style={{ position: 'absolute', top: '0.75rem', right: '0.75rem', background: 'rgba(255, 255, 255, 0.2)', backdropFilter: 'blur(10px)', padding: '0.25rem 0.75rem', borderRadius: '9999px', fontSize: '0.75rem', fontWeight: 'bold' }}>
-                        BEST
-                      </div>
-                    )}
                     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '0.75rem' }}>
                       <div style={{ flex: 1 }}>
                         <h4 style={{ fontSize: '1.25rem', fontWeight: 'bold', marginBottom: '0.25rem' }}>{card.cardName}</h4>
@@ -349,6 +339,18 @@ function App() {
             </div>
           </>
         )}
+
+        {/* How it works */}
+        <div style={{ background: 'white', borderRadius: '1.5rem', boxShadow: '0 10px 15px -3px rgba(0, 0, 0, 0.1)', padding: '1.5rem', marginBottom: '1.5rem' }}>
+          <h3 style={{ fontSize: '1.25rem', fontWeight: 'bold', color: '#1f2937', marginBottom: '0.75rem' }}>How it works</h3>
+          <p style={{ color: '#6b7280', lineHeight: '1.6' }}>
+            Search any store → see which credit cards give the best rewards there.
+            No login. No tracking. Data from public card terms.
+          </p>
+          <div style={{ fontSize: '0.875rem', color: '#9ca3af', marginTop: '0.75rem' }}>
+            Hobby project • <a href="mailto:rewardsfindr@gmail.com" style={{ color: '#4f46e5', textDecoration: 'none' }}>rewardsfindr@gmail.com</a>
+          </div>
+        </div>
       </div>
     </div>
   );

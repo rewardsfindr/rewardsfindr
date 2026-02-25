@@ -7,7 +7,7 @@ export const findBestStoreMatch = (searchTerm, storeCategories = {}) => {
   if (storeCategories[term]) return term;
   
   // Partial match
-  for (const [key, category] of Object.entries(storeCategories)) {
+  for (const [key] of Object.entries(storeCategories)) {
     if (key.includes(term) || term.includes(key)) {
       return key;
     }
