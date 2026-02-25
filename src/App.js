@@ -1,8 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { Search, TrendingUp, Store, CreditCard, Info, Loader, AlertCircle } from 'lucide-react';
-import { collection, getDocs } from 'firebase/firestore';
-import { findBestStoreMatch, buildResultsForCategory } from './searchUtils';
-import { db } from './firebase';
+import { findBestStoreMatch } from './searchUtils';
 import './App.css';
 
 const POPULAR_STORES = [
@@ -29,51 +27,83 @@ function App() {
   const [storeNames, setStoreNames] = useState([]);
 
   useEffect(() => {
-    const fetchFirebaseData = async () => {
-      try {
-        setLoading(true);
+    try {
+      setLoading(true);
 
-        // Fetch cards
-        const cardsSnapshot = await getDocs(collection(db, 'cards'));
-        const cards = cardsSnapshot.docs.map(doc => ({
-          id: doc.id,
-          ...doc.data()
-        }));
+      // Static cards – you can expand this list later
+      const cards = [
+        {
+          id: 'amex-bcp',
+          cardName: 'Blue Cash Preferred® Card from American Express',
+          issuer: 'American Express',
+          categoryRates: { grocery: 6, dining: 1, gas: 3, drugstore: 1, travel: 1 },
+          notes: '6% cash back at U.S. supermarkets (up to $6,000 per year).'
+        },
+        {
+          id: 'csp',
+          cardName: 'Chase Sapphire Preferred® Card',
+          issuer: 'Chase',
+          categoryRates: { dining: 3, travel: 3, grocery: 1, gas: 1, drugstore: 1 },
+          notes: '3x points on dining and travel.'
+        },
+        {
+          id: 'ccc',
+          cardName: 'Citi Custom Cash® Card',
+          issuer: 'Citi',
+          categoryRates: { grocery: 5, dining: 5, gas: 5, drugstore: 5, travel: 1 },
+          notes: '5% cash back in top eligible category each billing cycle (up to $500).'
+        }
+      ];
 
-        // Fetch stores
-        const storesSnapshot = await getDocs(collection(db, 'stores'));
-        const stores = storesSnapshot.docs.map(doc => doc.data());
+      // Static store → category mapping (stub of your old Firestore data)
+      const stores = [
+        { storeName: 'Whole Foods', category: 'grocery' },
+        { storeName: 'Target', category: 'grocery' },
+        { storeName: 'Costco', category: 'grocery' },
+        { storeName: 'Starbucks', category: 'dining' },
+        { storeName: 'Chipotle', category: 'dining' },
+        { storeName: 'Shell', category: 'gas' },
+        { storeName: 'CVS', category: 'drugstore' },
+        { storeName: 'United Airlines', category: 'travel' }
+        // TODO: paste the rest of your 60+ stores here later
+      ];
 
-        const storeLookup = {};
-        const names = [];
+      const storeLookup = {};
+      const names = [];
 
-        stores.forEach(store => {
-          if (store.storeName) {
-            const key = store.storeName.toLowerCase();
-            storeLookup[key] = store.category;
-            names.push(store.storeName);
-          }
-        });
+      stores.forEach(store => {
+        if (store.storeName) {
+          const key = store.storeName.toLowerCase();
+          storeLookup[key] = store.category;
+          names.push(store.storeName);
+        }
+      });
 
-        setAllCards(cards);
-        setStoreCategories(storeLookup);
-        setStoreNames(names);
-        setLoading(false);
-
-      } catch (err) {
-        console.error('Firebase error:', err);
-        setError(err.message);
-        setLoading(false);
-      }
-    };
-
-    fetchFirebaseData();
+      setAllCards(cards);
+      setStoreCategories(storeLookup);
+      setStoreNames(names);
+      setError(null);
+      setLoading(false);
+    } catch (e) {
+      console.error('Static data error:', e);
+      setError('Failed to load rewards data.');
+      setLoading(false);
+    }
   }, []);
 
   const getStoreCategory = (storeName) => {
-    const key = findBestStoreMatch(storeName);
+    const key = findBestStoreMatch(storeName, storeCategories);
     if (!key) return null;
     return storeCategories[key] || null;
+  };
+
+  const buildResultsForCategoryStatic = (category) => {
+    const withRates = allCards.map(card => ({
+      ...card,
+      category,
+      rate: card.categoryRates[category] ?? 1
+    }));
+    return withRates.sort((a, b) => b.rate - a.rate);
   };
 
   const handleSearch = async () => {
@@ -91,7 +121,7 @@ function App() {
       return;
     }
 
-    const cardResults = buildResultsForCategory(category);
+    const cardResults = buildResultsForCategoryStatic(category);
     setSelectedStore(searchTerm);
     setResults(cardResults);
     setSearching(false);
@@ -112,7 +142,7 @@ function App() {
       return;
     }
 
-    const cardResults = buildResultsForCategory(category);
+    const cardResults = buildResultsForCategoryStatic(category);
     setSelectedStore(storeName);
     setResults(cardResults);
     setSearching(false);
@@ -133,7 +163,7 @@ function App() {
       <div style={{ minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'linear-gradient(to bottom right, #eef2ff, #fae8ff)' }}>
         <div style={{ textAlign: 'center' }}>
           <Loader style={{ animation: 'spin 1s linear infinite', color: '#4f46e5', margin: '0 auto 1rem' }} size={48} />
-          <p style={{ color: '#6b7280', fontSize: '1.125rem', fontWeight: 500 }}>Connecting to Firebase...</p>
+          <p style={{ color: '#6b7280', fontSize: '1.125rem', fontWeight: 500 }}>Loading rewards data…</p>
         </div>
       </div>
     );
@@ -144,13 +174,13 @@ function App() {
       <div style={{ minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'linear-gradient(to bottom right, #eef2ff, #fae8ff)', padding: '1rem' }}>
         <div style={{ background: 'white', borderRadius: '1.5rem', boxShadow: '0 20px 25px -5px rgba(0, 0, 0, 0.1)', padding: '2rem', textAlign: 'center', maxWidth: '28rem' }}>
           <AlertCircle style={{ color: '#ef4444', margin: '0 auto 1rem' }} size={48} />
-          <h2 style={{ fontSize: '1.5rem', fontWeight: 'bold', color: '#1f2937', marginBottom: '0.5rem' }}>Connection Error</h2>
+          <h2 style={{ fontSize: '1.5rem', fontWeight: 'bold', color: '#1f2937', marginBottom: '0.5rem' }}>Error</h2>
           <p style={{ color: '#6b7280', marginBottom: '1rem' }}>{error}</p>
           <button
             onClick={() => window.location.reload()}
             style={{ background: '#4f46e5', color: 'white', padding: '0.75rem 1.5rem', borderRadius: '0.75rem', fontWeight: 600, border: 'none', cursor: 'pointer' }}
           >
-            Retry Connection
+            Retry
           </button>
         </div>
       </div>
@@ -160,7 +190,6 @@ function App() {
   return (
     <div style={{ minHeight: '100vh', background: 'linear-gradient(to bottom right, #eef2ff, #fae8ff)' }}>
       <div style={{ maxWidth: '80rem', margin: '0 auto', padding: '1rem', paddingBottom: '6rem' }}>
-
         {/* Header */}
         <div style={{ background: 'white', borderRadius: '1.5rem', boxShadow: '0 20px 25px -5px rgba(0, 0, 0, 0.1)', padding: '1.5rem', marginBottom: '1.5rem', marginTop: '1.5rem' }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', marginBottom: '0.5rem' }}>
@@ -234,11 +263,11 @@ function App() {
             <Info style={{ margin: '0 auto 0.75rem', color: '#d97706' }} size={48} />
             <h3 style={{ fontSize: '1.25rem', fontWeight: 'bold', color: '#1f2937', marginBottom: '0.5rem' }}>Store Not Found</h3>
             <p style={{ color: '#6b7280', marginBottom: '0.75rem' }}>
-              We don't have "{selectedStore}" in our database yet.
+              We don't have "{selectedStore}" in our data yet.
             </p>
             {suggestedStore && (
               <p style={{ color: '#6b7280' }}>
-                Did you mean{" "}
+                Did you mean{' '}
                 <button
                   onClick={() => handleQuickSearch(suggestedStore)}
                   style={{
@@ -281,11 +310,12 @@ function App() {
                   <div
                     key={card.id}
                     style={{
-                      background: idx === 0
-                        ? 'linear-gradient(to bottom right, #10b981, #059669)'
-                        : idx === 1
-                        ? 'linear-gradient(to bottom right, #3b82f6, #4f46e5)'
-                        : 'linear-gradient(to bottom right, #a855f7, #ec4899)',
+                      background:
+                        idx === 0
+                          ? 'linear-gradient(to bottom right, #10b981, #059669)'
+                          : idx === 1
+                          ? 'linear-gradient(to bottom right, #3b82f6, #4f46e5)'
+                          : 'linear-gradient(to bottom right, #a855f7, #ec4899)',
                       borderRadius: '1rem',
                       boxShadow: '0 10px 15px -3px rgba(0, 0, 0, 0.1)',
                       padding: '1.25rem',
@@ -325,3 +355,4 @@ function App() {
 }
 
 export default App;
+

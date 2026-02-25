@@ -1,29 +1,34 @@
-// src/searchUtils.js
-export const findBestStoreMatch = (input, storeCategories, storeNames) => {
-  if (!input) return null;
-  const query = input.toLowerCase().trim();
-
-  if (storeCategories[query]) return query;
-
-  const startsWith = storeNames.find(name =>
-    name.toLowerCase().startsWith(query)
-  );
-  if (startsWith) return startsWith.toLowerCase();
-
-  const contains = storeNames.find(name =>
-    name.toLowerCase().includes(query)
-  );
-  if (contains) return contains.toLowerCase();
-
+export const findBestStoreMatch = (searchTerm, storeCategories = {}) => {
+  if (!searchTerm || !storeCategories) return null;
+  
+  const term = searchTerm.toLowerCase().trim();
+  
+  // Exact match first
+  if (storeCategories[term]) return term;
+  
+  // Partial match
+  for (const [key, category] of Object.entries(storeCategories)) {
+    if (key.includes(term) || term.includes(key)) {
+      return key;
+    }
+  }
+  
+  // Fuzzy match - first letter + length match
+  for (const key of Object.keys(storeCategories)) {
+    if (key[0] === term[0] && key.length >= term.length * 0.8) {
+      return key;
+    }
+  }
+  
   return null;
 };
 
-export const buildResultsForCategory = (allCards, category) => {
-  const cardResults = allCards.map(card => ({
+export const buildResultsForCategory = (category, allCards = []) => {
+  if (!category || !allCards.length) return [];
+  
+  return allCards.map(card => ({
     ...card,
-    rate: card.categoryRates[category] || card.categoryRates.default || 0,
-    category
-  }));
-  cardResults.sort((a, b) => b.rate - a.rate);
-  return cardResults;
+    category,
+    rate: card.categoryRates?.[category] || 1
+  })).sort((a, b) => b.rate - a.rate);
 };
