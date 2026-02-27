@@ -46,6 +46,14 @@ export const useSearch = () => {
     runSearch(storeName);
   };
 
+  // Called when the user edits the input — clears stale results immediately
+  // Mirrors the original App.js onChange behaviour before extraction
+  const clearSearch = () => {
+    setSelectedStore(null);
+    setMatchMeta(null);
+    setResults([]);
+  };
+
   return {
     searchTerm,
     setSearchTerm,
@@ -55,6 +63,7 @@ export const useSearch = () => {
     searching,
     handleSearch,
     handleQuickSearch,
+    clearSearch,
     storeLookupSize: Object.keys(STORE_LOOKUP).length,
   };
 };

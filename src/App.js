@@ -25,6 +25,7 @@ function App() {
     searching,
     handleSearch,
     handleQuickSearch,
+    clearSearch,
     storeLookupSize,
   } = useSearch();
 
@@ -85,7 +86,10 @@ function App() {
 
         <SearchBar
           searchTerm={searchTerm}
-          onChange={(val) => setSearchTerm(val)}
+          onChange={(val) => {
+            setSearchTerm(val);
+            clearSearch(); // clears selectedStore, matchMeta, results on every keystroke
+          }}
           onSearch={handleSearch}
           onQuickSearch={handleQuickSearch}
           searching={searching}
