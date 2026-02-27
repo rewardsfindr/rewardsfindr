@@ -14,10 +14,6 @@
       "package": "com.rewardsfindr.app",
       "versionCode": 1
     },
-    "plugins": [
-      "@react-native-firebase/app",
-      "@react-native-firebase/auth"
-    ],
     "extra": {
       "eas": {
         "projectId": "REPLACE_WITH_EAS_PROJECT_ID"
