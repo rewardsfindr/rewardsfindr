@@ -85,10 +85,13 @@ export const findBestStoreMatch = (searchTerm, storeLookup = {}) => {
     return { ...storeLookup[term], quality: MATCH_QUALITY.EXACT };
   }
 
-  // Tier 2: Partial match — term is contained in a key or key in term
-  // e.g. "whole foods market" contains "whole foods"
+  // Tier 2: Partial match — key is contained in term (not term in key)
+  // "starbuck" should NOT match "starbucks" here — that's fuzzy territory
+  // Only match if the stored key is fully contained in the search term
+  // e.g. "whole foods market place" contains "whole foods" ✅
+  // e.g. "starbuck" does NOT contain "starbucks" ✅
   for (const [key, value] of Object.entries(storeLookup)) {
-    if (key.includes(term) || term.includes(key)) {
+    if (term.includes(key)) {
       return { ...value, quality: MATCH_QUALITY.PARTIAL };
     }
   }
@@ -134,8 +137,12 @@ export const buildResultsForCategory = (category, allCards = []) => {
 // ─────────────────────────────────────────────
 export const generateOfferId = (merchantName, cashbackAmount, expiryDate) => {
   const raw = `${merchantName.toLowerCase().trim()}_${cashbackAmount}_${expiryDate}`;
-  return btoa(raw).replace(/[^a-zA-Z0-9]/g, '').substring(0, 20);
+  // Use full btoa then take last 20 chars (expiry is at the end — most unique part)
+  const encoded = btoa(unescape(encodeURIComponent(raw)))
+    .replace(/[^a-zA-Z0-9]/g, '');
+  return encoded.slice(-20); // take LAST 20 chars, not first
 };
+
 
 // ─────────────────────────────────────────────
 // GENERATE CARD ID
@@ -157,8 +164,12 @@ export const generateCardId = (bankName, cardName) => {
 // ─────────────────────────────────────────────
 export const normalizeMerchant = (merchantName) => {
   return merchantName
+    .trim()                           // trim FIRST before split
     .toLowerCase()
-    .replace(/[^a-z\s]/g, '')
-    .split(' ')[0]
+    .replace(/[\/\\-]/g, ' ')         // replace slashes and dashes with space
+    .replace(/[^a-z\s]/g, '')         // strip remaining non-alpha chars
+    .trim()                           // trim again after replacements
+    .split(/\s+/)[0]                  // split on any whitespace, take first word
     .trim();
 };
+
