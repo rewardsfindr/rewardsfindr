@@ -1,7 +1,7 @@
 # See https://help.github.com/articles/ignoring-files/ for more about ignoring files.
 
-# dependencies
-/node_modules
+# dependencies — all depths (web, mobile, any future packages)
+node_modules/
 /.pnp
 .pnp.js
 
@@ -28,3 +28,18 @@ yarn-error.log*
 
 # Vercel
 .vercel/
+
+# Expo / React Native
+.expo/
+mobile/.expo/
+mobile/dist/
+mobile/android/
+mobile/ios/
+*.jks
+*.p8
+*.p12
+*.key
+*.mobileprovision
+*.orig.*
+google-services.json
+GoogleService-Info.plist
