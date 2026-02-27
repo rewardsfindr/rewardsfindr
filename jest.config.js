@@ -1,25 +1,19 @@
 module.exports = {
   testEnvironment: 'jsdom',
+  transform: {
+    '^.+\\.[jt]sx?$': 'babel-jest',
+  },
+  setupFilesAfterEnv: ['@testing-library/jest-dom'],
+  testPathIgnorePatterns: [
+    '/node_modules/',
+    '/mobile/',
+    '/src/tests/',
+  ],
   testMatch: [
     '**/__tests__/**/*.test.js',
     '**/*.test.js',
   ],
-  testPathIgnorePatterns: [
-    '/node_modules/',
-    '/mobile/',
-    '/src/tests/', // old test folder — being replaced
-  ],
-  transform: {
-    '^.+\\.jsx?$': 'babel-jest',
-  },
   moduleNameMapper: {
-    '^../shared/(.*)$': '<rootDir>/src/shared/$1',
-    '^./shared/(.*)$': '<rootDir>/src/shared/$1',
+    '\\.(css|less|scss|sass)$': '<rootDir>/src/__mocks__/fileMock.js',
   },
-  collectCoverageFrom: [
-    'src/shared/**/*.js',
-    'extension/content/**/*.js',
-    'src/App.js',
-  ],
-  setupFilesAfterFramework: ['@testing-library/jest-dom'],
 };

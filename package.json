@@ -20,6 +20,7 @@
     "test": "react-scripts test",
     "test:shared": "jest --testPathPattern=src/shared/__tests__",
     "test:extension": "jest --testPathPattern=extension/__tests__",
+    "test:app": "jest --testPathPattern=App.test",
     "eject": "react-scripts eject"
   },
   "eslintConfig": {
