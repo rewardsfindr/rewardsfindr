@@ -1,4 +1,4 @@
-# RewardsFindr — Full Dev Session Context (Feb 27, 2026)
+# RewardsFindr — Dev Context (Feb 27, 2026)
 
 ## Project Overview
 - **App name:** RewardsFindr
@@ -7,12 +7,13 @@
 - **Developer:** Rakesh Balasubramani
 - **Location:** San Diego, CA
 - **Live domain:** rewardsfindr.com
+- **GitHub:** https://github.com/rewardsfindr/rewardsfindr
 
 ---
 
 ## Tech Stack
-- **Frontend:** React (Vite)
-- **Backend:** Firebase (Firestore)
+- **Frontend:** React 18 (Create React App — `react-scripts`, NOT Vite)
+- **Backend:** Firebase 10 (Firestore + Google Auth)
 - **Deployment:** Vercel
 - **Language:** JavaScript (no TypeScript)
 - **IDE:** VSCode on Windows, PowerShell terminal
@@ -30,300 +31,242 @@ D:\RewardsFindr\rewardsfindr\
 
 ## Key File Structure
 ```
-D:\RewardsFindr\rewardsfindr\
-├── src/
-│   ├── shared/
-│   │   ├── offerUtils.js            ← core utility logic (main functions)
-│   │   ├── constants.js             ← CARDS array and category definitions
-│   │   └── __tests__/
-│   │       └── offerUtils.test.js   ← 63 tests, all passing ✅
-│   ├── components/                  ← React components (tests not yet written)
-│   ├── firebase.js                  ← Firebase init and db export
-│   ├── App.jsx
-│   └── main.jsx
-├── .env                             ← Firebase env vars (gitignored)
-├── DEV_CONTEXT.md                   ← this file
-├── package.json
-└── vite.config.js
+src/
+├── App.js                        ← root component, orchestration only (~90 lines)
+├── App.css                       ← all styles, named CSS classes, no inline styles
+├── index.js                      ← CRA entry point
+├── firebase.js                   ← Firebase init — exports auth, provider, db
+├── hooks/
+│   ├── useAuth.js                ← Google Sign In/Out, onAuthStateChanged
+│   └── useSearch.js              ← all search state + logic (runSearch, clearSearch)
+├── components/
+│   ├── Header.js                 ← logo, card/store count, sign in/out + avatar
+│   ├── SearchBar.js              ← text input, search button, popular store chips
+│   ├── MatchBanner.js            ← yellow "Did you mean" / "Showing results for" strip
+│   ├── ResultsHeader.js          ← purple gradient banner + Top Rewards title
+│   └── ResultCard.js             ← single credit card result tile
+├── shared/
+│   ├── constants.js              ← CARDS, STORES, POPULAR_STORES, BANKS, CATEGORIES, BANK_OFFER_URLS
+│   ├── offerUtils.js             ← core matching + utility functions
+│   ├── mockFirebase.js           ← mock DB + auth (mirrors real Firebase interface)
+│   └── __tests__/
+│       ├── offerUtils.test.js    ← 41 tests ✅
+│       └── constants.test.js     ← 21 tests ✅
+└── __tests__/
+    └── App.test.js               ← 27 tests ✅ (integration, mocks Firebase)
 ```
 
 ---
 
-## Environment Variables (`.env`)
+## Test Suite
+
+**Total: 89 tests, 3 suites, all passing ✅**
+
 ```
-VITE_FIREBASE_API_KEY=...
-VITE_FIREBASE_AUTH_DOMAIN=...
-VITE_FIREBASE_PROJECT_ID=...
-VITE_FIREBASE_STORAGE_BUCKET=...
-VITE_FIREBASE_MESSAGING_SENDER_ID=...
-VITE_FIREBASE_APP_ID=...
+npx jest --passWithNoTests --watchAll=false
+PASS src/shared/__tests__/constants.test.js
+PASS src/shared/__tests__/offerUtils.test.js
+PASS src/__tests__/App.test.js
+Tests: 89 passed, 89 total
 ```
-- Vite requires `VITE_` prefix (not `REACT_APP_`)
-- Same keys added manually in Vercel → Project → Environment Variables
+
+### `App.test.js` — 39 tests
+Full integration tests for the React app. Mocks:
+- `../firebase.js` → `{ auth: {}, provider: {}, db: {} }`
+- `firebase/auth` → stubs `onAuthStateChanged`, `signInWithPopup`, `signOut`
+- `../shared/constants.js` → 3 fixed test cards + 3 popular stores
+- `../shared/offerUtils.js` → deterministic match map
+- `lucide-react` → lightweight `<span>` stubs
+
+Covers: initial render, typing behaviour, search results, match quality banners,
+store-not-found, quick search chips, error state, Sign In button visibility.
+
+### `offerUtils.test.js` — 41 tests
+Unit tests for all 6 utility functions in `offerUtils.js`.
+
+| Function | Tests |
+|---|---|
+| `buildStoreLookup` | 6 |
+| `findBestStoreMatch` | 11 |
+| `buildResultsForCategory` | 8 |
+| `generateOfferId` | 6 |
+| `generateCardId` | 5 |
+| `normalizeMerchant` | 5 |
+
+### `constants.test.js` — 21 tests
+Structural validation of all exported constants:
+`CATEGORIES`, `BANKS`, `CARDS`, `STORES`, `POPULAR_STORES`, `BANK_OFFER_URLS`.
 
 ---
 
-## `.gitignore` (current, correct state)
-```gitignore
-# dependencies
-/node_modules
-/.pnp
-.pnp.js
+## Environment Variables
 
-# testing
-/coverage
+**CRA requires `REACT_APP_` prefix (NOT `VITE_`).**
 
-# production
-/build
-/dist
-
-# misc
-.DS_Store
-.env.local
-.env.development.local
-.env.test.local
-.env.production.local
-
-npm-debug.log*
-yarn-debug.log*
-yarn-error.log*
-
-# Environment variables
-.env
-
-# Vercel
-.vercel/
 ```
-- `package-lock.json` is NOT ignored — intentionally committed for consistent builds
+REACT_APP_FIREBASE_API_KEY
+REACT_APP_FIREBASE_AUTH_DOMAIN
+REACT_APP_FIREBASE_PROJECT_ID
+REACT_APP_FIREBASE_STORAGE_BUCKET
+REACT_APP_FIREBASE_MESSAGING_SENDER_ID
+REACT_APP_FIREBASE_APP_ID
+```
+
+- Stored in `.env` locally (gitignored)
+- Added manually in Vercel → Project → Environment Variables
+- `firebase.js` reads them via `process.env.REACT_APP_*`
 
 ---
 
-## Test Setup
+## Firebase Setup
 
-### Packages installed
-```bash
-npm install --save-dev jest @testing-library/react @testing-library/jest-dom
-npm install --save-dev babel-jest @babel/core @babel/preset-env @babel/preset-react
-```
-
-### Babel config (`babel.config.js` or `.babelrc`)
+### `src/firebase.js`
+Single source of truth for Firebase. All other files import from here, never from the SDK directly.
 ```js
-{
-  "presets": [
-    ["@babel/preset-env", { "targets": { "node": "current" } }],
-    ["@babel/preset-react", { "runtime": "automatic" }]
-  ]
-}
+export const auth     = getAuth(app);        // Google Auth
+export const provider = new GoogleAuthProvider();
+export const db       = getFirestore(app);   // Firestore (ready, not yet wired to UI)
 ```
 
-### Jest config (inside `package.json` or `jest.config.js`)
-```js
-{
-  "testEnvironment": "jsdom",
-  "transform": {
-    "^.+\\.[jt]sx?$": "babel-jest"
-  },
-  "setupFilesAfterFramework": ["@testing-library/jest-dom"]
-}
-```
+### `src/hooks/useAuth.js`
+- `onAuthStateChanged` is the single source of truth for auth state
+- Exposes: `user`, `authLoading`, `signIn`, `signOut`
+- `user === null` → signed out; `user === object` → signed in (Firebase user)
+- `authLoading === true` → auth state not yet resolved (shows loading spinner)
+- Popup closed without sign-in → silently ignored (`auth/popup-closed-by-user`)
 
-### NPM scripts (in `package.json`)
-```json
-"scripts": {
-  "test": "jest",
-  "test:shared": "jest src/shared/__tests__"
-}
-```
-
-### Key config issue resolved
-- Vite uses native ESM; Jest needs CommonJS — solved by Babel transform
-- `vite.config.js` must NOT be picked up by Jest — resolved by scoping jest config
+### Firebase Console requirements
+- Authentication → Sign-in method → **Google must be enabled**
+- Authentication → Settings → Authorized domains → **Vercel domain must be added**
 
 ---
 
-## Test Files Written This Session
-
-### 1. `src/App.test.js` ✅
-Basic smoke test — confirms App renders without crashing.
-```js
-import { render, screen } from '@testing-library/react';
-import App from '../App';
-
-test('renders learn react link', () => {
-  render(<App />);
-  const linkElement = screen.getByText(/learn react/i);
-  expect(linkElement).toBeInTheDocument();
-});
-```
-
----
-
-### 2. `src/App.integration.test.js` ✅
-Integration test — mocks Firebase Firestore, simulates a full search interaction.
-
-**What it mocks:**
-- `.firebase` module (exports `db`)
-- `firebase/firestore` (`collection`, `getDocs`)
-
-**Fake data used:**
-```js
-const cards = [{ id: '1', cardName: 'Test Card', issuer: 'Test Bank',
-  categoryRates: { grocery: 5, default: 1 } }];
-const stores = [{ storeName: 'Whole Foods', category: 'grocery' }];
-```
-
-**What it tests:**
-- Loading state disappears after data loads
-- Typing "Whole Foods" and clicking search shows results heading
-- "Test Card" appears in results
-
----
-
-### 3. `src/shared/__tests__/searchUtils.test.js` ✅
-Tests early versions of `findBestStoreMatch` and `buildResultsForCategory`
-(before these were moved/expanded into `offerUtils.js`).
-
-**`findBestStoreMatch` tests:**
-- Exact key match
-- Matches by `startsWith`
-- Matches by `contains`
-- Returns null when no match
-
-**`buildResultsForCategory` tests:**
-- Computes rate and sorts descending
-- Falls back to default rate for unknown category
-
----
-
-### 4. `src/shared/__tests__/offerUtils.test.js` ✅ — 63 tests, all passing
-
-Full coverage of all 6 utility functions:
-
-| Function | # Tests | What's Tested |
-|---|---|---|
-| `buildStoreLookup` | 6 | Non-empty result, lowercase keys, required fields, primary stores present, aliases present, alias resolves to same category |
-| `findBestStoreMatch` | 11 | Null/empty/undefined input, unrelated term, EXACT/PARTIAL/FUZZY quality tiers, case insensitivity, Shell≠Sephora, CVS=drugstore, United Airlines=travel |
-| `buildResultsForCategory` | 8 | Empty cards, null/undefined category, sorted descending, required fields, fallback to 1x, all cards returned, first result is max rate |
-| `generateOfferId` | 6 | Deterministic, unique per merchant, unique per amount, unique per expiry, alphanumeric only, ≤20 chars |
-| `generateCardId` | 5 | Correct slug format, strips `®`, deterministic, different banks differ, no double underscores |
-| `normalizeMerchant` | 5 | Strips store number/specials, handles slash in name, single word, already lowercase, trims whitespace |
-
----
-
-## Source Functions in `src/shared/offerUtils.js`
+## Core Logic (`src/shared/offerUtils.js`)
 
 ### `buildStoreLookup()`
-- Builds flat key→value lookup from store/merchant definitions
-- All keys lowercase (primary names + aliases)
-- Each value: `{ category, displayName }`
-- Example: `lookup['starbucks coffee'] → { category: 'dining', displayName: 'Starbucks' }`
+Builds flat `key → { category, displayName }` from `STORES` in constants.
+All keys lowercase. Includes primary names + all aliases.
 
-### `findBestStoreMatch(term, storeLookup)`
-3-tier matching:
-- **Tier 1 — EXACT:** `normalizedTerm === key`
-- **Tier 2 — PARTIAL:** `term.includes(key)` — the stored key is fully inside the search term
-- **Tier 3 — FUZZY:** Edit distance / Levenshtein for typos
-- Returns `{ category, displayName, quality }` or `null`
-- `MATCH_QUALITY` = `{ EXACT: 'exact', PARTIAL: 'partial', FUZZY: 'fuzzy' }`
+### `findBestStoreMatch(term, lookup)`
+3-tier matching (priority order):
+1. **EXACT** — `normalizedTerm === key`
+2. **PARTIAL** — `term.includes(key)` (stored key fully inside search term)
+3. **FUZZY** — Levenshtein edit distance for typos
+Returns `{ category, displayName, quality }` or `null`.
+`MATCH_QUALITY = { EXACT: 'exact', PARTIAL: 'partial', FUZZY: 'fuzzy' }`
 
 ### `buildResultsForCategory(category, cards)`
-- Maps each card to `{ ...card, rate: card.categoryRates?.[category] ?? 1, category }`
-- Sorts by `rate` descending
-- Returns `[]` for null/undefined category
+Maps each card → `{ ...card, rate, category }`, sorted by rate descending.
+Returns `[]` for null/undefined category.
 
-### `generateOfferId(merchantName, cashbackAmount, expiryDate)`
-- Builds: `` `${merchant}_${amount}_${expiry}` ``
-- Encodes: `btoa(unescape(encodeURIComponent(raw)))`
-- Strips non-alphanumeric
-- Returns **last 20 chars** (expiry at end = most unique part)
+### `generateOfferId(merchant, amount, expiry)`
+Deterministic, alphanumeric, ≤20 chars. Uses `btoa` encoding, takes **last** 20 chars
+(expiry at end = most unique part).
 
 ### `generateCardId(bank, cardName)`
-- Lowercase both → strip specials like `®` `™` → join with `_` → collapse spaces
-- Example: `('chase', 'Freedom Flex') → 'chase_freedom_flex'`
+Lowercase + strip specials (`®` `™`) + join with `_`.
+Example: `('chase', 'Freedom Flex') → 'chase_freedom_flex'`
 
-### `normalizeMerchant(merchantName)`
+### `normalizeMerchant(name)`
 Step order is critical:
 1. `.trim()` — FIRST
 2. `.toLowerCase()`
-3. `.replace(/[\/\\-]/g, ' ')` — slash/dash → space
-4. `.replace(/[^a-z\s]/g, '')` — strip non-alpha
+3. Replace `/`, `\`, `-` with space
+4. Strip non-alpha characters
 5. `.trim()` — again
 6. `.split(/\s+/)[0]` — first word only
 
 ---
 
-## Bugs Found & Fixed in `offerUtils.js`
-
-### Bug 1 — Tier 2 partial match too greedy
-- **Symptom:** `'starbuck'` returned `PARTIAL` instead of `FUZZY`
-- **Cause:** Logic checked `key.includes(term)` instead of `term.includes(key)`
-- **Fix:** Tier 2 = `term.includes(key)` — search term must contain the full store key
-
-### Bug 2 — `generateOfferId` truncation loses uniqueness
-- **Symptom:** Different expiry dates produced the same ID
-- **Cause:** `encoded.slice(0, 20)` — merchant name dominates first 20 chars
-- **Fix:** `encoded.slice(-20)` — last 20 chars capture the expiry variation
-
-### Bug 3 — `normalizeMerchant` slash not spaced
-- **Symptom:** `'CVS/pharmacy #5678'` → `'cvspharmacy'` instead of `'cvs'`
-- **Cause:** `/` stripped but not replaced with space first
-- **Fix:** Replace `/`, `\`, `-` with space before stripping non-alpha
-
-### Bug 4 — `normalizeMerchant` trim after split
-- **Symptom:** `'  Walmart  '` → `''` empty string
-- **Cause:** Leading space made `split(' ')[0]` return `''`
-- **Fix:** `.trim()` must be the very first operation
-
----
-
 ## Constants (`src/shared/constants.js`)
 
-### `CARDS` array — each object shape:
+### `CARDS` — shape of each card object
 ```js
 {
-  id: String,           // e.g. 'chase_freedom_flex'
-  bank: String,         // e.g. 'Chase'
-  name: String,         // e.g. 'Freedom Flex'
+  id:            String,   // e.g. 'chase_freedom_flex'
+  cardName:      String,   // e.g. 'Freedom Flex'
+  issuer:        String,   // e.g. 'Chase'
+  bank:          String,   // matches a BANKS constant value
+  annualFee:     Number,   // 0 for no-fee cards
+  rewardType:    String,   // 'cashback' | 'points'
   categoryRates: {
-    dining: Number,
-    grocery: Number,
-    travel: Number,
-    drugstore: Number,
-    gas: Number,
-    streaming: Number,
-    online: Number,
-    general: Number,
+    grocery:      Number,
+    dining:       Number,
+    gas:          Number,
+    travel:       Number,
+    drugstore:    Number,
+    shopping:     Number,
+    subscription: Number,
+    other:        Number,  // fallback — every card must have this
   }
 }
 ```
 
-### Categories
-`dining`, `grocery`, `travel`, `drugstore`, `gas`, `streaming`, `online`, `general`
+### `STORES` — shape of each store object
+```js
+{
+  storeName: String,   // e.g. 'Starbucks'
+  category:  String,   // must match a CATEGORIES value
+  aliases:   String[], // e.g. ['starbucks coffee', 'sbux']
+}
+```
+
+### Other exports
+- `CATEGORIES` — enum of valid category strings
+- `BANKS` — enum of valid bank identifiers
+- `POPULAR_STORES` — string[] shown as quick-search chips in UI
+- `BANK_OFFER_URLS` — maps bank key → URL for the bank's offers page
 
 ---
 
-## Earlier Session History (pre-midnight, Dec 2025)
+## `src/shared/mockFirebase.js`
+Drop-in replacement for real Firebase (used during development before auth was wired).
+Mirrors exact method signatures of Firestore + Auth.
+**Not used in production** — kept for local dev/testing reference.
 
-### Firebase setup
-- Moved Firebase config/init into its own `firebase.js` module
-- App calls `loadCardsAndStores()` instead of embedding fetch logic in `App.jsx`
-- Fixed Vercel build failure caused by missing `./firebase` module path after refactor
-- Added `.env` with `VITE_` prefixed Firebase keys
-- Added `.env` to `.gitignore`
-- Vercel env vars added manually in dashboard
+To swap mock → real: change import in one line per file:
+```js
+// FROM:
+import { mockDB, mockAuth } from '../shared/mockFirebase.js'
+// TO:
+import { db, auth } from '../firebase.js'
+```
+
+---
+
+## Build & Deploy
+
+```bash
+npm start          # local dev
+npm test           # run all 89 tests
+npm run build      # CI=false react-scripts build (suppresses warnings as errors)
+```
+
+Vercel auto-deploys on push to `main`. Build command: `npm run build`. Output: `build/`.
+
+---
+
+## Branch & PR Workflow
+- All work done on feature branches: `feat/`, `fix/`, `chore/`
+- PRs always opened against `main`
+- Branch protection on `main`: requires at least 1 approval
+- As repo owner, can bypass via Vercel/GitHub settings if needed for solo merges
+- AI assistant pushes to feature branches and opens PRs — human reviews and merges
+
+---
+
+## Completed PRs This Session
+| PR | Title | Status |
+|---|---|---|
+| #4 | refactor: extract components, custom hook, move styles to App.css | ✅ Merged |
+| #5 | feat: Firebase Google Auth | ✅ Merged |
 
 ---
 
 ## Next Steps (in priority order)
-1. **Option B — Component tests**
-   - `SearchBar` component: typing, submit, clear
-   - `ResultsCard` component: displays card name, rate, category
-   - Tools: `render`, `fireEvent`, `screen` from React Testing Library
-2. **Option C — Firebase/API layer tests**
-   - Mock Firestore: `jest.mock('firebase/firestore')`
-   - Test `loadCardsAndStores()` returns correct shape
-3. **Option A — Remaining shared utils**
-   - Any untested files in `src/shared/`
+1. **Firestore favourites** — save user's favourite cards using `db` (already exported)
+2. **Chrome extension auth** — sync signed-in user between web app and extension
+3. **Rate% display fix** — `ResultCard` shows `%` suffix; verify points cards show correct label
 
 ---
 
