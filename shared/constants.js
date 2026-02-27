@@ -1,0 +1,189 @@
+// ─────────────────────────────────────────────
+// CATEGORIES — strict enum, never use free text
+// ─────────────────────────────────────────────
+export const CATEGORIES = {
+  GROCERY: 'grocery',
+  DINING: 'dining',
+  GAS: 'gas',
+  DRUGSTORE: 'drugstore',
+  TRAVEL: 'travel',
+  SHOPPING: 'shopping',
+  ENTERTAINMENT: 'entertainment',
+  HEALTH: 'health',
+  SUBSCRIPTION: 'subscription',
+  OTHER: 'other',
+};
+
+// ─────────────────────────────────────────────
+// BANKS — slug identifiers, never change after launch
+// ─────────────────────────────────────────────
+export const BANKS = {
+  AMEX: 'amex',
+  CHASE: 'chase',
+  CITI: 'citi',
+  BOFA: 'bofa',
+  CAPITAL_ONE: 'capital_one',
+  DISCOVER: 'discover',
+  WELLS_FARGO: 'wells_fargo',
+};
+
+// ─────────────────────────────────────────────
+// CARDS — single source of truth
+// id must match Firestore staticRates document ID exactly
+// ─────────────────────────────────────────────
+export const CARDS = [
+  {
+    id: 'amex_blue_cash_preferred',
+    cardName: 'Blue Cash Preferred® Card from American Express',
+    issuer: 'American Express',
+    bank: BANKS.AMEX,
+    annualFee: 95,
+    categoryRates: {
+      [CATEGORIES.GROCERY]: 6,
+      [CATEGORIES.DINING]: 1,
+      [CATEGORIES.GAS]: 3,
+      [CATEGORIES.DRUGSTORE]: 1,
+      [CATEGORIES.TRAVEL]: 1,
+      [CATEGORIES.SHOPPING]: 1,
+      [CATEGORIES.OTHER]: 1,
+    },
+    notes: '6% at U.S. supermarkets (up to $6,000/yr), 3% on gas.',
+    rewardType: 'cashback',
+  },
+  {
+    id: 'chase_sapphire_preferred',
+    cardName: 'Chase Sapphire Preferred® Card',
+    issuer: 'Chase',
+    bank: BANKS.CHASE,
+    annualFee: 95,
+    categoryRates: {
+      [CATEGORIES.DINING]: 3,
+      [CATEGORIES.TRAVEL]: 3,
+      [CATEGORIES.GROCERY]: 3,
+      [CATEGORIES.GAS]: 2,
+      [CATEGORIES.DRUGSTORE]: 1,
+      [CATEGORIES.SHOPPING]: 1,
+      [CATEGORIES.OTHER]: 1,
+    },
+    notes: '3x points on dining, travel, and online grocery.',
+    rewardType: 'points',
+  },
+  {
+    id: 'citi_custom_cash',
+    cardName: 'Citi Custom Cash® Card',
+    issuer: 'Citi',
+    bank: BANKS.CITI,
+    annualFee: 0,
+    categoryRates: {
+      [CATEGORIES.GROCERY]: 5,
+      [CATEGORIES.DINING]: 5,
+      [CATEGORIES.GAS]: 5,
+      [CATEGORIES.DRUGSTORE]: 5,
+      [CATEGORIES.TRAVEL]: 1,
+      [CATEGORIES.SHOPPING]: 1,
+      [CATEGORIES.OTHER]: 1,
+    },
+    notes: '5% on top eligible spend category each billing cycle (up to $500).',
+    rewardType: 'cashback',
+  },
+  {
+    id: 'chase_freedom_flex',
+    cardName: 'Chase Freedom Flex®',
+    issuer: 'Chase',
+    bank: BANKS.CHASE,
+    annualFee: 0,
+    categoryRates: {
+      [CATEGORIES.DINING]: 3,
+      [CATEGORIES.DRUGSTORE]: 3,
+      [CATEGORIES.GROCERY]: 5,
+      [CATEGORIES.GAS]: 5,
+      [CATEGORIES.TRAVEL]: 5,
+      [CATEGORIES.SHOPPING]: 1,
+      [CATEGORIES.OTHER]: 1,
+    },
+    notes: '5% on rotating quarterly categories, 3% on dining and drugstores.',
+    rewardType: 'cashback',
+  },
+  {
+    id: 'amex_gold',
+    cardName: 'American Express® Gold Card',
+    issuer: 'American Express',
+    bank: BANKS.AMEX,
+    annualFee: 250,
+    categoryRates: {
+      [CATEGORIES.DINING]: 4,
+      [CATEGORIES.GROCERY]: 4,
+      [CATEGORIES.TRAVEL]: 3,
+      [CATEGORIES.GAS]: 1,
+      [CATEGORIES.DRUGSTORE]: 1,
+      [CATEGORIES.SHOPPING]: 1,
+      [CATEGORIES.OTHER]: 1,
+    },
+    notes: '4x at restaurants and U.S. supermarkets.',
+    rewardType: 'points',
+  },
+];
+
+// ─────────────────────────────────────────────
+// STORES — single source of truth
+// aliases: alternate search terms that map to this store
+// ─────────────────────────────────────────────
+export const STORES = [
+  { storeName: 'Whole Foods', category: CATEGORIES.GROCERY, aliases: ['whole foods market', 'wholefoods'] },
+  { storeName: 'Target', category: CATEGORIES.GROCERY, aliases: ['target.com'] },
+  { storeName: 'Costco', category: CATEGORIES.GROCERY, aliases: ['costco wholesale'] },
+  { storeName: 'Walmart', category: CATEGORIES.GROCERY, aliases: ['walmart.com', 'wal-mart'] },
+  { storeName: 'Kroger', category: CATEGORIES.GROCERY, aliases: ['kroger pharmacy'] },
+  { storeName: "Trader Joe's", category: CATEGORIES.GROCERY, aliases: ['trader joes', 'traderjoes'] },
+  { storeName: 'Starbucks', category: CATEGORIES.DINING, aliases: ['starbucks coffee'] },
+  { storeName: 'Chipotle', category: CATEGORIES.DINING, aliases: ['chipotle mexican grill'] },
+  { storeName: "McDonald's", category: CATEGORIES.DINING, aliases: ['mcdonalds', 'mcdonald'] },
+  { storeName: 'Chick-fil-A', category: CATEGORIES.DINING, aliases: ['chick fil a', 'chickfila'] },
+  { storeName: 'Panera Bread', category: CATEGORIES.DINING, aliases: ['panera'] },
+  { storeName: 'Subway', category: CATEGORIES.DINING, aliases: [] },
+  { storeName: 'Shell', category: CATEGORIES.GAS, aliases: ['shell gas', 'shell station'] },
+  { storeName: 'BP', category: CATEGORIES.GAS, aliases: ['bp gas', 'british petroleum'] },
+  { storeName: 'Chevron', category: CATEGORIES.GAS, aliases: ['chevron gas'] },
+  { storeName: 'Exxon', category: CATEGORIES.GAS, aliases: ['exxon mobil', 'exxonmobil'] },
+  { storeName: 'CVS', category: CATEGORIES.DRUGSTORE, aliases: ['cvs pharmacy', 'cvs health'] },
+  { storeName: 'Walgreens', category: CATEGORIES.DRUGSTORE, aliases: ['walgreen', 'walgreens pharmacy'] },
+  { storeName: 'Rite Aid', category: CATEGORIES.DRUGSTORE, aliases: ['riteaid'] },
+  { storeName: 'United Airlines', category: CATEGORIES.TRAVEL, aliases: ['united', 'ua'] },
+  { storeName: 'Delta Airlines', category: CATEGORIES.TRAVEL, aliases: ['delta', 'delta air lines'] },
+  { storeName: 'American Airlines', category: CATEGORIES.TRAVEL, aliases: ['aa', 'american air'] },
+  { storeName: 'Marriott', category: CATEGORIES.TRAVEL, aliases: ['marriott hotels', 'marriott bonvoy'] },
+  { storeName: 'Hilton', category: CATEGORIES.TRAVEL, aliases: ['hilton hotels'] },
+  { storeName: 'Amazon', category: CATEGORIES.SHOPPING, aliases: ['amazon.com', 'amazon prime'] },
+  { storeName: 'Best Buy', category: CATEGORIES.SHOPPING, aliases: ['bestbuy', 'best buy.com'] },
+  { storeName: 'Nike', category: CATEGORIES.SHOPPING, aliases: ['nike.com', 'nike store'] },
+  { storeName: 'Netflix', category: CATEGORIES.SUBSCRIPTION, aliases: [] },
+  { storeName: 'Spotify', category: CATEGORIES.SUBSCRIPTION, aliases: [] },
+  { storeName: 'Hulu', category: CATEGORIES.SUBSCRIPTION, aliases: [] },
+];
+
+// ─────────────────────────────────────────────
+// POPULAR STORES — shown on home screen
+// Must be exact match to a storeName in STORES above
+// ─────────────────────────────────────────────
+export const POPULAR_STORES = [
+  'Whole Foods',
+  'Target',
+  'Costco',
+  'Starbucks',
+  'Chipotle',
+  'Shell',
+  'CVS',
+  'United Airlines',
+];
+
+// ─────────────────────────────────────────────
+// BANK OFFER PAGE URL PATTERNS
+// Used by extension content scripts to detect correct parser
+// ─────────────────────────────────────────────
+export const BANK_OFFER_URLS = {
+  [BANKS.CHASE]: 'chase.com/digital/offers',
+  [BANKS.AMEX]: 'americanexpress.com/en-us/benefits/offers',
+  [BANKS.CAPITAL_ONE]: 'capitalone.com/card-benefits/offers',
+  [BANKS.BOFA]: 'bankofamerica.com/deposits/manage/rewards-offers',
+  [BANKS.CITI]: 'citibank.com/credit-cards/offers',
+};
