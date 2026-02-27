@@ -164,6 +164,25 @@ body {
   align-items: center;
 }
 
+.header-user {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+}
+
+.header-avatar {
+  width: 2rem;
+  height: 2rem;
+  border-radius: 9999px;
+  object-fit: cover;
+}
+
+.header-user-name {
+  font-size: 0.875rem;
+  color: #374151;
+  font-weight: 500;
+}
+
 .btn-signin {
   background: linear-gradient(to right, #4f46e5, #7c3aed);
   color: white;
@@ -174,6 +193,23 @@ body {
   border: none;
   cursor: pointer;
   font-family: inherit;
+}
+
+.btn-signout {
+  background: transparent;
+  color: #6b7280;
+  padding: 0.4rem 0.875rem;
+  border-radius: 0.75rem;
+  font-size: 0.8125rem;
+  font-weight: 500;
+  border: 1.5px solid #e5e7eb;
+  cursor: pointer;
+  font-family: inherit;
+}
+
+.btn-signout:hover {
+  border-color: #d1d5db;
+  color: #374151;
 }
 
 /* ─── SearchBar ───────────────────────────────────────── */

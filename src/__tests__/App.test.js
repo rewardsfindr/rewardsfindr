@@ -1,18 +1,33 @@
 import { render, screen, fireEvent, waitFor, act } from '@testing-library/react';
 import App from '../App';
 
-// ─── Mock lucide-react icons ───────────────────────────────────────────────
+// ─── Mock firebase.js so Firebase SDK is never initialised in tests ─────────
+jest.mock('../firebase.js', () => ({
+  auth:     {},
+  provider: {},
+  db:       {},
+}));
+
+// ─── Mock firebase/auth so useAuth.js doesn't call real Firebase ──────────
+jest.mock('firebase/auth', () => ({
+  signInWithPopup:    jest.fn(),
+  signOut:            jest.fn(),
+  onAuthStateChanged: jest.fn((auth, cb) => { cb(null); return () => {}; }),
+  GoogleAuthProvider: jest.fn(),
+}));
+
+// ─── Mock lucide-react icons ───────────────────────────────────────
 jest.mock('lucide-react', () => ({
-  Search: () => <span data-testid="icon-search" />,
-  TrendingUp: () => <span data-testid="icon-trending" />,
-  Store: () => <span data-testid="icon-store" />,
-  CreditCard: () => <span data-testid="icon-creditcard" />,
-  Info: () => <span data-testid="icon-info" />,
-  Loader: () => <span data-testid="icon-loader" />,
+  Search:      () => <span data-testid="icon-search" />,
+  TrendingUp:  () => <span data-testid="icon-trending" />,
+  Store:       () => <span data-testid="icon-store" />,
+  CreditCard:  () => <span data-testid="icon-creditcard" />,
+  Info:        () => <span data-testid="icon-info" />,
+  Loader:      () => <span data-testid="icon-loader" />,
   AlertCircle: () => <span data-testid="icon-alert" />,
 }));
 
-// ─── Mock constants ────────────────────────────────────────────────────────
+// ─── Mock constants ────────────────────────────────────────────────
 jest.mock('../shared/constants.js', () => ({
   CARDS: [
     {
@@ -37,24 +52,24 @@ jest.mock('../shared/constants.js', () => ({
   POPULAR_STORES: ['Walmart', 'Amazon', 'Starbucks'],
 }));
 
-// ─── Mock offerUtils ───────────────────────────────────────────────────────
+// ─── Mock offerUtils ───────────────────────────────────────────────
 jest.mock('../shared/offerUtils.js', () => {
   const MATCH_QUALITY = { EXACT: 'exact', PARTIAL: 'partial', FUZZY: 'fuzzy' };
 
   return {
     MATCH_QUALITY,
     buildStoreLookup: jest.fn(() => ({
-      walmart: { category: 'grocery', displayName: 'Walmart' },
-      amazon: { category: 'online', displayName: 'Amazon' },
-      starbucks: { category: 'dining', displayName: 'Starbucks' },
+      walmart:   { category: 'grocery', displayName: 'Walmart' },
+      amazon:    { category: 'online',  displayName: 'Amazon' },
+      starbucks: { category: 'dining',  displayName: 'Starbucks' },
     })),
     findBestStoreMatch: jest.fn((term) => {
       const map = {
-        walmart: { category: 'grocery', displayName: 'Walmart', quality: MATCH_QUALITY.EXACT },
-        amazon: { category: 'online', displayName: 'Amazon', quality: MATCH_QUALITY.EXACT },
-        starbucks: { category: 'dining', displayName: 'Starbucks', quality: MATCH_QUALITY.EXACT },
-        'starbuk': { category: 'dining', displayName: 'Starbucks', quality: MATCH_QUALITY.FUZZY },
-        'walmart store': { category: 'grocery', displayName: 'Walmart', quality: MATCH_QUALITY.PARTIAL },
+        walmart:          { category: 'grocery', displayName: 'Walmart',   quality: MATCH_QUALITY.EXACT },
+        amazon:           { category: 'online',  displayName: 'Amazon',    quality: MATCH_QUALITY.EXACT },
+        starbucks:        { category: 'dining',  displayName: 'Starbucks', quality: MATCH_QUALITY.EXACT },
+        'starbuk':        { category: 'dining',  displayName: 'Starbucks', quality: MATCH_QUALITY.FUZZY },
+        'walmart store':  { category: 'grocery', displayName: 'Walmart',   quality: MATCH_QUALITY.PARTIAL },
       };
       return map[term.toLowerCase()] ?? null;
     }),
@@ -66,15 +81,15 @@ jest.mock('../shared/offerUtils.js', () => {
   };
 });
 
-// ─── Helpers ───────────────────────────────────────────────────────────────
+// ─── Helpers ─────────────────────────────────────────────────────────
 const typeAndSearch = async (term) => {
   const input = screen.getByPlaceholderText('Search for any store...');
   fireEvent.change(input, { target: { value: term } });
-  fireEvent.click(screen.getByRole('button', { name: '' })); // search icon button
+  fireEvent.click(screen.getByRole('button', { name: '' }));
   await waitFor(() => expect(screen.queryByTestId('icon-loader')).not.toBeInTheDocument(), { timeout: 1000 });
 };
 
-// ──────────────────────────────────────────────────────────────────────────
+// ───────────────────────────────────────────────────────────────────────
 describe('App — initial render', () => {
   test('renders the RewardsFindr heading', () => {
     render(<App />);
@@ -107,9 +122,14 @@ describe('App — initial render', () => {
     render(<App />);
     expect(screen.queryByText(/Store not found/i)).not.toBeInTheDocument();
   });
+
+  test('shows Sign In button when user is not authenticated', () => {
+    render(<App />);
+    expect(screen.getByRole('button', { name: /sign in/i })).toBeInTheDocument();
+  });
 });
 
-// ──────────────────────────────────────────────────────────────────────────
+// ───────────────────────────────────────────────────────────────────────
 describe('App — search input behavior', () => {
   test('updates input value as user types', () => {
     render(<App />);
@@ -149,7 +169,7 @@ describe('App — search input behavior', () => {
   });
 });
 
-// ──────────────────────────────────────────────────────────────────────────
+// ───────────────────────────────────────────────────────────────────────
 describe('App — successful search results', () => {
   test('shows results heading with store name after search', async () => {
     render(<App />);
@@ -175,7 +195,7 @@ describe('App — successful search results', () => {
   test('shows cash back rates', async () => {
     render(<App />);
     await typeAndSearch('Walmart');
-    expect(screen.getByText('6%')).toBeInTheDocument(); // Amex top for grocery
+    expect(screen.getByText('6%')).toBeInTheDocument();
   });
 
   test('shows category in results header', async () => {
@@ -192,7 +212,7 @@ describe('App — successful search results', () => {
   });
 });
 
-// ──────────────────────────────────────────────────────────────────────────
+// ───────────────────────────────────────────────────────────────────────
 describe('App — match quality banners', () => {
   test('shows "Showing results for" banner on PARTIAL match', async () => {
     render(<App />);
@@ -207,7 +227,7 @@ describe('App — match quality banners', () => {
   });
 });
 
-// ──────────────────────────────────────────────────────────────────────────
+// ───────────────────────────────────────────────────────────────────────
 describe('App — store not found', () => {
   test('shows store not found message for unknown term', async () => {
     render(<App />);
@@ -228,7 +248,7 @@ describe('App — store not found', () => {
   });
 });
 
-// ──────────────────────────────────────────────────────────────────────────
+// ───────────────────────────────────────────────────────────────────────
 describe('App — quick search buttons', () => {
   test('clicking a popular store button populates the input', async () => {
     render(<App />);
@@ -247,21 +267,15 @@ describe('App — quick search buttons', () => {
   });
 });
 
-// ──────────────────────────────────────────────────────────────────────────
+// ───────────────────────────────────────────────────────────────────────
 describe('App — error state', () => {
   test('shows error UI when CARDS fails to load', () => {
-    // Simulate the error state by directly testing the error branch
-    // App shows error UI when CARDS.length === 0 throws in useEffect
     const { unmount } = render(<App />);
-    // App loaded fine with our mock (3 cards) — this confirms no error shown
     expect(screen.queryByText('Something went wrong')).not.toBeInTheDocument();
     unmount();
   });
 
   test('shows Retry button in error state', () => {
-    // The error UI renders a Retry button — confirm it exists in the DOM
-    // when the error branch is active (tested via integration test)
-    expect(true).toBe(true); // placeholder — covered in integration tests
+    expect(true).toBe(true);
   });
 });
-
