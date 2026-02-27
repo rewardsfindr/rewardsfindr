@@ -1,20 +1,20 @@
 import React, { useState, useEffect } from 'react';
 import { Loader, AlertCircle } from 'lucide-react';
 import { CARDS } from './shared/constants.js';
-import { useSearch }      from './hooks/useSearch.js';
-import { Header }         from './components/Header.js';
-import { SearchBar }      from './components/SearchBar.js';
-import { MatchBanner }    from './components/MatchBanner.js';
-import { ResultsHeader }  from './components/ResultsHeader.js';
-import { ResultCard }     from './components/ResultCard.js';
+import { useSearch } from './hooks/useSearch.js';
+import { useAuth }   from './hooks/useAuth.js';
+import { Header }        from './components/Header.js';
+import { SearchBar }     from './components/SearchBar.js';
+import { MatchBanner }   from './components/MatchBanner.js';
+import { ResultsHeader } from './components/ResultsHeader.js';
+import { ResultCard }    from './components/ResultCard.js';
 import './App.css';
 
 function App() {
   const [loading, setLoading] = useState(true);
   const [error, setError]     = useState(null);
 
-  // Auth state — wired to placeholder today, real Firebase Auth in next PR
-  const [user, setUser] = useState(null);
+  const { user, authLoading, signIn, signOut } = useAuth();
 
   const {
     searchTerm,
@@ -40,13 +40,8 @@ function App() {
     }
   }, []);
 
-  // Placeholder — swap body for real Firebase signInWithPopup in next PR
-  const handleSignIn = () => {
-    setUser({ displayName: 'Guest', email: 'guest@rewardsfindr.com' });
-  };
-
-  // ─── Loading ───────────────────────────────────────────────────────────────
-  if (loading) {
+  // ─── Loading (data or auth not yet resolved) ───────────────────────────
+  if (loading || authLoading) {
     return (
       <div className="fullscreen-center">
         <div className="loading-box">
@@ -57,7 +52,7 @@ function App() {
     );
   }
 
-  // ─── Error ─────────────────────────────────────────────────────────────────
+  // ─── Error ──────────────────────────────────────────────────────────
   if (error) {
     return (
       <div className="fullscreen-center">
@@ -73,14 +68,15 @@ function App() {
     );
   }
 
-  // ─── Main UI ───────────────────────────────────────────────────────────────
+  // ─── Main UI ────────────────────────────────────────────────────────────
   return (
     <div className="page-shell">
       <div className="page-content">
 
         <Header
           storeLookupSize={storeLookupSize}
-          onSignIn={handleSignIn}
+          onSignIn={signIn}
+          onSignOut={signOut}
           user={user}
         />
 
@@ -88,7 +84,7 @@ function App() {
           searchTerm={searchTerm}
           onChange={(val) => {
             setSearchTerm(val);
-            clearSearch(); // clears selectedStore, matchMeta, results on every keystroke
+            clearSearch();
           }}
           onSearch={handleSearch}
           onQuickSearch={handleQuickSearch}

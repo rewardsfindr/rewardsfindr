@@ -5,11 +5,12 @@ import { CARDS } from '../shared/constants.js';
 /**
  * Header
  * Props:
- *   storeLookupSize  {number}      — total store key count from buildStoreLookup
- *   onSignIn         {func}        — called when Sign In button is clicked
- *   user             {object|null} — null = signed out; object = signed-in user
+ *   storeLookupSize  {number}      — total store key count
+ *   onSignIn         {func}        — called when Sign In button clicked
+ *   onSignOut        {func}        — called when Sign Out button clicked
+ *   user             {object|null} — null = signed out; Firebase user object = signed in
  */
-export const Header = ({ storeLookupSize, onSignIn, user }) => (
+export const Header = ({ storeLookupSize, onSignIn, onSignOut, user }) => (
   <div className="panel header">
     <div className="header-top">
       <div className="header-icon-wrap">
@@ -18,12 +19,25 @@ export const Header = ({ storeLookupSize, onSignIn, user }) => (
       <h1 className="header-title">RewardsFindr</h1>
       <div className="header-actions">
         {user ? (
-          <span style={{ fontSize: '0.875rem', color: '#6b7280', fontWeight: 500 }}>
-            {user.displayName || user.email}
-          </span>
+          <div className="header-user">
+            {user.photoURL && (
+              <img
+                src={user.photoURL}
+                alt={user.displayName || 'User'}
+                className="header-avatar"
+                referrerPolicy="no-referrer"
+              />
+            )}
+            <span className="header-user-name">
+              {user.displayName || user.email}
+            </span>
+            <button className="btn-signout" onClick={onSignOut}>
+              Sign Out
+            </button>
+          </div>
         ) : (
           <button className="btn-signin" onClick={onSignIn}>
-            Sign In
+            Sign In with Google
           </button>
         )}
       </div>
