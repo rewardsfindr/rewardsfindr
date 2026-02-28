@@ -23,8 +23,22 @@ npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
 
-# Environment variables
+# Environment variables - all variants
 .env
+.env.development
+.env.production
+.env.test
+.env*.local
+
+# API environment files
+api/.env
+api/.env.development
+api/.env.production
+
+# Mobile environment files
+mobile/.env
+mobile/.env.development
+mobile/.env.production
 
 # Vercel
 .vercel/
