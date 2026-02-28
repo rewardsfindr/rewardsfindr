@@ -206,6 +206,7 @@ const parseChaseOffers = () => {
         expiryDate,
         category,
         isActivated,
+        activateButton: activateBtn, // Store reference for activation
       });
 
     } catch (e) {
@@ -238,6 +239,120 @@ const syncOffers = (cardName, offers) => {
   );
 };
 
+// ── Activate All Offers ───────────────────────
+const activateAllOffers = async (offers) => {
+  const unactivatedOffers = offers.filter(o => !o.isActivated && o.activateButton);
+  
+  if (unactivatedOffers.length === 0) {
+    alert('All offers are already activated! ✓');
+    return;
+  }
+
+  console.log(`[RewardsFindr] Activating ${unactivatedOffers.length} offers...`);
+  
+  let activated = 0;
+  let failed = 0;
+
+  for (const offer of unactivatedOffers) {
+    try {
+      // Scroll button into view
+      offer.activateButton.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      
+      // Wait a bit for scroll
+      await new Promise(resolve => setTimeout(resolve, 300));
+      
+      // Click the activate button
+      offer.activateButton.click();
+      
+      // Wait for activation to complete
+      await new Promise(resolve => setTimeout(resolve, 500));
+      
+      activated++;
+      console.log(`[RewardsFindr] ✓ Activated: ${offer.merchantName}`);
+      
+    } catch (e) {
+      failed++;
+      console.error(`[RewardsFindr] ✗ Failed to activate: ${offer.merchantName}`, e);
+    }
+  }
+
+  alert(`Activation complete!\n✓ Activated: ${activated}\n✗ Failed: ${failed}`);
+};
+
+// ── Create Floating Button ────────────────────
+const createFloatingButton = (offers) => {
+  // Remove existing button if any
+  const existing = document.getElementById('rewardsfindr-activate-btn');
+  if (existing) existing.remove();
+
+  // Count unactivated offers
+  const unactivatedCount = offers.filter(o => !o.isActivated && o.activateButton).length;
+  
+  if (unactivatedCount === 0) {
+    console.log('[RewardsFindr] All offers already activated — not showing button');
+    return;
+  }
+
+  // Create button
+  const button = document.createElement('button');
+  button.id = 'rewardsfindr-activate-btn';
+  button.innerHTML = `
+    <span style="font-size: 18px; margin-right: 6px;">⚡</span>
+    <span>Activate All (${unactivatedCount})</span>
+  `;
+  
+  // Styles
+  Object.assign(button.style, {
+    position: 'fixed',
+    bottom: '24px',
+    right: '24px',
+    zIndex: '999999',
+    padding: '14px 20px',
+    background: 'linear-gradient(135deg, #4f46e5 0%, #7c3aed 100%)',
+    color: 'white',
+    border: 'none',
+    borderRadius: '12px',
+    fontSize: '14px',
+    fontWeight: '600',
+    fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif',
+    cursor: 'pointer',
+    boxShadow: '0 8px 16px rgba(79, 70, 229, 0.3), 0 2px 4px rgba(0, 0, 0, 0.1)',
+    display: 'flex',
+    alignItems: 'center',
+    transition: 'all 0.2s ease',
+  });
+
+  // Hover effect
+  button.addEventListener('mouseenter', () => {
+    button.style.transform = 'translateY(-2px)';
+    button.style.boxShadow = '0 12px 24px rgba(79, 70, 229, 0.4), 0 4px 8px rgba(0, 0, 0, 0.15)';
+  });
+
+  button.addEventListener('mouseleave', () => {
+    button.style.transform = 'translateY(0)';
+    button.style.boxShadow = '0 8px 16px rgba(79, 70, 229, 0.3), 0 2px 4px rgba(0, 0, 0, 0.1)';
+  });
+
+  // Click handler
+  button.addEventListener('click', async () => {
+    button.disabled = true;
+    button.style.opacity = '0.6';
+    button.style.cursor = 'not-allowed';
+    button.innerHTML = '<span style="font-size: 18px;">⏳</span> <span>Activating...</span>';
+    
+    await activateAllOffers(offers);
+    
+    // Refresh offers after activation
+    setTimeout(() => {
+      button.remove();
+      boot(); // Re-run to update counts
+    }, 1000);
+  });
+
+  document.body.appendChild(button);
+  console.log(`[RewardsFindr] ✓ Floating button added (${unactivatedCount} offers)`);
+};
+
 // ── Boot ──────────────────────────────────────
 // Chase uses React — DOM isn't ready at document_idle sometimes
 // We wait PARSE_DELAY_MS then parse once
@@ -253,6 +368,7 @@ const boot = () => {
 
     if (offers.length > 0) {
       syncOffers(cardName, offers);
+      createFloatingButton(offers);
     } else {
       console.warn('[RewardsFindr] No offers parsed — skipping sync');
     }
