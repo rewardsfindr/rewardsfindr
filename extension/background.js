@@ -2,44 +2,10 @@
 // BACKGROUND SERVICE WORKER
 // Runs persistently in the background
 // Responsibilities:
-//   1. Manages user auth state (Google sign-in)
-//   2. Receives parsed offers from content scripts
-//   3. Writes offers to MockDB (swapped for real Firebase later)
-//   4. Updates extension badge to show sync status
+//   1. Receives parsed offers from content scripts
+//   2. Logs them to console (DB sync coming later)
+//   3. Updates extension badge to show sync status
 // ─────────────────────────────────────────────
-
-import { mockDB, mockAuth } from '../src/shared/mockFirebase.js';
-import { generateOfferId, generateCardId, normalizeMerchant } from '../src/shared/offerUtils.js';
-import { CATEGORIES } from '../src/shared/constants.js';
-
-// ─────────────────────────────────────────────
-// AUTH STATE
-// Persisted in chrome.storage.local so it survives
-// service worker restarts (MV3 service workers don't stay in memory)
-// ─────────────────────────────────────────────
-let currentUser = null;
-
-const initAuth = async () => {
-  // Check if we have a cached user first
-  const cached = await chrome.storage.local.get('rewardsfindr_user');
-  if (cached.rewardsfindr_user) {
-    currentUser = cached.rewardsfindr_user;
-    console.log('[Background] Restored user from storage:', currentUser.email);
-    return currentUser;
-  }
-
-  // No cached user — sign in
-  try {
-    const user = await mockAuth.signIn();
-    currentUser = user;
-    await chrome.storage.local.set({ rewardsfindr_user: user });
-    console.log('[Background] Signed in:', user.email);
-    return user;
-  } catch (e) {
-    console.error('[Background] Auth failed:', e);
-    return null;
-  }
-};
 
 // ─────────────────────────────────────────────
 // BADGE HELPERS
@@ -58,76 +24,46 @@ const setBadgeError = () => setBadge('!', '#ef4444');       // red — failed
 // ─────────────────────────────────────────────
 // PROCESS OFFERS
 // Called when a content script sends parsed offers
-// Validates, deduplicates, and writes to DB
+// For now, just logs them - DB sync coming later
 // ─────────────────────────────────────────────
 const processOffers = async (bank, cardName, rawOffers) => {
-  if (!currentUser) {
-    console.warn('[Background] No user — cannot sync offers');
-    setBadgeError();
-    return { success: false, reason: 'not_authenticated' };
-  }
-
   if (!rawOffers?.length) {
     console.warn(`[Background] No offers received from ${bank}`);
-    mockDB.setSyncFailed(currentUser.uid, generateCardId(bank, cardName), 'no_offers_found');
     setBadgeError();
     return { success: false, reason: 'no_offers_found' };
   }
 
   setBadgeSyncing();
 
-  const cardId = generateCardId(bank, cardName);
-  let successCount = 0;
-  let failCount = 0;
+  console.log(`[Background] Processing ${rawOffers.length} offers from ${bank} (${cardName})`);
+  console.table(rawOffers);
 
-  for (const raw of rawOffers) {
-    try {
-      // Validate required fields before writing
-      if (!raw.merchantName || raw.cashbackAmount == null) {
-        console.warn('[Background] Skipping malformed offer:', raw);
-        failCount++;
-        continue;
+  // TODO: Add database sync here
+  // For now, just store in chrome.storage for testing
+  try {
+    await chrome.storage.local.set({
+      [`offers_${bank}_${cardName}`]: {
+        bank,
+        cardName,
+        offers: rawOffers,
+        syncedAt: new Date().toISOString(),
       }
+    });
 
-      const offerId = generateOfferId(
-        raw.merchantName,
-        raw.cashbackAmount,
-        raw.expiryDate || 'no-expiry'
-      );
+    console.log(`[Background] Stored ${rawOffers.length} offers in local storage`);
+    setBadgeSuccess(rawOffers.length);
 
-      const offer = {
-        merchantName: raw.merchantName,
-        merchantNormalized: normalizeMerchant(raw.merchantName),
-        offerDescription: raw.offerDescription || '',
-        cashbackAmount: Number(raw.cashbackAmount),
-        cashbackType: raw.cashbackType || 'fixed',
-        minimumSpend: Number(raw.minimumSpend) || 0,
-        expiryDate: raw.expiryDate || null,
-        category: raw.category || CATEGORIES.OTHER,
-        isActivated: raw.isActivated || false,
-        source: 'chrome_extension',
-      };
-
-      mockDB.setOffer(currentUser.uid, cardId, offerId, offer);
-      successCount++;
-
-    } catch (e) {
-      console.error('[Background] Failed to write offer:', e);
-      failCount++;
-    }
+    return { success: true, synced: rawOffers.length };
+  } catch (e) {
+    console.error('[Background] Failed to store offers:', e);
+    setBadgeError();
+    return { success: false, reason: e.message };
   }
-
-  console.log(`[Background] Sync complete — ${successCount} written, ${failCount} failed`);
-  setBadgeSuccess(successCount);
-
-  return { success: true, synced: successCount, failed: failCount };
 };
 
 // ─────────────────────────────────────────────
 // MESSAGE LISTENER
-// Content scripts cannot write to DB directly — they send
-// messages to background which handles all DB writes
-// This keeps auth logic in one place
+// Content scripts send messages to background
 // ─────────────────────────────────────────────
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 
@@ -146,49 +82,23 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     return true; // Required for async sendResponse in MV3
   }
 
-  // Popup requesting current user info
-  if (message.type === 'GET_USER') {
-    sendResponse({ user: currentUser });
-    return true;
-  }
-
-  // Popup requesting sync summary
-  if (message.type === 'GET_SYNC_STATUS') {
-    if (!currentUser) {
-      sendResponse({ cards: [] });
-      return true;
-    }
-    const cards = mockDB.getCards(currentUser.uid);
-    sendResponse({ cards });
-    return true;
-  }
-
-  // Popup requesting sign in
-  if (message.type === 'SIGN_IN') {
-    initAuth()
-      .then(user => sendResponse({ user }))
-      .catch(e => sendResponse({ user: null, error: e.message }));
-    return true;
-  }
-
-  // Popup requesting sign out
-  if (message.type === 'SIGN_OUT') {
-    currentUser = null;
-    chrome.storage.local.remove('rewardsfindr_user');
-    setBadge('', '#6366f1');
-    sendResponse({ success: true });
+  // Popup requesting stored offers
+  if (message.type === 'GET_OFFERS') {
+    chrome.storage.local.get(null, (items) => {
+      const offerKeys = Object.keys(items).filter(k => k.startsWith('offers_'));
+      const allOffers = offerKeys.map(k => items[k]);
+      sendResponse({ offers: allOffers });
+    });
     return true;
   }
 });
 
 // ─────────────────────────────────────────────
 // EXTENSION INSTALL / STARTUP
-// Runs when extension is first installed or Chrome restarts
 // ─────────────────────────────────────────────
 chrome.runtime.onInstalled.addListener(async () => {
-  console.log('[Background] RewardsFindr installed');
-  await initAuth();
+  console.log('[Background] RewardsFindr extension installed');
+  setBadge('', '#6366f1');
 });
 
-// Restore auth on service worker restart (MV3 kills service workers when idle)
-initAuth();
+console.log('[Background] RewardsFindr service worker started');
