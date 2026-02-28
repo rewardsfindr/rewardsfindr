@@ -40,14 +40,6 @@
       ],
       "js": ["content/amex.js"],
       "run_at": "document_idle"
-    },
-    {
-      "matches": [
-        "https://www.capitalone.com/card-benefits/offers*",
-        "https://www.capitalone.com/*offers*"
-      ],
-      "js": ["content/capitalOne.js"],
-      "run_at": "document_idle"
     }
   ],
 
@@ -59,8 +51,7 @@
 
   "host_permissions": [
     "https://*.chase.com/*",
-    "https://*.americanexpress.com/*",
-    "https://*.capitalone.com/*"
+    "https://*.americanexpress.com/*"
   ],
 
   "oauth2": {
