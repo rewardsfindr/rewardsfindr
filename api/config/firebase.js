@@ -2,7 +2,11 @@
 // FIREBASE ADMIN SDK INITIALIZATION
 // Single source of truth for server-side Firebase
 // ─────────────────────────────────────────────
+import dotenv from 'dotenv';
 import admin from 'firebase-admin';
+
+// Load .env BEFORE accessing process.env
+dotenv.config();
 
 // Initialize Firebase Admin with service account credentials from env
 const serviceAccount = {
@@ -12,6 +16,10 @@ const serviceAccount = {
 };
 
 if (!serviceAccount.projectId || !serviceAccount.clientEmail || !serviceAccount.privateKey) {
+  console.error('Missing Firebase credentials. Check your .env file.');
+  console.error('PROJECT_ID:', serviceAccount.projectId ? '✓' : '✗');
+  console.error('CLIENT_EMAIL:', serviceAccount.clientEmail ? '✓' : '✗');
+  console.error('PRIVATE_KEY:', serviceAccount.privateKey ? '✓' : '✗');
   throw new Error('Missing Firebase Admin SDK credentials in environment variables');
 }
 
