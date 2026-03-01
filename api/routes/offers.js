@@ -3,20 +3,21 @@
 // Handle syncing offers from Chrome extension
 // ─────────────────────────────────────────────
 import express from 'express';
-import admin from '../firebase.js';
+import { db, auth } from '../config/firebase.js';
+import { FieldValue } from 'firebase-admin/firestore';
 import { generateOfferId, normalizeMerchant } from '../../shared/offerUtils.js';
 
 const router = express.Router();
-const db = admin.firestore();
 
 /**
  * POST /api/offers/sync
  * Sync offers from Chrome extension to Firestore
  * Requires Firebase authentication
+ * Body: { offers: [], bank: string, cardName: string }
  */
 router.post('/sync', async (req, res) => {
   try {
-    // Get Firebase ID token from Authorization header
+    // Verify auth token
     const authHeader = req.headers.authorization;
     if (!authHeader?.startsWith('Bearer ')) {
       return res.status(401).json({ error: 'Missing or invalid authorization header' });
@@ -24,42 +25,41 @@ router.post('/sync', async (req, res) => {
 
     const idToken = authHeader.split('Bearer ')[1];
 
-    // Verify Firebase token
     let decodedToken;
     try {
-      decodedToken = await admin.auth().verifyIdToken(idToken);
+      decodedToken = await auth.verifyIdToken(idToken);
     } catch (error) {
       console.error('Token verification failed:', error);
       return res.status(401).json({ error: 'Invalid authentication token' });
     }
 
     const userId = decodedToken.uid;
-    const { offers } = req.body;
+    const { offers, bank, cardName } = req.body;
 
     if (!offers || !Array.isArray(offers)) {
       return res.status(400).json({ error: 'Invalid offers data' });
     }
 
-    console.log(`🔄 Syncing ${offers.length} offers for user ${userId}`);
+    if (!bank || !cardName) {
+      return res.status(400).json({ error: 'bank and cardName are required' });
+    }
 
-    // Process offers and write to Firestore
+    console.log(`🔄 Syncing ${offers.length} offers for user ${userId} (${bank} - ${cardName})`);
+
     const batch = db.batch();
     let syncedCount = 0;
     let skippedCount = 0;
 
     for (const offer of offers) {
       try {
-        // Generate deterministic offer ID
         const offerId = generateOfferId(
           offer.merchantName,
           offer.cashbackAmount,
-          offer.expiryDate || new Date(Date.now() + 90 * 24 * 60 * 60 * 1000).toISOString() // Default 90 days if no expiry
+          offer.expiryDate || new Date(Date.now() + 90 * 24 * 60 * 60 * 1000).toISOString()
         );
 
-        // Normalize merchant name for search matching
         const normalizedMerchant = normalizeMerchant(offer.merchantName);
 
-        // Prepare offer document
         const offerDoc = {
           offerId,
           userId,
@@ -72,11 +72,11 @@ router.post('/sync', async (req, res) => {
           category: offer.category || 'other',
           expiryDate: offer.expiryDate || null,
           isActivated: offer.isActivated || false,
-          bank: 'chase', // TODO: Get from request
-          syncedAt: admin.firestore.FieldValue.serverTimestamp(),
+          bank,
+          cardName,
+          syncedAt: FieldValue.serverTimestamp(),
         };
 
-        // Use offerId as document ID to prevent duplicates
         const offerRef = db.collection('offers').doc(offerId);
         batch.set(offerRef, offerDoc, { merge: true });
         syncedCount++;
@@ -87,7 +87,6 @@ router.post('/sync', async (req, res) => {
       }
     }
 
-    // Commit batch write
     await batch.commit();
 
     console.log(`✅ Sync complete: ${syncedCount} synced, ${skippedCount} skipped`);

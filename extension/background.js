@@ -39,16 +39,16 @@ const getAuthToken = async () => {
 
 // ─────────────────────────────────────────────
 // SYNC TO API
-// Sends offers to backend API with authentication
+// Sends offers + bank + cardName to backend API
 // ─────────────────────────────────────────────
-const syncToAPI = async (offers, token) => {
+const syncToAPI = async (offers, bank, cardName, token) => {
   const response = await fetch(`${API_URL}/api/offers/sync`, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
       'Authorization': `Bearer ${token}`,
     },
-    body: JSON.stringify({ offers }),
+    body: JSON.stringify({ offers, bank, cardName }),
   });
 
   if (!response.ok) {
@@ -62,7 +62,6 @@ const syncToAPI = async (offers, token) => {
 // ─────────────────────────────────────────────
 // PROCESS OFFERS
 // Called when a content script sends parsed offers
-// Now syncs to API instead of just local storage
 // ─────────────────────────────────────────────
 const processOffers = async (bank, cardName, rawOffers) => {
   if (!rawOffers?.length) {
@@ -75,7 +74,6 @@ const processOffers = async (bank, cardName, rawOffers) => {
 
   console.log(`[Background] Processing ${rawOffers.length} offers from ${bank} (${cardName})`);
 
-  // Check if user is logged in
   const token = await getAuthToken();
   if (!token) {
     console.warn('[Background] User not logged in — cannot sync to API');
@@ -84,10 +82,9 @@ const processOffers = async (bank, cardName, rawOffers) => {
   }
 
   try {
-    // Sync to API
-    const result = await syncToAPI(rawOffers, token);
+    const result = await syncToAPI(rawOffers, bank, cardName, token);
     console.log(`[Background] ✅ API sync successful:`, result);
-    
+
     // Also store in local storage as backup
     await chrome.storage.local.set({
       [`offers_${bank}_${cardName}`]: {
@@ -117,7 +114,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   // Content script finished parsing offers
   if (message.type === 'OFFERS_PARSED') {
     const { bank, cardName, offers } = message.payload;
-    console.log(`[Background] Received ${offers?.length} offers from ${bank}`);
+    console.log(`[Background] Received ${offers?.length} offers from ${bank} (${cardName})`);
 
     processOffers(bank, cardName, offers)
       .then(result => sendResponse(result))
