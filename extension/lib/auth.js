@@ -13,26 +13,48 @@ import { CONFIG } from '../config.js';
 export async function signInWithGoogle() {
   return new Promise((resolve, reject) => {
     // Get Google OAuth token from Chrome
-    chrome.identity.getAuthToken({ interactive: true }, async (token) => {
+    chrome.identity.getAuthToken({ interactive: true }, async (accessToken) => {
       if (chrome.runtime.lastError) {
         reject(new Error(chrome.runtime.lastError.message));
         return;
       }
 
-      if (!token) {
+      if (!accessToken) {
         reject(new Error('No token returned'));
         return;
       }
 
       try {
-        // Exchange Google token for Firebase token
+        // Get user info from Google using access token
+        const userInfoResponse = await fetch(
+          'https://www.googleapis.com/oauth2/v2/userinfo',
+          {
+            headers: { Authorization: `Bearer ${accessToken}` },
+          }
+        );
+
+        if (!userInfoResponse.ok) {
+          throw new Error('Failed to get user info from Google');
+        }
+
+        const userInfo = await userInfoResponse.json();
+
+        // Get ID token from tokeninfo endpoint
+        const tokenInfoResponse = await fetch(
+          `https://www.googleapis.com/oauth2/v3/tokeninfo?access_token=${accessToken}`
+        );
+
+        const tokenInfo = await tokenInfoResponse.json();
+        
+        // Use access token directly with Firebase signInWithIdp
+        // Firebase expects the access_token in postBody format
         const response = await fetch(
           `https://identitytoolkit.googleapis.com/v1/accounts:signInWithIdp?key=${CONFIG.FIREBASE_API_KEY}`,
           {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
-              postBody: `id_token=${token}&providerId=google.com`,
+              postBody: `access_token=${accessToken}&providerId=google.com`,
               requestUri: `https://${CONFIG.FIREBASE_AUTH_DOMAIN}`,
               returnIdpCredential: true,
               returnSecureToken: true,
@@ -45,16 +67,6 @@ export async function signInWithGoogle() {
         if (!response.ok) {
           throw new Error(data.error?.message || 'Firebase auth failed');
         }
-
-        // Get user info from Google
-        const userInfoResponse = await fetch(
-          'https://www.googleapis.com/oauth2/v2/userinfo',
-          {
-            headers: { Authorization: `Bearer ${token}` },
-          }
-        );
-
-        const userInfo = await userInfoResponse.json();
 
         resolve({
           firebaseToken: data.idToken,
