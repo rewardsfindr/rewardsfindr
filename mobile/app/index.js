@@ -6,72 +6,74 @@
 import React, { useState } from 'react';
 import {
   View, Text, TextInput, TouchableOpacity,
-  ScrollView, ActivityIndicator, StyleSheet, SafeAreaView,
+  ScrollView, ActivityIndicator, StyleSheet, SafeAreaView, Alert,
 } from 'react-native';
 import { useRouter } from 'expo-router';
 import { useSearch } from '../hooks/useSearch.js';
 import { POPULAR_STORES } from '../shared/constants.js';
+import { searchStore } from '../lib/api.js';
 
 export default function HomeScreen() {
   const router = useRouter();
   const {
     searchTerm, setSearchTerm,
-    searching, handleSearch, handleQuickSearch,
-    results, selectedStore, matchMeta, clearSearch,
+    searching, error, clearSearch,
   } = useSearch();
-
-  const doSearch = async (term) => {
-    if (!term?.trim()) return;
-    // Run the search then navigate if we got results
-    await handleQuickSearch(term);
-  };
+  const [localSearching, setLocalSearching] = useState(false);
 
   // Navigate to results after searching
   const onSearchPress = async () => {
     if (!searchTerm.trim()) return;
-    clearSearch();
+    
+    setLocalSearching(true);
+    try {
+      const data = await searchStore(searchTerm);
 
-    // Inline search so we can pass results via router params
-    const { findBestStoreMatch, buildResultsForCategory, buildStoreLookup } = require('../shared/offerUtils.js');
-    const { CARDS } = require('../shared/constants.js');
-    const lookup = buildStoreLookup();
-    const match = findBestStoreMatch(searchTerm, lookup);
+      if (!data.store) {
+        router.push({ pathname: '/results', params: { notFound: searchTerm } });
+        return;
+      }
 
-    if (!match) {
-      router.push({ pathname: '/results', params: { notFound: searchTerm } });
-      return;
+      router.push({
+        pathname: '/results',
+        params: {
+          storeName: data.store,
+          category:  data.category,
+          quality:   data.quality,
+          results:   JSON.stringify(data.cards.slice(0, 3)),
+        },
+      });
+    } catch (err) {
+      Alert.alert('Search Error', err.message);
+    } finally {
+      setLocalSearching(false);
     }
-
-    const cardResults = buildResultsForCategory(match.category, CARDS);
-    router.push({
-      pathname: '/results',
-      params: {
-        storeName: match.displayName,
-        category:  match.category,
-        quality:   match.quality,
-        results:   JSON.stringify(cardResults.slice(0, 3)),
-      },
-    });
   };
 
-  const onChipPress = (storeName) => {
-    setSearchTerm(storeName);
-    const { findBestStoreMatch, buildResultsForCategory, buildStoreLookup } = require('../shared/offerUtils.js');
-    const { CARDS } = require('../shared/constants.js');
-    const lookup = buildStoreLookup();
-    const match = findBestStoreMatch(storeName, lookup);
-    if (!match) return;
-    const cardResults = buildResultsForCategory(match.category, CARDS);
-    router.push({
-      pathname: '/results',
-      params: {
-        storeName: match.displayName,
-        category:  match.category,
-        quality:   match.quality,
-        results:   JSON.stringify(cardResults.slice(0, 3)),
-      },
-    });
+  const onChipPress = async (storeName) => {
+    setLocalSearching(true);
+    try {
+      const data = await searchStore(storeName);
+      
+      if (!data.store) return;
+      
+      router.push({
+        pathname: '/results',
+        params: {
+          storeName: data.store,
+          category:  data.category,
+          quality:   data.quality,
+          results:   JSON.stringify(data.cards.slice(0, 3)),
+        },
+      });
+    } catch (err) {
+      Alert.alert('Search Error', err.message);
+    } finally {
+      setLocalSearching(false);
+    }
   };
+
+  const isSearching = searching || localSearching;
 
   return (
     <SafeAreaView style={s.safe}>
@@ -102,17 +104,23 @@ export default function HomeScreen() {
               autoCorrect={false}
               autoCapitalize="none"
             />
-            <TouchableOpacity style={s.searchBtn} onPress={onSearchPress} disabled={searching}>
-              {searching
+            <TouchableOpacity style={s.searchBtn} onPress={onSearchPress} disabled={isSearching}>
+              {isSearching
                 ? <ActivityIndicator color="white" size="small" />
                 : <Text style={s.searchBtnText}>🔍</Text>}
             </TouchableOpacity>
           </View>
 
+          {error && (
+            <View style={s.errorBox}>
+              <Text style={s.errorText}>⚠️ {error}</Text>
+            </View>
+          )}
+
           <Text style={s.popularLabel}>Popular Stores</Text>
           <View style={s.chips}>
             {POPULAR_STORES.map(name => (
-              <TouchableOpacity key={name} style={s.chip} onPress={() => onChipPress(name)}>
+              <TouchableOpacity key={name} style={s.chip} onPress={() => onChipPress(name)} disabled={isSearching}>
                 <Text style={s.chipText}>{name}</Text>
               </TouchableOpacity>
             ))}
@@ -151,6 +159,9 @@ const s = StyleSheet.create({
   searchBtn:     { backgroundColor: '#4f46e5', borderRadius: 12, paddingHorizontal: 16,
                    alignItems: 'center', justifyContent: 'center' },
   searchBtnText: { fontSize: 18 },
+
+  errorBox:      { backgroundColor: '#fee', borderRadius: 8, padding: 10, marginBottom: 12 },
+  errorText:     { color: '#c00', fontSize: 13 },
 
   popularLabel:  { fontSize: 13, color: '#6b7280', fontWeight: '500', marginBottom: 8 },
   chips:         { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },

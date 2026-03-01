@@ -1,13 +1,9 @@
 // ─────────────────────────────────────────────
 // useSearch — mobile
-// Identical logic to web app's hooks/useSearch.js.
-// No platform-specific APIs — pure React state.
+// Calls Firebase Functions API for search results
 // ─────────────────────────────────────────────
 import { useState } from 'react';
-import { CARDS } from '../shared/constants.js';
-import { buildStoreLookup, findBestStoreMatch, buildResultsForCategory } from '../shared/offerUtils.js';
-
-const STORE_LOOKUP = buildStoreLookup();
+import { searchStore } from '../lib/api.js';
 
 export const useSearch = () => {
   const [searchTerm, setSearchTerm]       = useState('');
@@ -15,29 +11,47 @@ export const useSearch = () => {
   const [results, setResults]             = useState([]);
   const [matchMeta, setMatchMeta]         = useState(null);
   const [searching, setSearching]         = useState(false);
+  const [error, setError]                 = useState(null);
 
   const runSearch = async (term) => {
     if (!term?.trim()) return;
+    
     setSearching(true);
-    await new Promise(r => setTimeout(r, 150));
+    setError(null);
 
-    const match = findBestStoreMatch(term, STORE_LOOKUP);
-    if (!match) {
+    try {
+      const data = await searchStore(term);
+      
+      if (!data.store) {
+        // No match found
+        setSelectedStore(term);
+        setMatchMeta(null);
+        setResults([]);
+      } else {
+        setSelectedStore(data.store);
+        setMatchMeta({
+          displayName: data.store,
+          category: data.category,
+          quality: data.quality,
+        });
+        setResults(data.cards || []);
+      }
+    } catch (err) {
+      console.error('Search error:', err);
+      setError(err.message);
       setSelectedStore(term);
       setMatchMeta(null);
       setResults([]);
-    } else {
-      setSelectedStore(match.displayName);
-      setMatchMeta(match);
-      setResults(buildResultsForCategory(match.category, CARDS));
+    } finally {
+      setSearching(false);
     }
-    setSearching(false);
   };
 
   const clearSearch = () => {
     setSelectedStore(null);
     setMatchMeta(null);
     setResults([]);
+    setError(null);
   };
 
   return {
@@ -47,9 +61,9 @@ export const useSearch = () => {
     results,
     matchMeta,
     searching,
+    error,
     handleSearch:      () => runSearch(searchTerm),
     handleQuickSearch: (name) => { setSearchTerm(name); runSearch(name); },
     clearSearch,
-    storeLookupSize:   Object.keys(STORE_LOOKUP).length,
   };
 };
