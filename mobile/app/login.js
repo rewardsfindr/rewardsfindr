@@ -25,6 +25,8 @@ export default function LoginScreen() {
     webClientId: process.env.EXPO_PUBLIC_GOOGLE_CLIENT_ID,
     androidClientId: process.env.EXPO_PUBLIC_GOOGLE_CLIENT_ID,
     iosClientId: process.env.EXPO_PUBLIC_GOOGLE_CLIENT_ID,
+  }, {
+    useProxy: true, // Force use of https://auth.expo.io proxy instead of exp:// local redirect
   });
 
   useEffect(() => {
