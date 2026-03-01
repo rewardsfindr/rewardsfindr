@@ -23,6 +23,8 @@ export default function LoginScreen() {
 
   const [request, response, promptAsync] = Google.useAuthRequest({
     webClientId: process.env.EXPO_PUBLIC_GOOGLE_CLIENT_ID,
+    androidClientId: process.env.EXPO_PUBLIC_GOOGLE_CLIENT_ID,
+    iosClientId: process.env.EXPO_PUBLIC_GOOGLE_CLIENT_ID,
   });
 
   useEffect(() => {
@@ -80,7 +82,7 @@ export default function LoginScreen() {
           {loading ? (
             <ActivityIndicator color="#1f2937" />
           ) : (
-            <Text style={s.googleBtnText}>🔑  Continue with Google</Text>
+            <Text style={s.googleBtnText}>🔑  Continue with Google</Text>
           )}
         </TouchableOpacity>
 
