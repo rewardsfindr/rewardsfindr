@@ -7,6 +7,7 @@ import cors from 'cors';
 import dotenv from 'dotenv';
 import authRoutes from './routes/auth.js';
 import offerRoutes from './routes/offers.js';
+import searchRoutes from './routes/search.js';
 
 dotenv.config();
 
@@ -40,6 +41,7 @@ app.get('/health', (req, res) => {
 
 app.use('/api/auth', authRoutes);
 app.use('/api/offers', offerRoutes);
+app.use('/api/search', searchRoutes);
 
 // ─── Error Handler ───
 app.use((err, req, res, next) => {
