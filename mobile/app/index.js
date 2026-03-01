@@ -1,7 +1,8 @@
 // ─────────────────────────────────────────────
-// Home Screen
+// HOME SCREEN
 // Search input + popular store chips
-// Navigates to /results on successful match
+// Shows signed-in user info + sign out in header
+// Navigates to /results on search
 // ─────────────────────────────────────────────
 import React, { useState } from 'react';
 import {
@@ -9,40 +10,51 @@ import {
   ScrollView, ActivityIndicator, StyleSheet, SafeAreaView, Alert,
 } from 'react-native';
 import { useRouter } from 'expo-router';
+import { signOut } from 'firebase/auth';
+import { getAuthInstance } from '../lib/firebaseClient.js';
 import { useSearch } from '../hooks/useSearch.js';
 import { POPULAR_STORES } from '../shared/constants.js';
 import { searchStore } from '../lib/api.js';
 
 export default function HomeScreen() {
   const router = useRouter();
-  const {
-    searchTerm, setSearchTerm,
-    searching, error, clearSearch,
-  } = useSearch();
+  const { searchTerm, setSearchTerm, searching, error, clearSearch } = useSearch();
   const [localSearching, setLocalSearching] = useState(false);
 
-  // Navigate to results after searching
+  const user = getAuthInstance().currentUser;
+
+  const handleSignOut = async () => {
+    try {
+      await signOut(getAuthInstance());
+      // _layout.js auth listener redirects to /login automatically
+    } catch (err) {
+      Alert.alert('Error', 'Could not sign out. Please try again.');
+    }
+  };
+
+  const navigateToResults = (data, query) => {
+    if (!data.store && (!data.personalizedOffers || data.personalizedOffers.length === 0)) {
+      router.push({ pathname: '/results', params: { notFound: query } });
+      return;
+    }
+    router.push({
+      pathname: '/results',
+      params: {
+        storeName: data.store || query,
+        category:  data.category,
+        quality:   data.quality,
+        results:   JSON.stringify(data.cards?.slice(0, 3) ?? []),
+        personalizedOffers: JSON.stringify(data.personalizedOffers ?? []),
+      },
+    });
+  };
+
   const onSearchPress = async () => {
     if (!searchTerm.trim()) return;
-    
     setLocalSearching(true);
     try {
       const data = await searchStore(searchTerm);
-
-      if (!data.store) {
-        router.push({ pathname: '/results', params: { notFound: searchTerm } });
-        return;
-      }
-
-      router.push({
-        pathname: '/results',
-        params: {
-          storeName: data.store,
-          category:  data.category,
-          quality:   data.quality,
-          results:   JSON.stringify(data.cards.slice(0, 3)),
-        },
-      });
+      navigateToResults(data, searchTerm);
     } catch (err) {
       Alert.alert('Search Error', err.message);
     } finally {
@@ -54,18 +66,7 @@ export default function HomeScreen() {
     setLocalSearching(true);
     try {
       const data = await searchStore(storeName);
-      
-      if (!data.store) return;
-      
-      router.push({
-        pathname: '/results',
-        params: {
-          storeName: data.store,
-          category:  data.category,
-          quality:   data.quality,
-          results:   JSON.stringify(data.cards.slice(0, 3)),
-        },
-      });
+      navigateToResults(data, storeName);
     } catch (err) {
       Alert.alert('Search Error', err.message);
     } finally {
@@ -81,14 +82,28 @@ export default function HomeScreen() {
 
         {/* Header */}
         <View style={s.header}>
-          <View style={s.headerIconWrap}>
-            <Text style={s.headerIcon}>💳</Text>
-          </View>
-          <View>
-            <Text style={s.headerTitle}>RewardsFindr</Text>
-            <Text style={s.headerSub}>Find the best card for any store</Text>
+          <View style={s.headerLeft}>
+            <View style={s.headerIconWrap}>
+              <Text style={s.headerIcon}>💳</Text>
+            </View>
+            <View>
+              <Text style={s.headerTitle}>RewardsFindr</Text>
+              <Text style={s.headerSub}>Find the best card for any store</Text>
+            </View>
           </View>
         </View>
+
+        {/* Signed-in user banner */}
+        {user && (
+          <View style={s.userBanner}>
+            <Text style={s.userEmail} numberOfLines={1}>
+              👤 {user.displayName || user.email}
+            </Text>
+            <TouchableOpacity onPress={handleSignOut}>
+              <Text style={s.signOutText}>Sign out</Text>
+            </TouchableOpacity>
+          </View>
+        )}
 
         {/* Search */}
         <View style={s.searchBox}>
@@ -131,8 +146,8 @@ export default function HomeScreen() {
         <View style={s.card}>
           <Text style={s.cardTitle}>How it works</Text>
           <Text style={s.cardBody}>
-            Search any store → see which credit card gives you the best rewards there.
-            No login required. Data from public card terms.
+            Search any store → see which of your credit cards gives you the best rewards there.
+            Install the Chrome extension to sync your card offers automatically.
           </Text>
         </View>
 
@@ -145,11 +160,20 @@ const s = StyleSheet.create({
   safe:          { flex: 1, backgroundColor: '#eef2ff' },
   scroll:        { padding: 16, paddingBottom: 40 },
 
-  header:        { flexDirection: 'row', alignItems: 'center', gap: 12, marginBottom: 20, marginTop: 8 },
+  header:        { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
+                   marginBottom: 12, marginTop: 8 },
+  headerLeft:    { flexDirection: 'row', alignItems: 'center', gap: 12 },
   headerIconWrap:{ backgroundColor: '#4f46e5', borderRadius: 12, padding: 10 },
   headerIcon:    { fontSize: 22 },
   headerTitle:   { fontSize: 26, fontWeight: '800', color: '#4f46e5' },
   headerSub:     { fontSize: 13, color: '#6b7280', marginTop: 2 },
+
+  userBanner:    { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center',
+                   backgroundColor: 'white', borderRadius: 12, paddingHorizontal: 14,
+                   paddingVertical: 10, marginBottom: 14,
+                   shadowColor: '#000', shadowOpacity: 0.05, shadowRadius: 6, elevation: 2 },
+  userEmail:     { fontSize: 13, color: '#4b5563', flex: 1, marginRight: 8 },
+  signOutText:   { fontSize: 13, color: '#ef4444', fontWeight: '600' },
 
   searchBox:     { backgroundColor: 'white', borderRadius: 20, padding: 16, marginBottom: 16,
                    shadowColor: '#000', shadowOpacity: 0.08, shadowRadius: 12, elevation: 4 },
