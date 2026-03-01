@@ -7,7 +7,9 @@
 //   3. Updates extension badge to show sync status
 // ─────────────────────────────────────────────
 
-const API_URL = 'http://localhost:3001'; // TODO: Change to production URL
+import { CONFIG } from './config.js';
+
+const API_URL = CONFIG.API_URL;
 
 // ─────────────────────────────────────────────
 // BADGE HELPERS

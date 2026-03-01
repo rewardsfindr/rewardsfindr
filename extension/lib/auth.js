@@ -4,8 +4,7 @@
 // Can't use Firebase SDK in extensions due to CSP
 // ─────────────────────────────────────────────
 
-const FIREBASE_API_KEY = 'AIzaSyBVe-sMZEm_vGZtMc5hBu6xJZJLtQZqZqM';
-const FIREBASE_AUTH_DOMAIN = 'rewardsfindr-dev.firebaseapp.com';
+import { CONFIG } from '../config.js';
 
 /**
  * Sign in with Google using Chrome Identity API
@@ -28,13 +27,13 @@ export async function signInWithGoogle() {
       try {
         // Exchange Google token for Firebase token
         const response = await fetch(
-          `https://identitytoolkit.googleapis.com/v1/accounts:signInWithIdp?key=${FIREBASE_API_KEY}`,
+          `https://identitytoolkit.googleapis.com/v1/accounts:signInWithIdp?key=${CONFIG.FIREBASE_API_KEY}`,
           {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
               postBody: `id_token=${token}&providerId=google.com`,
-              requestUri: `https://${FIREBASE_AUTH_DOMAIN}`,
+              requestUri: `https://${CONFIG.FIREBASE_AUTH_DOMAIN}`,
               returnIdpCredential: true,
               returnSecureToken: true,
             }),
