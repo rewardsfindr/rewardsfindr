@@ -3,9 +3,11 @@
 // Runs persistently in the background
 // Responsibilities:
 //   1. Receives parsed offers from content scripts
-//   2. Logs them to console (DB sync coming later)
+//   2. Syncs offers to Firebase via API
 //   3. Updates extension badge to show sync status
 // ─────────────────────────────────────────────
+
+const API_URL = 'http://localhost:3001'; // TODO: Change to production URL
 
 // ─────────────────────────────────────────────
 // BADGE HELPERS
@@ -22,9 +24,43 @@ const setBadgeSuccess = (count) => setBadge(`${count}`, '#10b981'); // green —
 const setBadgeError = () => setBadge('!', '#ef4444');       // red — failed
 
 // ─────────────────────────────────────────────
+// GET AUTH TOKEN
+// Retrieves stored Firebase ID token from chrome.storage
+// ─────────────────────────────────────────────
+const getAuthToken = async () => {
+  return new Promise((resolve) => {
+    chrome.storage.local.get(['firebaseToken'], (result) => {
+      resolve(result.firebaseToken || null);
+    });
+  });
+};
+
+// ─────────────────────────────────────────────
+// SYNC TO API
+// Sends offers to backend API with authentication
+// ─────────────────────────────────────────────
+const syncToAPI = async (offers, token) => {
+  const response = await fetch(`${API_URL}/api/offers/sync`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'Authorization': `Bearer ${token}`,
+    },
+    body: JSON.stringify({ offers }),
+  });
+
+  if (!response.ok) {
+    const error = await response.json().catch(() => ({ error: 'Network error' }));
+    throw new Error(error.error || `HTTP ${response.status}`);
+  }
+
+  return response.json();
+};
+
+// ─────────────────────────────────────────────
 // PROCESS OFFERS
 // Called when a content script sends parsed offers
-// For now, just logs them - DB sync coming later
+// Now syncs to API instead of just local storage
 // ─────────────────────────────────────────────
 const processOffers = async (bank, cardName, rawOffers) => {
   if (!rawOffers?.length) {
@@ -36,11 +72,21 @@ const processOffers = async (bank, cardName, rawOffers) => {
   setBadgeSyncing();
 
   console.log(`[Background] Processing ${rawOffers.length} offers from ${bank} (${cardName})`);
-  console.table(rawOffers);
 
-  // TODO: Add database sync here
-  // For now, just store in chrome.storage for testing
+  // Check if user is logged in
+  const token = await getAuthToken();
+  if (!token) {
+    console.warn('[Background] User not logged in — cannot sync to API');
+    setBadgeError();
+    return { success: false, reason: 'not_logged_in' };
+  }
+
   try {
+    // Sync to API
+    const result = await syncToAPI(rawOffers, token);
+    console.log(`[Background] ✅ API sync successful:`, result);
+    
+    // Also store in local storage as backup
     await chrome.storage.local.set({
       [`offers_${bank}_${cardName}`]: {
         bank,
@@ -50,20 +96,19 @@ const processOffers = async (bank, cardName, rawOffers) => {
       }
     });
 
-    console.log(`[Background] Stored ${rawOffers.length} offers in local storage`);
     setBadgeSuccess(rawOffers.length);
-
     return { success: true, synced: rawOffers.length };
-  } catch (e) {
-    console.error('[Background] Failed to store offers:', e);
+
+  } catch (error) {
+    console.error('[Background] ❌ API sync failed:', error);
     setBadgeError();
-    return { success: false, reason: e.message };
+    return { success: false, reason: error.message };
   }
 };
 
 // ─────────────────────────────────────────────
 // MESSAGE LISTENER
-// Content scripts send messages to background
+// Content scripts and popup send messages to background
 // ─────────────────────────────────────────────
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 
@@ -88,6 +133,14 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       const offerKeys = Object.keys(items).filter(k => k.startsWith('offers_'));
       const allOffers = offerKeys.map(k => items[k]);
       sendResponse({ offers: allOffers });
+    });
+    return true;
+  }
+
+  // Popup requesting auth status
+  if (message.type === 'GET_AUTH_STATUS') {
+    getAuthToken().then(token => {
+      sendResponse({ loggedIn: !!token });
     });
     return true;
   }

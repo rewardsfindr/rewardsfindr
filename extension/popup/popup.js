@@ -1,155 +1,131 @@
 // ─────────────────────────────────────────────
 // POPUP SCRIPT
-// Runs only when user clicks the extension icon
-// Never handles auth or DB directly — always asks background via messages
-// Three states: loading → signedout → signedin
+// Handles UI interactions in the extension popup
 // ─────────────────────────────────────────────
 
-// ── DOM References ──────────────────────────
-const stateLoading  = document.getElementById('state-loading');
-const stateSignedOut = document.getElementById('state-signedout');
-const stateSignedIn  = document.getElementById('state-signedin');
-const btnSignIn      = document.getElementById('btn-signin');
-const btnSignOut     = document.getElementById('btn-signout');
-const userEmail      = document.getElementById('user-email');
-const cardList       = document.getElementById('card-list');
-const emptyState     = document.getElementById('empty-state');
+import { auth, signInWithPopup, signOut, provider } from '../lib/firebase.js';
 
-// ── State Management ─────────────────────────
-// Only one state visible at a time — hide all, show one
-const showState = (stateEl) => {
-  [stateLoading, stateSignedOut, stateSignedIn].forEach(el => {
-    el.classList.remove('active');
-  });
-  stateEl.classList.add('active');
+const states = {
+  loading: document.getElementById('state-loading'),
+  signedout: document.getElementById('state-signedout'),
+  signedin: document.getElementById('state-signedin'),
 };
 
-// ── Card List Renderer ───────────────────────
-// Renders synced cards with offer count and sync status
-const renderCards = (cards) => {
-  cardList.innerHTML = '';
-
-  if (!cards?.length) {
-    emptyState.style.display = 'block';
-    cardList.style.display = 'none';
-    return;
-  }
-
-  emptyState.style.display = 'none';
-  cardList.style.display = 'flex';
-
-  cards.forEach(card => {
-    const row = document.createElement('div');
-    row.className = 'card-row';
-
-    // Format last synced time
-    const lastSynced = card.lastSynced
-      ? formatTimeAgo(new Date(card.lastSynced))
-      : 'Never';
-
-    // Format card name from slug: chase_freedom_flex → Chase Freedom Flex
-    const displayName = card.cardId
-      .split('_')
-      .map(word => word.charAt(0).toUpperCase() + word.slice(1))
-      .join(' ');
-
-    // Badge based on sync status
-    const badgeClass = card.syncStatus === 'success'
-      ? 'badge-success'
-      : card.syncStatus === 'failed'
-      ? 'badge-failed'
-      : 'badge-pending';
-
-    const badgeText = card.syncStatus === 'success'
-      ? `${card.offerCount} offers`
-      : card.syncStatus === 'failed'
-      ? 'Failed'
-      : 'Pending';
-
-    row.innerHTML = `
-      <div class="card-info">
-        <div class="card-name">${displayName}</div>
-        <div class="card-meta">Last synced: ${lastSynced}</div>
-      </div>
-      <span class="card-badge ${badgeClass}">${badgeText}</span>
-    `;
-
-    cardList.appendChild(row);
-  });
+const elements = {
+  btnSignin: document.getElementById('btn-signin'),
+  btnSignout: document.getElementById('btn-signout'),
+  userEmail: document.getElementById('user-email'),
+  cardList: document.getElementById('card-list'),
+  emptyState: document.getElementById('empty-state'),
 };
 
-// ── Time Formatter ───────────────────────────
-// "2 hrs ago", "Just now", "3 days ago"
-// Keeps the UI human-readable without a date library
-const formatTimeAgo = (date) => {
-  const seconds = Math.floor((new Date() - date) / 1000);
-
-  if (seconds < 60)   return 'Just now';
-  if (seconds < 3600) return `${Math.floor(seconds / 60)} min ago`;
-  if (seconds < 86400) return `${Math.floor(seconds / 3600)} hrs ago`;
-  return `${Math.floor(seconds / 86400)} days ago`;
+// ─────────────────────────────────────────────
+// STATE MANAGEMENT
+// ─────────────────────────────────────────────
+const showState = (stateName) => {
+  Object.values(states).forEach(el => el.classList.remove('active'));
+  states[stateName]?.classList.add('active');
 };
 
-// ── Init ─────────────────────────────────────
-// On popup open: check auth state, then render appropriate state
-const init = () => {
-  showState(stateLoading);
+// ─────────────────────────────────────────────
+// AUTH HELPERS
+// ─────────────────────────────────────────────
+const handleSignIn = async () => {
+  try {
+    elements.btnSignin.disabled = true;
+    elements.btnSignin.textContent = 'Signing in...';
 
-  chrome.runtime.sendMessage({ type: 'GET_USER' }, (response) => {
-    if (chrome.runtime.lastError) {
-      console.error('[Popup] GET_USER error:', chrome.runtime.lastError);
-      showState(stateSignedOut);
-      return;
-    }
+    const result = await signInWithPopup(auth, provider);
+    const token = await result.user.getIdToken();
 
-    if (!response?.user) {
-      showState(stateSignedOut);
-      return;
-    }
-
-    // User is signed in — show their email and sync status
-    userEmail.textContent = response.user.email;
-
-    chrome.runtime.sendMessage({ type: 'GET_SYNC_STATUS' }, (syncResponse) => {
-      if (chrome.runtime.lastError) {
-        console.error('[Popup] GET_SYNC_STATUS error:', chrome.runtime.lastError);
-        renderCards([]);
-      } else {
-        renderCards(syncResponse?.cards || []);
-      }
-      showState(stateSignedIn);
+    // Store token in chrome.storage for background script
+    await chrome.storage.local.set({ 
+      firebaseToken: token,
+      userEmail: result.user.email,
     });
-  });
+
+    console.log('✅ Signed in:', result.user.email);
+    loadDashboard();
+
+  } catch (error) {
+    console.error('❌ Sign in failed:', error);
+    alert(`Sign in failed: ${error.message}`);
+    elements.btnSignin.disabled = false;
+    elements.btnSignin.textContent = 'Sign in with Google';
+  }
 };
 
-// ── Sign In ───────────────────────────────────
-btnSignIn.addEventListener('click', () => {
-  btnSignIn.disabled = true;
-  btnSignIn.textContent = 'Signing in…';
+const handleSignOut = async () => {
+  try {
+    await signOut(auth);
+    await chrome.storage.local.remove(['firebaseToken', 'userEmail']);
+    console.log('✅ Signed out');
+    showState('signedout');
+  } catch (error) {
+    console.error('❌ Sign out failed:', error);
+    alert(`Sign out failed: ${error.message}`);
+  }
+};
 
-  chrome.runtime.sendMessage({ type: 'SIGN_IN' }, (response) => {
-    if (chrome.runtime.lastError || !response?.user) {
-      console.error('[Popup] Sign in failed:', chrome.runtime.lastError);
-      btnSignIn.disabled = false;
-      btnSignIn.textContent = 'Sign in with Google';
+// ─────────────────────────────────────────────
+// LOAD DASHBOARD
+// ─────────────────────────────────────────────
+const loadDashboard = async () => {
+  showState('signedin');
+
+  // Get user email from storage
+  const { userEmail } = await chrome.storage.local.get(['userEmail']);
+  elements.userEmail.textContent = userEmail || 'Not signed in';
+
+  // Get synced offers from storage
+  chrome.runtime.sendMessage({ type: 'GET_OFFERS' }, (response) => {
+    const offers = response?.offers || [];
+
+    if (offers.length === 0) {
+      elements.cardList.style.display = 'none';
+      elements.emptyState.style.display = 'block';
       return;
     }
 
-    // Signed in successfully — re-init to show signed-in state
-    init();
-  });
-});
+    elements.cardList.style.display = 'flex';
+    elements.emptyState.style.display = 'none';
 
-// ── Sign Out ──────────────────────────────────
-btnSignOut.addEventListener('click', () => {
-  chrome.runtime.sendMessage({ type: 'SIGN_OUT' }, () => {
-    showState(stateSignedOut);
+    // Render card list
+    elements.cardList.innerHTML = offers.map(item => {
+      const syncedDate = new Date(item.syncedAt).toLocaleDateString();
+      return `
+        <div class="card-row">
+          <div class="card-info">
+            <div class="card-name">${item.cardName}</div>
+            <div class="card-meta">${item.bank} • ${item.offers.length} offers • ${syncedDate}</div>
+          </div>
+          <span class="card-badge badge-success">✓</span>
+        </div>
+      `;
+    }).join('');
   });
-});
+};
 
-// ── Boot ──────────────────────────────────────
-// Small delay ensures background service worker is ready
-// before popup tries to message it
-document.addEventListener('DOMContentLoaded', () => {
-  setTimeout(init, 100);
-});
+// ─────────────────────────────────────────────
+// CHECK AUTH STATUS
+// ─────────────────────────────────────────────
+const checkAuthStatus = async () => {
+  const { firebaseToken } = await chrome.storage.local.get(['firebaseToken']);
+
+  if (firebaseToken) {
+    loadDashboard();
+  } else {
+    showState('signedout');
+  }
+};
+
+// ─────────────────────────────────────────────
+// EVENT LISTENERS
+// ─────────────────────────────────────────────
+elements.btnSignin.addEventListener('click', handleSignIn);
+elements.btnSignout.addEventListener('click', handleSignOut);
+
+// ─────────────────────────────────────────────
+// BOOT
+// ─────────────────────────────────────────────
+checkAuthStatus();
