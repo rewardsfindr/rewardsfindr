@@ -7,7 +7,7 @@
 
 // ── Constants ────────────────────────────────
 const BANK = 'chase';
-const PARSE_DELAY_MS = 2000; // Chase renders offers via React — wait for DOM to settle
+const PARSE_DELAY_MS = 3000; // Chase renders offers via React — wait for DOM to settle
 
 // ── Category Inference ───────────────────────
 // Chase doesn't always label categories explicitly
@@ -46,7 +46,7 @@ const inferCategory = (merchantName) => {
 const parseCashback = (text) => {
   if (!text) return { cashbackAmount: 0, cashbackType: 'fixed' };
 
-  // Percent format: "5% back"
+  // Percent format: "5% back", "30% cash back"
   const percentMatch = text.match(/(\d+(?:\.\d+)?)\s*%/);
   if (percentMatch) {
     return {
@@ -65,34 +65,6 @@ const parseCashback = (text) => {
   }
 
   return { cashbackAmount: 0, cashbackType: 'fixed' };
-};
-
-// ── Parse Minimum Spend ───────────────────────
-// Handles: "on $50 or more", "when you spend $50+"
-const parseMinimumSpend = (text) => {
-  if (!text) return 0;
-  const match = text.match(/\$(\d+(?:\.\d+)?)/);
-  return match ? parseFloat(match[1]) : 0;
-};
-
-// ── Parse Expiry Date ─────────────────────────
-// Handles: "Expires 03/31/2026", "Valid through March 31, 2026"
-const parseExpiry = (text) => {
-  if (!text) return null;
-
-  // MM/DD/YYYY format
-  const slashMatch = text.match(/(\d{1,2})\/(\d{1,2})\/(\d{4})/);
-  if (slashMatch) {
-    return new Date(`${slashMatch[3]}-${slashMatch[1].padStart(2,'0')}-${slashMatch[2].padStart(2,'0')}`).toISOString();
-  }
-
-  // "Month DD, YYYY" format
-  const wordMatch = text.match(/([A-Za-z]+)\s+(\d{1,2}),?\s+(\d{4})/);
-  if (wordMatch) {
-    return new Date(`${wordMatch[1]} ${wordMatch[2]}, ${wordMatch[3]}`).toISOString();
-  }
-
-  return null;
 };
 
 // ── Detect Card Name ──────────────────────────
@@ -121,19 +93,12 @@ const detectCardName = () => {
 
 // ── Main Parser ───────────────────────────────
 // Chase renders offers as cards in a grid
-// Each offer card contains merchant name, offer description, expiry
+// Each offer card contains merchant name, offer description
 const parseChaseOffers = () => {
   const offers = [];
 
-  // Chase offer card selectors — ordered by specificity
-  // Multiple selectors handle different Chase page versions
-  const offerCards = document.querySelectorAll([
-    '[data-testid="offer-card"]',
-    '[class*="offerCard"]',
-    '[class*="offer-card"]',
-    '.offers-container .offer',
-    '[class*="OfferTile"]',
-  ].join(', '));
+  // New Chase DOM structure (2024+)
+  const offerCards = document.querySelectorAll('[data-testid="offer-tile-grid-item-container"]');
 
   console.log(`[RewardsFindr] Found ${offerCards.length} offer elements on Chase page`);
 
@@ -144,69 +109,40 @@ const parseChaseOffers = () => {
 
   offerCards.forEach((card, index) => {
     try {
-      // Merchant name
-      const merchantEl = card.querySelector([
-        '[data-testid="offer-merchant-name"]',
-        '[class*="merchantName"]',
-        '[class*="merchant-name"]',
-        'h3',
-        'h4',
-        '.offer-title',
-      ].join(', '));
-
+      // Merchant name - in the span with class containing "semanticColorTextRegular"
+      const merchantEl = card.querySelector('.mds-body-small-heavier');
       const merchantName = merchantEl?.textContent?.trim();
+      
       if (!merchantName) {
         console.warn(`[RewardsFindr] Skipping offer ${index} — no merchant name found`);
         return;
       }
 
-      // Offer description (contains cashback amount)
-      const descEl = card.querySelector([
-        '[data-testid="offer-description"]',
-        '[class*="offerDescription"]',
-        '[class*="offer-description"]',
-        '[class*="rewardText"]',
-        'p',
-      ].join(', '));
-
+      // Offer description (cashback amount) - in the larger text
+      const descEl = card.querySelector('.mds-body-large-heavier');
       const description = descEl?.textContent?.trim() || '';
       const { cashbackAmount, cashbackType } = parseCashback(description);
 
-      // Minimum spend
-      const minimumSpend = parseMinimumSpend(description);
-
-      // Expiry date
-      const expiryEl = card.querySelector([
-        '[data-testid="offer-expiry"]',
-        '[class*="expiryDate"]',
-        '[class*="expiry-date"]',
-        '[class*="validThrough"]',
-        '.offer-expiry',
-        'time',
-      ].join(', '));
-
-      const expiryDate = parseExpiry(expiryEl?.textContent?.trim() || '');
-
-      // Activation status
-      const activateBtn = card.querySelector('[data-testid="activate-button"], [class*="activateBtn"], button');
-      const isActivated = activateBtn
-        ? activateBtn.textContent?.toLowerCase().includes('added') ||
-          activateBtn.textContent?.toLowerCase().includes('activated')
-        : false;
+      // Check if already activated (button shows plus icon = not activated)
+      const addButton = card.querySelector('svg');
+      const isActivated = !addButton; // If no add button, already activated
 
       // Infer category from merchant name
       const category = inferCategory(merchantName);
+
+      // No expiry date visible in this DOM structure
+      const expiryDate = null;
 
       offers.push({
         merchantName,
         offerDescription: description,
         cashbackAmount,
         cashbackType,
-        minimumSpend,
+        minimumSpend: 0, // Not visible in this structure
         expiryDate,
         category,
         isActivated,
-        activateButton: activateBtn, // Store reference for activation
+        cardElement: card, // Store reference for activation
       });
 
     } catch (e) {
@@ -241,7 +177,7 @@ const syncOffers = (cardName, offers) => {
 
 // ── Activate All Offers ───────────────────────
 const activateAllOffers = async (offers) => {
-  const unactivatedOffers = offers.filter(o => !o.isActivated && o.activateButton);
+  const unactivatedOffers = offers.filter(o => !o.isActivated && o.cardElement);
   
   if (unactivatedOffers.length === 0) {
     alert('All offers are already activated! ✓');
@@ -255,17 +191,25 @@ const activateAllOffers = async (offers) => {
 
   for (const offer of unactivatedOffers) {
     try {
-      // Scroll button into view
-      offer.activateButton.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      // Find the clickable tile
+      const tile = offer.cardElement.querySelector('[data-testid="commerce-tile"]');
       
-      // Wait a bit for scroll
+      if (!tile) {
+        failed++;
+        continue;
+      }
+      
+      // Scroll into view
+      tile.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      
+      // Wait for scroll
       await new Promise(resolve => setTimeout(resolve, 300));
       
-      // Click the activate button
-      offer.activateButton.click();
+      // Click the tile
+      tile.click();
       
-      // Wait for activation to complete
-      await new Promise(resolve => setTimeout(resolve, 500));
+      // Wait for activation
+      await new Promise(resolve => setTimeout(resolve, 800));
       
       activated++;
       console.log(`[RewardsFindr] ✓ Activated: ${offer.merchantName}`);
@@ -286,7 +230,7 @@ const createFloatingButton = (offers) => {
   if (existing) existing.remove();
 
   // Count unactivated offers
-  const unactivatedCount = offers.filter(o => !o.isActivated && o.activateButton).length;
+  const unactivatedCount = offers.filter(o => !o.isActivated && o.cardElement).length;
   
   if (unactivatedCount === 0) {
     console.log('[RewardsFindr] All offers already activated — not showing button');
@@ -354,9 +298,6 @@ const createFloatingButton = (offers) => {
 };
 
 // ── Boot ──────────────────────────────────────
-// Chase uses React — DOM isn't ready at document_idle sometimes
-// We wait PARSE_DELAY_MS then parse once
-// MutationObserver would be more reliable but adds complexity — revisit if needed
 const boot = () => {
   console.log('[RewardsFindr] Chase content script loaded — waiting for DOM…');
 
