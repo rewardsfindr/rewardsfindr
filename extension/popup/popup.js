@@ -3,7 +3,7 @@
 // Handles UI interactions in the extension popup
 // ─────────────────────────────────────────────
 
-import { auth, signInWithPopup, signOut, provider } from '../lib/firebase.js';
+import { signInWithGoogle, signOut } from '../lib/auth.js';
 
 const states = {
   loading: document.getElementById('state-loading'),
@@ -35,16 +35,17 @@ const handleSignIn = async () => {
     elements.btnSignin.disabled = true;
     elements.btnSignin.textContent = 'Signing in...';
 
-    const result = await signInWithPopup(auth, provider);
-    const token = await result.user.getIdToken();
+    const authData = await signInWithGoogle();
 
-    // Store token in chrome.storage for background script
+    // Store auth data in chrome.storage for background script
     await chrome.storage.local.set({ 
-      firebaseToken: token,
-      userEmail: result.user.email,
+      firebaseToken: authData.firebaseToken,
+      refreshToken: authData.refreshToken,
+      userEmail: authData.email,
+      userName: authData.name,
     });
 
-    console.log('✅ Signed in:', result.user.email);
+    console.log('✅ Signed in:', authData.email);
     loadDashboard();
 
   } catch (error) {
@@ -57,8 +58,8 @@ const handleSignIn = async () => {
 
 const handleSignOut = async () => {
   try {
-    await signOut(auth);
-    await chrome.storage.local.remove(['firebaseToken', 'userEmail']);
+    await signOut();
+    await chrome.storage.local.remove(['firebaseToken', 'refreshToken', 'userEmail', 'userName']);
     console.log('✅ Signed out');
     showState('signedout');
   } catch (error) {
