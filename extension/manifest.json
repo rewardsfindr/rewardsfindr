@@ -27,6 +27,7 @@
   "content_scripts": [
     {
       "matches": [
+        "https://*.chase.com/web/auth/dashboard*",
         "https://*.chase.com/digital/offers*",
         "https://*.chase.com/*offers*"
       ],
@@ -57,7 +58,7 @@
   ],
 
   "oauth2": {
-    "client_id": "1051620863746-vn8jh0v6b4c5k3l2m1n0o9p8q7r6s5t4.apps.googleusercontent.com",
+    "client_id": "963869613685-scqumt7gu71lorarafru2gbfe41viuip.apps.googleusercontent.com",
     "scopes": [
       "https://www.googleapis.com/auth/userinfo.email",
       "https://www.googleapis.com/auth/userinfo.profile"
