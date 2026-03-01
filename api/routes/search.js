@@ -3,8 +3,8 @@
 // Handle store search and card recommendations
 // ─────────────────────────────────────────────
 import express from 'express';
-import { CARDS, STORE_CATEGORY_MAP } from '../../../shared/constants.js';
-import { buildStoreLookup, findBestStoreMatch, buildResultsForCategory } from '../../../shared/offerUtils.js';
+import { CARDS } from '../../shared/constants.js';
+import { buildStoreLookup, findBestStoreMatch, buildResultsForCategory } from '../../shared/offerUtils.js';
 
 const router = express.Router();
 const STORE_LOOKUP = buildStoreLookup();
@@ -24,10 +24,13 @@ router.get('/', (req, res) => {
       });
     }
 
+    console.log(`🔍 Search query: "${query}"`);
+
     // Find best store match
     const match = findBestStoreMatch(query, STORE_LOOKUP);
 
     if (!match) {
+      console.log(`❌ No match found for "${query}"`);
       return res.json({
         store: null,
         category: null,
@@ -36,6 +39,8 @@ router.get('/', (req, res) => {
         message: `No matches found for "${query}"`
       });
     }
+
+    console.log(`✅ Match found: ${match.displayName} (${match.category})`);
 
     // Build card results for the matched category
     const cards = buildResultsForCategory(match.category, CARDS);
