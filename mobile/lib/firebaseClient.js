@@ -3,7 +3,7 @@
 // Firebase JS SDK initialization for React Native/Expo
 // Uses EXPO_PUBLIC_ env vars injected at build time
 // ─────────────────────────────────────────────
-import { initializeApp } from 'firebase/app';
+import { initializeApp, getApps } from 'firebase/app';
 import { getAuth } from 'firebase/auth';
 import { getFirestore } from 'firebase/firestore';
 
@@ -17,15 +17,54 @@ const firebaseConfig = {
   appId: process.env.EXPO_PUBLIC_FIREBASE_APP_ID,
 };
 
-// Validate required config
-if (!firebaseConfig.apiKey || !firebaseConfig.projectId) {
-  console.error('❌ Missing Firebase configuration. Check your .env file.');
-  throw new Error('Firebase configuration incomplete');
+// Lazy initialization - only initialize when actually needed
+let app;
+let authInstance;
+let dbInstance;
+
+function initializeFirebase() {
+  if (app) return; // Already initialized
+  
+  // Validate required config
+  if (!firebaseConfig.apiKey || !firebaseConfig.projectId) {
+    console.error('❌ Missing Firebase configuration. Check your .env file.');
+    throw new Error('Firebase configuration incomplete');
+  }
+
+  // Check if already initialized
+  const apps = getApps();
+  if (apps.length > 0) {
+    app = apps[0];
+  } else {
+    app = initializeApp(firebaseConfig);
+  }
+  
+  authInstance = getAuth(app);
+  dbInstance = getFirestore(app);
+  
+  console.log('✅ Firebase initialized for project:', firebaseConfig.projectId);
 }
 
-const app = initializeApp(firebaseConfig);
+// Export getters that initialize on first access
+export const getAuthInstance = () => {
+  if (!authInstance) initializeFirebase();
+  return authInstance;
+};
 
-export const auth = getAuth(app);
-export const db = getFirestore(app);
+export const getDbInstance = () => {
+  if (!dbInstance) initializeFirebase();
+  return dbInstance;
+};
 
-console.log('✅ Firebase initialized for project:', firebaseConfig.projectId);
+// Legacy exports for backward compatibility
+export const auth = new Proxy({}, {
+  get(target, prop) {
+    return getAuthInstance()[prop];
+  }
+});
+
+export const db = new Proxy({}, {
+  get(target, prop) {
+    return getDbInstance()[prop];
+  }
+});
