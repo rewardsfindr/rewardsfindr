@@ -1,103 +1,107 @@
 // ─────────────────────────────────────────────
 // OFFERS ROUTES
-// Handle offer syncing and retrieval
+// Handle syncing offers from Chrome extension
 // ─────────────────────────────────────────────
 import express from 'express';
-import { db } from '../config/firebase.js';
-import { verifyToken } from '../middleware/auth.js';
+import admin from '../firebase.js';
+import { generateOfferId, normalizeMerchant } from '../../shared/offerUtils.js';
 
 const router = express.Router();
+const db = admin.firestore();
 
 /**
  * POST /api/offers/sync
- * Accept scraped offers from Chrome extension
- * Protected route - requires valid Firebase token
+ * Sync offers from Chrome extension to Firestore
+ * Requires Firebase authentication
  */
-router.post('/sync', verifyToken, async (req, res) => {
+router.post('/sync', async (req, res) => {
   try {
-    const { offers } = req.body;
-    const userId = req.user.uid;
+    // Get Firebase ID token from Authorization header
+    const authHeader = req.headers.authorization;
+    if (!authHeader?.startsWith('Bearer ')) {
+      return res.status(401).json({ error: 'Missing or invalid authorization header' });
+    }
 
-    if (!Array.isArray(offers) || offers.length === 0) {
+    const idToken = authHeader.split('Bearer ')[1];
+
+    // Verify Firebase token
+    let decodedToken;
+    try {
+      decodedToken = await admin.auth().verifyIdToken(idToken);
+    } catch (error) {
+      console.error('Token verification failed:', error);
+      return res.status(401).json({ error: 'Invalid authentication token' });
+    }
+
+    const userId = decodedToken.uid;
+    const { offers } = req.body;
+
+    if (!offers || !Array.isArray(offers)) {
       return res.status(400).json({ error: 'Invalid offers data' });
     }
 
-    // Validate each offer has required fields
+    console.log(`🔄 Syncing ${offers.length} offers for user ${userId}`);
+
+    // Process offers and write to Firestore
+    const batch = db.batch();
+    let syncedCount = 0;
+    let skippedCount = 0;
+
     for (const offer of offers) {
-      if (!offer.merchant || !offer.bank || !offer.amount) {
-        return res.status(400).json({ 
-          error: 'Each offer must have merchant, bank, and amount' 
-        });
+      try {
+        // Generate deterministic offer ID
+        const offerId = generateOfferId(
+          offer.merchantName,
+          offer.cashbackAmount,
+          offer.expiryDate || new Date(Date.now() + 90 * 24 * 60 * 60 * 1000).toISOString() // Default 90 days if no expiry
+        );
+
+        // Normalize merchant name for search matching
+        const normalizedMerchant = normalizeMerchant(offer.merchantName);
+
+        // Prepare offer document
+        const offerDoc = {
+          offerId,
+          userId,
+          merchantName: offer.merchantName,
+          normalizedMerchant,
+          offerDescription: offer.offerDescription || '',
+          cashbackAmount: offer.cashbackAmount || 0,
+          cashbackType: offer.cashbackType || 'percent',
+          minimumSpend: offer.minimumSpend || 0,
+          category: offer.category || 'other',
+          expiryDate: offer.expiryDate || null,
+          isActivated: offer.isActivated || false,
+          bank: 'chase', // TODO: Get from request
+          syncedAt: admin.firestore.FieldValue.serverTimestamp(),
+        };
+
+        // Use offerId as document ID to prevent duplicates
+        const offerRef = db.collection('offers').doc(offerId);
+        batch.set(offerRef, offerDoc, { merge: true });
+        syncedCount++;
+
+      } catch (error) {
+        console.error(`❌ Error processing offer ${offer.merchantName}:`, error);
+        skippedCount++;
       }
     }
 
-    // Store offers in Firestore
-    const batch = db.batch();
-    const timestamp = new Date();
-
-    for (const offer of offers) {
-      // Generate unique offer ID based on merchant and bank
-      const offerId = `${offer.bank}_${offer.merchant}_${Date.now()}`.toLowerCase().replace(/\s+/g, '_');
-      const offerRef = db.collection('users').doc(userId).collection('offers').doc(offerId);
-      
-      batch.set(offerRef, {
-        ...offer,
-        activatedAt: timestamp,
-        source: 'extension',
-        synced: true
-      });
-    }
-
+    // Commit batch write
     await batch.commit();
 
-    res.json({ 
-      success: true, 
-      count: offers.length,
-      message: `${offers.length} offers synced successfully` 
-    });
-  } catch (error) {
-    console.error('Offer sync error:', error);
-    res.status(500).json({ error: 'Failed to sync offers' });
-  }
-});
+    console.log(`✅ Sync complete: ${syncedCount} synced, ${skippedCount} skipped`);
 
-/**
- * GET /api/offers/:userId
- * Retrieve all offers for a user
- * Protected route - requires valid Firebase token
- */
-router.get('/:userId', verifyToken, async (req, res) => {
-  try {
-    const { userId } = req.params;
-
-    // Users can only access their own offers
-    if (userId !== req.user.uid) {
-      return res.status(403).json({ error: 'Unauthorized access' });
-    }
-
-    const offersSnapshot = await db
-      .collection('users')
-      .doc(userId)
-      .collection('offers')
-      .orderBy('activatedAt', 'desc')
-      .get();
-
-    const offers = [];
-    offersSnapshot.forEach(doc => {
-      offers.push({
-        id: doc.id,
-        ...doc.data()
-      });
-    });
-
-    res.json({ 
+    res.json({
       success: true,
-      count: offers.length,
-      offers 
+      synced: syncedCount,
+      skipped: skippedCount,
+      total: offers.length,
     });
+
   } catch (error) {
-    console.error('Get offers error:', error);
-    res.status(500).json({ error: 'Failed to retrieve offers' });
+    console.error('❌ Offers sync error:', error);
+    res.status(500).json({ error: 'Failed to sync offers' });
   }
 });
 
