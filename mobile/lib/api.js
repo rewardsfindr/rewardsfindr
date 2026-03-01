@@ -5,6 +5,10 @@
 
 const API_URL = process.env.EXPO_PUBLIC_API_URL || 'http://localhost:3001';
 
+// Debug: Log the API URL being used
+console.log('🔧 API_URL configured as:', API_URL);
+console.log('🔧 EXPO_PUBLIC_API_URL env var:', process.env.EXPO_PUBLIC_API_URL);
+
 /**
  * Search for best credit card rewards for a store
  * @param {string} storeName - Store name to search
@@ -15,19 +19,31 @@ export async function searchStore(storeName) {
     throw new Error('Store name is required');
   }
 
-  const response = await fetch(`${API_URL}/api/search?q=${encodeURIComponent(storeName)}`, {
-    method: 'GET',
-    headers: {
-      'Content-Type': 'application/json',
-    },
-  });
+  const url = `${API_URL}/api/search?q=${encodeURIComponent(storeName)}`;
+  console.log('🔍 Fetching:', url);
 
-  if (!response.ok) {
-    const error = await response.json().catch(() => ({ message: 'Network error' }));
-    throw new Error(error.message || `HTTP ${response.status}`);
+  try {
+    const response = await fetch(url, {
+      method: 'GET',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+    });
+
+    console.log('📡 Response status:', response.status);
+
+    if (!response.ok) {
+      const error = await response.json().catch(() => ({ message: 'Network error' }));
+      throw new Error(error.message || `HTTP ${response.status}`);
+    }
+
+    const data = await response.json();
+    console.log('✅ Response data:', data);
+    return data;
+  } catch (error) {
+    console.error('❌ Fetch error:', error);
+    throw error;
   }
-
-  return response.json();
 }
 
 /**
@@ -35,7 +51,10 @@ export async function searchStore(storeName) {
  * @returns {Promise<{status: string, timestamp: string}>}
  */
 export async function healthCheck() {
-  const response = await fetch(`${API_URL}/api/health`, {
+  const url = `${API_URL}/api/health`;
+  console.log('🏥 Health check:', url);
+
+  const response = await fetch(url, {
     method: 'GET',
   });
 
