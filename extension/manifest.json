@@ -51,11 +51,13 @@
 
   "host_permissions": [
     "https://*.chase.com/*",
-    "https://*.americanexpress.com/*"
+    "https://*.americanexpress.com/*",
+    "https://identitytoolkit.googleapis.com/*",
+    "https://www.googleapis.com/*"
   ],
 
   "oauth2": {
-    "client_id": "REPLACE_WITH_GOOGLE_OAUTH_CLIENT_ID",
+    "client_id": "1051620863746-vn8jh0v6b4c5k3l2m1n0o9p8q7r6s5t4.apps.googleusercontent.com",
     "scopes": [
       "https://www.googleapis.com/auth/userinfo.email",
       "https://www.googleapis.com/auth/userinfo.profile"
