@@ -1,133 +1,142 @@
-import React, { useState, useEffect } from 'react';
-import { Loader, AlertCircle } from 'lucide-react';
-import { CARDS } from './shared/constants.js';
-import { useSearch } from './hooks/useSearch.js';
-import { useAuth }   from './hooks/useAuth.js';
-import { Header }        from './components/Header.js';
-import { SearchBar }     from './components/SearchBar.js';
-import { MatchBanner }   from './components/MatchBanner.js';
-import { ResultsHeader } from './components/ResultsHeader.js';
-import { ResultCard }    from './components/ResultCard.js';
+import React from 'react';
 import './App.css';
 
 function App() {
-  const [loading, setLoading] = useState(true);
-  const [error, setError]     = useState(null);
-
-  const { user, authLoading, signIn, signOut } = useAuth();
-
-  const {
-    searchTerm,
-    setSearchTerm,
-    selectedStore,
-    results,
-    matchMeta,
-    searching,
-    handleSearch,
-    handleQuickSearch,
-    clearSearch,
-    storeLookupSize,
-  } = useSearch();
-
-  useEffect(() => {
-    try {
-      if (!CARDS.length) throw new Error('Card data failed to load.');
-      setLoading(false);
-    } catch (e) {
-      console.error('Data load error:', e);
-      setError(e.message);
-      setLoading(false);
-    }
-  }, []);
-
-  // ─── Loading (data or auth not yet resolved) ───────────────────────────
-  if (loading || authLoading) {
-    return (
-      <div className="fullscreen-center">
-        <div className="loading-box">
-          <Loader className="loading-icon" size={48} />
-          <p>Loading rewards data…</p>
-        </div>
-      </div>
-    );
-  }
-
-  // ─── Error ──────────────────────────────────────────────────────────
-  if (error) {
-    return (
-      <div className="fullscreen-center">
-        <div className="error-box">
-          <AlertCircle color="#ef4444" size={48} />
-          <h2>Something went wrong</h2>
-          <p>{error}</p>
-          <button className="btn-retry" onClick={() => window.location.reload()}>
-            Retry
-          </button>
-        </div>
-      </div>
-    );
-  }
-
-  // ─── Main UI ────────────────────────────────────────────────────────────
   return (
-    <div className="page-shell">
-      <div className="page-content">
-
-        <Header
-          storeLookupSize={storeLookupSize}
-          onSignIn={signIn}
-          onSignOut={signOut}
-          user={user}
-        />
-
-        <SearchBar
-          searchTerm={searchTerm}
-          onChange={(val) => {
-            setSearchTerm(val);
-            clearSearch();
-          }}
-          onSearch={handleSearch}
-          onQuickSearch={handleQuickSearch}
-          searching={searching}
-        />
-
-        <MatchBanner matchMeta={matchMeta} searching={searching} />
-
-        {/* Store not found */}
-        {selectedStore && !searching && results.length === 0 && (
-          <div className="not-found-box">
-            <AlertCircle color="#9ca3af" size={40} />
-            <h3>Store not found</h3>
-            <p>We don't have "{selectedStore}" yet. Try a different name or check spelling.</p>
-          </div>
-        )}
-
-        {/* Results */}
-        {results.length > 0 && !searching && (
-          <>
-            <ResultsHeader selectedStore={selectedStore} matchMeta={matchMeta} />
-            <div className="results-grid">
-              {results.slice(0, 3).map((card, idx) => (
-                <ResultCard key={card.id} card={card} rank={idx} />
-              ))}
-            </div>
-          </>
-        )}
-
-        {/* How it works */}
-        <div className="panel how-it-works">
-          <h3>How it works</h3>
-          <p>
-            Search any store → see which credit cards give the best rewards there.
-            No login. No tracking. Data from public card terms.
+    <div className="landing-page">
+      {/* Hero Section */}
+      <section className="hero">
+        <div className="container">
+          <h1>Never miss the best credit card reward again</h1>
+          <p className="hero-subtitle">
+            RewardsFindr automatically tracks your bank offers and shows you which card to use at any store.
+            Save money on every purchase.
           </p>
-          <div className="how-it-works-meta">
-            Hobby project ·{' '}
-            <a href="mailto:rewardsfindr@gmail.com">rewardsfindr@gmail.com</a>
+          <div className="hero-cta">
+            <button className="btn-primary">Download for iOS</button>
+            <button className="btn-secondary">Download for Android</button>
+          </div>
+          <div className="hero-image-placeholder">
+            {/* App screenshots will go here */}
+            <div className="screenshot-placeholder">App Screenshots Coming Soon</div>
           </div>
         </div>
+      </section>
 
-      </div>
+      {/* How It Works */}
+      <section className="how-it-works">
+        <div className="container">
+          <h2>How RewardsFindr Saves You Money</h2>
+          <div className="features-grid">
+            <div className="feature">
+              <div className="feature-number">1</div>
+              <h3>Install Chrome Extension</h3>
+              <p>
+                Our secure extension automatically syncs your Chase, Amex, and other bank offers.
+                No manual entry needed.
+              </p>
+            </div>
+            <div className="feature">
+              <div className="feature-number">2</div>
+              <h3>Search Any Store</h3>
+              <p>
+                Open the mobile app and search for any store you're shopping at - Target, Amazon, gas stations, restaurants.
+              </p>
+            </div>
+            <div className="feature">
+              <div className="feature-number">3</div>
+              <h3>See Best Card Instantly</h3>
+              <p>
+                Get personalized recommendations based on YOUR active offers. See exactly how much you'll save.
+              </p>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      {/* Money Savings Section */}
+      <section className="savings">
+        <div className="container">
+          <h2>Real Savings, Real Users</h2>
+          <div className="savings-stats">
+            <div className="stat">
+              <div className="stat-number">$50-500</div>
+              <div className="stat-label">Average yearly savings</div>
+            </div>
+            <div className="stat">
+              <div className="stat-number">5-15%</div>
+              <div className="stat-label">Cashback on purchases</div>
+            </div>
+            <div className="stat">
+              <div className="stat-number">3 sec</div>
+              <div className="stat-label">Time to find best card</div>
+            </div>
+          </div>
+          <div className="savings-example">
+            <h3>Example: Shopping at Target</h3>
+            <p>
+              Without RewardsFindr: Use any card → Get 1-2% back<br />
+              With RewardsFindr: See you have a Chase Freedom 5% Target offer → Get 5% back<br />
+              <strong>On $100 purchase: Save extra $3-4 every time</strong>
+            </p>
+          </div>
+        </div>
+      </section>
+
+      {/* Features List */}
+      <section className="features">
+        <div className="container">
+          <h2>Features</h2>
+          <ul className="features-list">
+            <li>✅ Auto-sync offers from Chase, Amex (Capital One coming soon)</li>
+            <li>✅ Search thousands of merchants instantly</li>
+            <li>✅ See personalized offers based on YOUR cards</li>
+            <li>✅ Works with rotating 5% categories (Chase Freedom, Discover)</li>
+            <li>✅ Privacy-focused - your data never leaves your device</li>
+            <li>✅ Free forever - no subscriptions, no ads</li>
+          </ul>
+        </div>
+      </section>
+
+      {/* FAQ Placeholder */}
+      <section className="faq">
+        <div className="container">
+          <h2>Frequently Asked Questions</h2>
+          <div className="faq-item">
+            <h3>Is RewardsFindr free?</h3>
+            <p>Yes! Completely free with no ads. Built as a hobby project to help people save money.</p>
+          </div>
+          <div className="faq-item">
+            <h3>Which banks are supported?</h3>
+            <p>Currently Chase and American Express. Capital One and Citi are coming soon.</p>
+          </div>
+          <div className="faq-item">
+            <h3>Is my data secure?</h3>
+            <p>
+              Absolutely. The extension only reads offer data from bank websites - never your account numbers,
+              transactions, or passwords. All data is stored securely in your private Firebase account.
+            </p>
+          </div>
+          <div className="faq-item">
+            <h3>How does it compare to credit card apps?</h3>
+            <p>
+              Bank apps show offers for ONE card at a time. RewardsFindr shows ALL your offers across ALL cards
+              when you search for a store, so you always pick the best one.
+            </p>
+          </div>
+        </div>
+      </section>
+
+      {/* Footer */}
+      <footer className="footer">
+        <div className="container">
+          <p>RewardsFindr - Find the best credit card rewards for any store</p>
+          <p>
+            <a href="mailto:rewardsfindr@gmail.com">rewardsfindr@gmail.com</a> · 
+            Hobby project by Rakesh Balasubramani
+          </p>
+        </div>
+      </footer>
     </div>
   );
 }
