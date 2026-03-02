@@ -1,0 +1,3 @@
+# Disable Vercel builds for this monorepo
+# Web deployments are handled in rewardsfindr-web repo
+*
