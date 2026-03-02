@@ -30,9 +30,9 @@ function App() {
           <div className="features-grid">
             <div className="feature">
               <div className="feature-number">1</div>
-              <h3>Install Chrome Extension</h3>
+              <h3>Connect Your Banks</h3>
               <p>
-                Our secure extension automatically syncs your Chase, Amex, and other bank offers.
+                Securely sync your Chase, Amex, and other bank offers directly in the app.
                 No manual entry needed.
               </p>
             </div>
@@ -40,7 +40,7 @@ function App() {
               <div className="feature-number">2</div>
               <h3>Search Any Store</h3>
               <p>
-                Open the mobile app and search for any store you're shopping at - Target, Amazon, gas stations, restaurants.
+                Before you shop, search for any store - Target, Amazon, gas stations, restaurants.
               </p>
             </div>
             <div className="feature">
@@ -92,7 +92,7 @@ function App() {
             <li>✅ Search thousands of merchants instantly</li>
             <li>✅ See personalized offers based on YOUR cards</li>
             <li>✅ Works with rotating 5% categories (Chase Freedom, Discover)</li>
-            <li>✅ Privacy-focused - your data never leaves your device</li>
+            <li>✅ Privacy-focused - your data is securely encrypted</li>
             <li>✅ Free forever - no subscriptions, no ads</li>
           </ul>
         </div>
@@ -113,7 +113,7 @@ function App() {
           <div className="faq-item">
             <h3>Is my data secure?</h3>
             <p>
-              Absolutely. The extension only reads offer data from bank websites - never your account numbers,
+              Absolutely. The app only reads offer data from bank websites - never your account numbers,
               transactions, or passwords. All data is stored securely in your private Firebase account.
             </p>
           </div>
