@@ -104,7 +104,7 @@ function App() {
           <h2>Frequently Asked Questions</h2>
           <div className="faq-item">
             <h3>Is RewardsFindr free?</h3>
-            <p>Yes! Completely free with no ads. Built as a hobby project to help people save money.</p>
+            <p>Yes! Completely free with no ads or hidden fees.</p>
           </div>
           <div className="faq-item">
             <h3>Which banks are supported?</h3>
@@ -132,8 +132,7 @@ function App() {
         <div className="container">
           <p>RewardsFindr - Find the best credit card rewards for any store</p>
           <p>
-            <a href="mailto:rewardsfindr@gmail.com">rewardsfindr@gmail.com</a> · 
-            Hobby project by Rakesh Balasubramani
+            <a href="mailto:hello@rewardsfindr.com">hello@rewardsfindr.com</a>
           </p>
         </div>
       </footer>
