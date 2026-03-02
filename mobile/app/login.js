@@ -23,13 +23,27 @@ export default function LoginScreen() {
 
   const [request, response, promptAsync] = Google.useAuthRequest({
     webClientId: process.env.EXPO_PUBLIC_GOOGLE_CLIENT_ID,
+    androidClientId: process.env.EXPO_PUBLIC_GOOGLE_CLIENT_ID,
+    iosClientId: process.env.EXPO_PUBLIC_GOOGLE_CLIENT_ID,
+  }, {
+    useProxy: true, // Force use of https://auth.expo.io proxy instead of exp:// local redirect
   });
 
   useEffect(() => {
     if (response?.type === 'success') {
-      const { id_token } = response.params;
-      handleGoogleSignIn(id_token);
+      // Different response structure for web vs native
+      const idToken = response.params?.id_token || response.authentication?.idToken;
+      const accessToken = response.params?.access_token || response.authentication?.accessToken;
+      
+      if (idToken || accessToken) {
+        handleGoogleSignIn(idToken, accessToken);
+      } else {
+        console.error('[Login] No token in response:', response);
+        setError('Authentication failed. No token received.');
+        setLoading(false);
+      }
     } else if (response?.type === 'error') {
+      console.error('[Login] OAuth error:', response.error);
       setError('Google sign-in failed. Please try again.');
       setLoading(false);
     } else if (response?.type === 'dismiss') {
@@ -37,10 +51,10 @@ export default function LoginScreen() {
     }
   }, [response]);
 
-  const handleGoogleSignIn = async (idToken) => {
+  const handleGoogleSignIn = async (idToken, accessToken) => {
     try {
       const auth = getAuthInstance();
-      const credential = GoogleAuthProvider.credential(idToken);
+      const credential = GoogleAuthProvider.credential(idToken, accessToken);
       await signInWithCredential(auth, credential);
       // _layout.js onAuthStateChanged fires and redirects to '/' automatically
     } catch (err) {
@@ -80,7 +94,7 @@ export default function LoginScreen() {
           {loading ? (
             <ActivityIndicator color="#1f2937" />
           ) : (
-            <Text style={s.googleBtnText}>🔑  Continue with Google</Text>
+            <Text style={s.googleBtnText}>🔑  Continue with Google</Text>
           )}
         </TouchableOpacity>
 
