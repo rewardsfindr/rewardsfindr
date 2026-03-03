@@ -13,12 +13,15 @@
 ## Repository Structure (Updated Mar 2, 2026)
 
 **Main Monorepo:** https://github.com/rewardsfindr/rewardsfindr
-- API, Mobile App, Extension, Shared utilities
+- API, Mobile App, Shared utilities
 
 **Separate Repos:**
 - **Web Landing Page:** https://github.com/rewardsfindr/rewardsfindr-web
   - React landing page deployed on Vercel → rewardsfindr.com
   - Split out on Mar 2, 2026 to separate concerns
+- **Chrome Extension:** https://github.com/rewardsfindr/rewardsfindr-chrome-extension
+  - Manifest V3, scrapes Chase & Amex offers
+  - Split out on Mar 2, 2026
 
 **Coming Soon (Planned Splits):**
 - `rewardsfindr-mobile` - Standalone mobile app repo
@@ -40,7 +43,8 @@
 - **Auth:** Firebase JS SDK v10 (Google Sign-In)
 - **Deployment:** EAS (Expo Application Services)
 
-### Chrome Extension (Primary Focus)
+### Chrome Extension (Separate Repo)
+- **Repo:** https://github.com/rewardsfindr/rewardsfindr-chrome-extension
 - **Manifest:** V3
 - **Banks Supported:** Chase, Amex (Capital One planned)
 - **Auth:** chrome.identity + Firebase custom tokens
@@ -76,7 +80,7 @@ D:\RewardsFindr\rewardsfindr\
 ```
 ┌──────────────────┐     ┌──────────────────┐     ┌──────────────────┐
 │  Chrome Extension│     │   Mobile App     │     │  Landing Page    │
-│  (Manifest V3)   │     │  (Expo + EAS)    │     │  (React/Vercel)  │
+│  (Separate Repo) │     │  (Expo + EAS)    │     │  (React/Vercel)  │
 └────────┬─────────┘     └────────┬─────────┘     └──────────────────┘
          │                        │                   (separate repo)
          │   REST / HTTPS calls   │
@@ -103,13 +107,6 @@ D:\RewardsFindr\rewardsfindr\
 
 ```
 rewardsfindr/
-├── extension/              ← Chrome extension (Manifest V3)
-│   ├── manifest.json
-│   ├── background.js
-│   ├── content/
-│   │   ├── chase.js
-│   │   └── amex.js
-│   └── popup/
 ├── mobile/                 ← React Native + Expo app
 │   ├── app/
 │   ├── lib/
@@ -131,12 +128,14 @@ rewardsfindr/
 │   ├── .env.example
 │   └── .env                 ← gitignored, local only
 ├── shared/                  ← Top-level shared utilities
-├── src/shared/              ← Shared constants (used by extension/mobile)
+├── src/shared/              ← Shared constants (used by mobile)
 ├── .github/workflows/       ← CI/CD (tests)
 └── DEV_CONTEXT.md           ← This file
 ```
 
-**Note:** `/src`, `/public`, `package.json` removed Mar 2, 2026 (moved to rewardsfindr-web repo)
+**Note:**
+- `/extension` removed Mar 2, 2026 — moved to `rewardsfindr-chrome-extension` repo
+- `/src`, `/public`, `package.json` removed Mar 2, 2026 — moved to `rewardsfindr-web` repo
 
 ---
 
@@ -204,7 +203,7 @@ ALLOWED_ORIGINS
 ## Test Coverage
 
 ### Shared Utilities — Tests ✅
-- `src/shared/` — Constants and utilities (used by extension/mobile)
+- `src/shared/` — Constants and utilities (used by mobile)
 - Tested via monorepo test scripts
 
 ### API (`/api`) — **0 tests** ⚠️
@@ -219,20 +218,26 @@ ALLOWED_ORIGINS
 
 ## Recent Changes (Mar 2, 2026)
 
-### Repository Split
+### Extension Repo Split
+**Date:** March 2, 2026
+
+**What Changed:**
+- Split Chrome extension into separate `rewardsfindr-chrome-extension` repo
+- Removed `/extension` folder from monorepo
+- Updated DEV_CONTEXT.md to reflect new repo structure
+
+**Reason:** Separation of concerns — extension has its own release cycle and Chrome Web Store deployment independent of mobile/API.
+
+### Web Repo Split
 **Date:** March 2, 2026
 
 **What Changed:**
 - Split landing page into separate `rewardsfindr-web` repo
 - Cleaned monorepo: removed `/src`, `/public`, `package.json`, `vercel.json`, babel/jest configs
-- Kept `/src/shared` (used by extension and mobile)
-- Disabled Vercel builds on main repo (added `.vercelignore`)
+- Kept `/src/shared` (used by mobile)
 - Updated README to reflect monorepo structure
 
-**Reason:**
-- Separation of concerns: marketing site vs. app infrastructure
-- Cleaner development: each repo has focused purpose
-- Easier deployment: web auto-deploys independently
+**Reason:** Separation of concerns: marketing site vs. app infrastructure
 
 **PRs:**
 - PR #30: Remove web config files (package.json, babel, jest, vercel)
@@ -259,17 +264,18 @@ ALLOWED_ORIGINS
 ### Immediate (In Progress)
 1. ✅ **Node.js API backend** — Merged (PR #14, #15)
 2. ✅ **Mobile Firebase + API client** — Merged (PR #16)
-3. ✅ **Repo split** — Web moved to separate repo (PR #30, #31, #33)
-4. ⬜ **Mobile Google Sign-In UI** — Add auth screen with Firebase Google auth
-5. ⬜ **Extension auth flow** — Wire chrome.identity + Firebase custom tokens
-6. ⬜ **Extension offer sync** — POST to `/api/offers/sync` after scraping
+3. ✅ **Repo split: web** — Web moved to separate repo (PR #30, #31, #33)
+4. ✅ **Repo split: extension** — Extension moved to `rewardsfindr-chrome-extension`
+5. ⬜ **Mobile Google Sign-In UI** — Add auth screen with Firebase Google auth
+6. ⬜ **Extension auth flow** — Wire chrome.identity + Firebase custom tokens
+7. ⬜ **Extension offer sync** — POST to `/api/offers/sync` after scraping
 
 ### Post-MVP
-7. ⬜ **Add tests** — API endpoint tests (Jest + supertest)
-8. ⬜ **Deploy API** — Railway or Render with prod Firebase project
-9. ⬜ **EAS production builds** — Android/iOS app store builds
-10. ⬜ **Capital One scraper** — Add third bank to extension
-11. ⬜ **Consider further splits** — Move mobile/api to separate repos if needed
+8. ⬜ **Add tests** — API endpoint tests (Jest + supertest)
+9. ⬜ **Deploy API** — Railway or Render with prod Firebase project
+10. ⬜ **EAS production builds** — Android/iOS app store builds
+11. ⬜ **Capital One scraper** — Add third bank to extension
+12. ⬜ **Consider further splits** — Move mobile/api to separate repos if needed
 
 ---
 
@@ -284,6 +290,14 @@ npm run build      # production build
 ```
 Vercel auto-deploys `rewardsfindr-web` repo to rewardsfindr.com
 
+### Chrome Extension (Separate Repo)
+```bash
+cd ../rewardsfindr-chrome-extension
+cp config.example.js config.js
+# fill in config.js with Firebase credentials
+# Load unpacked in Chrome from repo root
+```
+
 ### Mobile App
 ```bash
 cd mobile
@@ -297,14 +311,6 @@ eas build --profile production --platform android   # prod build
 cd api
 npm run dev        # local with --watch
 npm start          # production
-```
-
-### Extension
-```bash
-cd extension
-npm install
-npm run build
-# Load unpacked in Chrome from extension/dist
 ```
 
 ---
