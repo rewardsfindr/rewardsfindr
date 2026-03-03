@@ -1,113 +1,131 @@
-# OAuth Fix - Switch to Development Build
+# OAuth Fix - Development Build Required
 
 ## Problem Identified
 
-The OAuth redirect URI mismatch is caused by using **Expo Go**, which always uses `exp://` scheme regardless of `app.json` configuration.
+**Root cause:** Google OAuth doesn't allow `exp://` redirect URIs (Expo Go scheme). You must use a development build with the proper `https://auth.expo.io/@rewardsfindr/rewardsfindr` redirect URI.
 
-**Current (broken):** `exp://192.168.0.103:8081`  
-**Expected:** `https://auth.expo.io/@rewardsfindr/rewardsfindr`
+**Current (Expo Go - broken):** `exp://192.168.0.103:8081` ❌  
+**Required:** `https://auth.expo.io/@rewardsfindr/rewardsfindr` ✅
 
-Expo Go cannot use the proxy redirect URI because it doesn't respect `owner` and `scheme` in `app.json`.
+## Solution: Build Local Development APK
 
-## Solution Options
+I've added the necessary configuration. Follow these steps:
 
-### Option 1: Use Development Build (Recommended)
-
-A development build respects `app.json` settings and will use the correct redirect URI.
-
-**Steps:**
-
-1. **Install EAS CLI:**
-   ```bash
-   npm install -g eas-cli
-   ```
-
-2. **Login to Expo:**
-   ```bash
-   eas login
-   ```
-
-3. **Configure EAS project:**
-   ```bash
-   cd mobile
-   eas init
-   ```
-   - This will create an EAS project ID and update `app.json`
-
-4. **Build development build for Android:**
-   ```bash
-   eas build --profile development --platform android
-   ```
-   - This takes 10-15 minutes
-   - You'll get a download link when done
-
-5. **Install on emulator:**
-   ```bash
-   # Download the APK from the link
-   adb install path/to/downloaded.apk
-   ```
-
-6. **Start dev server:**
-   ```bash
-   npx expo start --dev-client
-   ```
-
-7. **Open app on emulator** - it will connect and use the correct redirect URI
-
-### Option 2: Add Local Redirect URI (Quick Workaround)
-
-Add your local `exp://` URL to Google Cloud Console as an authorized redirect URI.
-
-**Steps:**
-
-1. Go to [Google Cloud Console](https://console.cloud.google.com)
-2. Select your project: `rewardsfindr-dev`
-3. Go to: **APIs & Services** → **Credentials**
-4. Click on your OAuth 2.0 Client ID: `963869613685-7u94c53t5grma47e1qnt5b0hucfa3bi5`
-5. Under **Authorized redirect URIs**, add:
-   ```
-   exp://192.168.0.103:8081
-   ```
-   ⚠️ **Note:** You'll need to update this every time your IP changes
-
-6. Click **Save**
-
-7. Restart the app and try login again
-
-### Option 3: Use Web Testing (Temporary)
-
-Test OAuth on web instead of mobile temporarily.
+### Step 1: Install Dependencies
 
 ```bash
 cd mobile
-npx expo start
-# Press 'w' to open in browser
+npm install
 ```
 
-Web uses `http://localhost:8081` which is already in your redirect URIs.
+This installs `expo-dev-client` which enables development builds.
 
-## Recommended Approach
+### Step 2: Build Local Development APK
 
-**For development:** Use Option 2 (add local redirect URI) - quickest fix  
-**For production:** Use Option 1 (development build) - proper solution
+You can build locally without EAS cloud (faster, no account needed):
 
-## Why This Happened
+```bash
+# Option A: Local build (faster, ~5 minutes)
+npm run build:dev
 
-The OAuth was working before because:
-- You were likely using a different setup (web browser, or different IP)
-- Or your previous Google OAuth config had a wildcard/different redirect URI
+# OR Option B: If above fails, use npx directly
+npx expo run:android
+```
 
-It broke today because:
-- Adding `react-native-webview` didn't break OAuth directly
-- But you may have cleared app data / restarted emulator
-- The `exp://` URL changed or was never properly configured
+**What happens:**
+- Builds a debug APK with development client
+- Automatically installs on your emulator
+- Takes ~5-10 minutes first time
+- Uses gradle to compile locally
+
+### Step 3: Start Dev Server
+
+```bash
+npm run start:dev
+# OR: npx expo start --dev-client
+```
+
+### Step 4: Open App
+
+- The development build will automatically open
+- It looks like Expo Go but respects your `app.json` settings
+- OAuth will now use the correct redirect URI: `https://auth.expo.io/@rewardsfindr/rewardsfindr`
+
+## Alternative: Use EAS Cloud Build
+
+If local build doesn't work:
+
+```bash
+# 1. Install EAS CLI
+npm install -g eas-cli
+
+# 2. Login (create free account if needed)
+eas login
+
+# 3. Initialize project
+eas init
+
+# 4. Build development APK
+eas build --profile development --platform android
+
+# Wait 10-15 minutes, then download and install the APK
+```
+
+## Why This is Necessary
+
+**Expo Go limitations:**
+- Always uses `exp://` scheme
+- Cannot customize redirect URIs
+- Google blocks non-HTTPS schemes
+- Fine for simple apps, not OAuth
+
+**Development build:**
+- Custom native code (including WebView)
+- Respects `owner` and `scheme` in app.json
+- Uses Expo's auth proxy: `https://auth.expo.io`
+- Required for production anyway
+
+## What Changed Today
+
+The OAuth probably worked before if:
+- You tested on web (uses `http://localhost:8081`)
+- Used a previous Expo SDK that handled this differently
+- Had different Google OAuth settings
+
+Today it broke because:
+- Testing on Android with Expo Go for the first time
+- Google's OAuth policies reject `exp://` schemes
 
 ## Next Steps
 
-1. Choose Option 2 (quick fix) to unblock development
-2. Continue working on the WebView sync feature
-3. Later, set up EAS development build for proper testing
+1. ✅ Pull the latest branch: `git pull origin fix/oauth-webview-conflict`
+2. ✅ Install dependencies: `cd mobile && npm install`
+3. 🛠️ Build development APK: `npm run build:dev` or `npx expo run:android`
+4. 🚀 Start dev server: `npm run start:dev`
+5. ✅ Test OAuth login - should work now!
+
+## Troubleshooting
+
+**If `npm run build:dev` fails:**
+```bash
+# Make sure Android SDK is installed
+# Set ANDROID_HOME environment variable
+# Then try:
+npx expo run:android
+```
+
+**If build takes too long:**
+```bash
+# Use EAS cloud build instead (free tier available)
+eas build --profile development --platform android
+```
+
+**If OAuth still fails:**
+- Check Metro logs for the redirect URI being used
+- Verify `app.json` has `owner: "rewardsfindr"` and `scheme: "rewardsfindr"`
+- Confirm Google Console has `https://auth.expo.io/@rewardsfindr/rewardsfindr`
 
 ---
 
-**Current Status:** Waiting for you to add `exp://192.168.0.103:8081` to Google Cloud Console redirect URIs.
+**Current branch:** `fix/oauth-webview-conflict`  
+**Ready to build:** Yes, all config added
