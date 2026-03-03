@@ -3,6 +3,7 @@
 // Search input + popular store chips
 // Shows signed-in user info + sign out in header
 // Navigates to /results on search
+// Sync Chase / Amex buttons open SyncWebView modal
 // ─────────────────────────────────────────────
 import React, { useState } from 'react';
 import {
@@ -15,18 +16,19 @@ import { getAuthInstance } from '../lib/firebaseClient.js';
 import { useSearch } from '../hooks/useSearch.js';
 import { POPULAR_STORES } from '../shared/constants.js';
 import { searchStore } from '../lib/api.js';
+import SyncWebView from '../components/SyncWebView.js';
 
 export default function HomeScreen() {
   const router = useRouter();
   const { searchTerm, setSearchTerm, searching, error, clearSearch } = useSearch();
   const [localSearching, setLocalSearching] = useState(false);
+  const [syncBank, setSyncBank] = useState(null); // 'chase' | 'amex' | null
 
   const user = getAuthInstance().currentUser;
 
   const handleSignOut = async () => {
     try {
       await signOut(getAuthInstance());
-      // _layout.js auth listener redirects to /login automatically
     } catch (err) {
       Alert.alert('Error', 'Could not sign out. Please try again.');
     }
@@ -74,6 +76,17 @@ export default function HomeScreen() {
     }
   };
 
+  const handleSyncSuccess = (count) => {
+    setSyncBank(null);
+    Alert.alert(
+      'Sync Complete',
+      count > 0
+        ? `${count} offer${count !== 1 ? 's' : ''} synced successfully!`
+        : 'No offers found. Make sure you are on the offers page before syncing.',
+      [{ text: 'OK' }]
+    );
+  };
+
   const isSearching = searching || localSearching;
 
   return (
@@ -84,7 +97,7 @@ export default function HomeScreen() {
         <View style={s.header}>
           <View style={s.headerLeft}>
             <View style={s.headerIconWrap}>
-              <Text style={s.headerIcon}>💳</Text>
+              <Text style={s.headerIcon}>&#128179;</Text>
             </View>
             <View>
               <Text style={s.headerTitle}>RewardsFindr</Text>
@@ -97,7 +110,7 @@ export default function HomeScreen() {
         {user && (
           <View style={s.userBanner}>
             <Text style={s.userEmail} numberOfLines={1}>
-              👤 {user.displayName || user.email}
+              &#128100; {user.displayName || user.email}
             </Text>
             <TouchableOpacity onPress={handleSignOut}>
               <Text style={s.signOutText}>Sign out</Text>
@@ -122,13 +135,13 @@ export default function HomeScreen() {
             <TouchableOpacity style={s.searchBtn} onPress={onSearchPress} disabled={isSearching}>
               {isSearching
                 ? <ActivityIndicator color="white" size="small" />
-                : <Text style={s.searchBtnText}>🔍</Text>}
+                : <Text style={s.searchBtnText}>&#128269;</Text>}
             </TouchableOpacity>
           </View>
 
           {error && (
             <View style={s.errorBox}>
-              <Text style={s.errorText}>⚠️ {error}</Text>
+              <Text style={s.errorText}>&#9888;&#65039; {error}</Text>
             </View>
           )}
 
@@ -142,16 +155,38 @@ export default function HomeScreen() {
           </View>
         </View>
 
+        {/* Sync Offers */}
+        <View style={s.syncCard}>
+          <Text style={s.syncTitle}>Sync Your Card Offers</Text>
+          <Text style={s.syncSubtitle}>Log in to see your personalized cashback offers</Text>
+          <View style={s.syncRow}>
+            <TouchableOpacity style={s.syncBtnChase} onPress={() => setSyncBank('chase')}>
+              <Text style={s.syncBtnText}>Sync Chase</Text>
+            </TouchableOpacity>
+            <TouchableOpacity style={s.syncBtnAmex} onPress={() => setSyncBank('amex')}>
+              <Text style={s.syncBtnText}>Sync Amex</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+
         {/* How it works */}
         <View style={s.card}>
           <Text style={s.cardTitle}>How it works</Text>
           <Text style={s.cardBody}>
-            Search any store → see which of your credit cards gives you the best rewards there.
-            Install the Chrome extension to sync your card offers automatically.
+            Search any store &#8594; see which of your credit cards gives you the best rewards there.
+            Sync your Chase or Amex offers above to see personalized results.
           </Text>
         </View>
 
       </ScrollView>
+
+      {/* WebView Sync Modal */}
+      <SyncWebView
+        visible={syncBank !== null}
+        bank={syncBank}
+        onClose={() => setSyncBank(null)}
+        onSuccess={handleSyncSuccess}
+      />
     </SafeAreaView>
   );
 }
@@ -192,6 +227,17 @@ const s = StyleSheet.create({
   chip:          { backgroundColor: '#eef2ff', borderRadius: 999, paddingHorizontal: 14,
                    paddingVertical: 7, borderWidth: 1, borderColor: '#c7d2fe' },
   chipText:      { color: '#4338ca', fontSize: 13, fontWeight: '500' },
+
+  syncCard:      { backgroundColor: 'white', borderRadius: 20, padding: 16, marginBottom: 16,
+                   shadowColor: '#000', shadowOpacity: 0.06, shadowRadius: 10, elevation: 3 },
+  syncTitle:     { fontSize: 15, fontWeight: '700', color: '#1f2937', marginBottom: 4 },
+  syncSubtitle:  { fontSize: 13, color: '#6b7280', marginBottom: 14 },
+  syncRow:       { flexDirection: 'row', gap: 10 },
+  syncBtnChase:  { flex: 1, backgroundColor: '#1a3a6b', borderRadius: 12,
+                   paddingVertical: 12, alignItems: 'center' },
+  syncBtnAmex:   { flex: 1, backgroundColor: '#007ac1', borderRadius: 12,
+                   paddingVertical: 12, alignItems: 'center' },
+  syncBtnText:   { color: 'white', fontWeight: '700', fontSize: 14 },
 
   card:          { backgroundColor: 'white', borderRadius: 20, padding: 16,
                    shadowColor: '#000', shadowOpacity: 0.06, shadowRadius: 10, elevation: 3 },
