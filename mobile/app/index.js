@@ -3,9 +3,9 @@
 // Search input + popular store chips
 // Shows signed-in user info + sign out in header
 // Navigates to /results on search
-// Sync Chase / Amex buttons open SyncWebView modal
+// Sync Chase / Amex buttons TEMPORARILY DISABLED for OAuth debugging
 // ─────────────────────────────────────────────
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   View, Text, TextInput, TouchableOpacity,
   ScrollView, ActivityIndicator, StyleSheet, SafeAreaView, Alert,
@@ -16,25 +16,49 @@ import { getAuthInstance } from '../lib/firebaseClient.js';
 import { useSearch } from '../hooks/useSearch.js';
 import { POPULAR_STORES } from '../shared/constants.js';
 import { searchStore } from '../lib/api.js';
-import SyncWebView from '../components/SyncWebView.js';
+// TEMPORARILY COMMENTED OUT TO DEBUG OAUTH
+// import SyncWebView from '../components/SyncWebView.js';
 
 export default function HomeScreen() {
   const router = useRouter();
   const { searchTerm, setSearchTerm, searching, error, clearSearch } = useSearch();
   const [localSearching, setLocalSearching] = useState(false);
-  const [syncBank, setSyncBank] = useState(null); // 'chase' | 'amex' | null
+  // const [syncBank, setSyncBank] = useState(null); // 'chase' | 'amex' | null
 
   const user = getAuthInstance().currentUser;
 
+  // DEBUG: Log when component mounts and user state
+  useEffect(() => {
+    console.log('[HomeScreen] Component mounted');
+    console.log('[HomeScreen] User authenticated:', !!user);
+    if (user) {
+      console.log('[HomeScreen] User email:', user.email);
+      console.log('[HomeScreen] User displayName:', user.displayName);
+    }
+  }, []);
+
+  // DEBUG: Log user changes
+  useEffect(() => {
+    console.log('[HomeScreen] User state changed:', {
+      authenticated: !!user,
+      email: user?.email,
+      uid: user?.uid,
+    });
+  }, [user]);
+
   const handleSignOut = async () => {
+    console.log('[HomeScreen] Sign out initiated');
     try {
       await signOut(getAuthInstance());
+      console.log('[HomeScreen] Sign out successful');
     } catch (err) {
+      console.error('[HomeScreen] Sign out error:', err);
       Alert.alert('Error', 'Could not sign out. Please try again.');
     }
   };
 
   const navigateToResults = (data, query) => {
+    console.log('[HomeScreen] Navigating to results:', { query, hasStore: !!data.store });
     if (!data.store && (!data.personalizedOffers || data.personalizedOffers.length === 0)) {
       router.push({ pathname: '/results', params: { notFound: query } });
       return;
@@ -53,11 +77,14 @@ export default function HomeScreen() {
 
   const onSearchPress = async () => {
     if (!searchTerm.trim()) return;
+    console.log('[HomeScreen] Search initiated:', searchTerm);
     setLocalSearching(true);
     try {
       const data = await searchStore(searchTerm);
+      console.log('[HomeScreen] Search successful');
       navigateToResults(data, searchTerm);
     } catch (err) {
+      console.error('[HomeScreen] Search error:', err);
       Alert.alert('Search Error', err.message);
     } finally {
       setLocalSearching(false);
@@ -65,17 +92,20 @@ export default function HomeScreen() {
   };
 
   const onChipPress = async (storeName) => {
+    console.log('[HomeScreen] Chip pressed:', storeName);
     setLocalSearching(true);
     try {
       const data = await searchStore(storeName);
       navigateToResults(data, storeName);
     } catch (err) {
+      console.error('[HomeScreen] Chip search error:', err);
       Alert.alert('Search Error', err.message);
     } finally {
       setLocalSearching(false);
     }
   };
 
+  /* TEMPORARILY DISABLED FOR OAUTH DEBUGGING
   const handleSyncSuccess = (count) => {
     setSyncBank(null);
     Alert.alert(
@@ -86,6 +116,7 @@ export default function HomeScreen() {
       [{ text: 'OK' }]
     );
   };
+  */
 
   const isSearching = searching || localSearching;
 
@@ -155,18 +186,10 @@ export default function HomeScreen() {
           </View>
         </View>
 
-        {/* Sync Offers */}
+        {/* SYNC OFFERS TEMPORARILY DISABLED FOR OAUTH DEBUGGING */}
         <View style={s.syncCard}>
-          <Text style={s.syncTitle}>Sync Your Card Offers</Text>
-          <Text style={s.syncSubtitle}>Log in to see your personalized cashback offers</Text>
-          <View style={s.syncRow}>
-            <TouchableOpacity style={s.syncBtnChase} onPress={() => setSyncBank('chase')}>
-              <Text style={s.syncBtnText}>Sync Chase</Text>
-            </TouchableOpacity>
-            <TouchableOpacity style={s.syncBtnAmex} onPress={() => setSyncBank('amex')}>
-              <Text style={s.syncBtnText}>Sync Amex</Text>
-            </TouchableOpacity>
-          </View>
+          <Text style={s.syncTitle}>🔧 OAuth Debugging Mode</Text>
+          <Text style={s.syncSubtitle}>Sync buttons temporarily disabled to isolate OAuth issue. Check Metro bundler console for debug logs. If sign-in works now, the WebView component is causing the conflict.</Text>
         </View>
 
         {/* How it works */}
@@ -180,13 +203,13 @@ export default function HomeScreen() {
 
       </ScrollView>
 
-      {/* WebView Sync Modal */}
-      <SyncWebView
+      {/* WEBVIEW SYNC MODAL TEMPORARILY DISABLED FOR OAUTH DEBUGGING */}
+      {/* <SyncWebView
         visible={syncBank !== null}
         bank={syncBank}
         onClose={() => setSyncBank(null)}
         onSuccess={handleSyncSuccess}
-      />
+      /> */}
     </SafeAreaView>
   );
 }
@@ -228,8 +251,9 @@ const s = StyleSheet.create({
                    paddingVertical: 7, borderWidth: 1, borderColor: '#c7d2fe' },
   chipText:      { color: '#4338ca', fontSize: 13, fontWeight: '500' },
 
-  syncCard:      { backgroundColor: 'white', borderRadius: 20, padding: 16, marginBottom: 16,
-                   shadowColor: '#000', shadowOpacity: 0.06, shadowRadius: 10, elevation: 3 },
+  syncCard:      { backgroundColor: '#fff8dc', borderRadius: 20, padding: 16, marginBottom: 16,
+                   shadowColor: '#000', shadowOpacity: 0.06, shadowRadius: 10, elevation: 3, 
+                   borderWidth: 2, borderColor: '#ffa500' },
   syncTitle:     { fontSize: 15, fontWeight: '700', color: '#1f2937', marginBottom: 4 },
   syncSubtitle:  { fontSize: 13, color: '#6b7280', marginBottom: 14 },
   syncRow:       { flexDirection: 'row', gap: 10 },
