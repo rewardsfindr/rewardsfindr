@@ -2,6 +2,8 @@
   "expo": {
     "name": "RewardsFindr",
     "slug": "rewardsfindr",
+    "owner": "rewardsfindr",
+    "scheme": "rewardsfindr",
     "version": "1.0.0",
     "orientation": "portrait",
     "userInterfaceStyle": "light",
