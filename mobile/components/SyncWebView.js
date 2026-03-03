@@ -4,14 +4,17 @@
 // User logs into Chase/Amex inside the WebView, then
 // taps "Sync Offers" → JS captures outerHTML → POST
 // to /api/offers/parse → success toast + close.
+// Platform-aware: uses iframe on web, WebView on native
 // ─────────────────────────────────────────────
 import React, { useRef, useState } from 'react';
 import {
   Modal, View, Text, TouchableOpacity,
-  StyleSheet, ActivityIndicator, Alert, SafeAreaView,
+  StyleSheet, ActivityIndicator, Alert, SafeAreaView, Platform,
 } from 'react-native';
-import { WebView } from 'react-native-webview';
 import { getAuthInstance } from '../lib/firebaseClient.js';
+
+// Only import WebView on native platforms
+const WebView = Platform.OS === 'web' ? null : require('react-native-webview').WebView;
 
 const BANK_CONFIG = {
   chase: {
@@ -50,11 +53,29 @@ const CAPTURE_JS = `
  */
 export default function SyncWebView({ visible, bank, onClose, onSuccess }) {
   const webViewRef = useRef(null);
+  const iframeRef = useRef(null);
   const [syncing, setSyncing] = useState(false);
   const config = BANK_CONFIG[bank] || BANK_CONFIG.chase;
 
   const handleSyncPress = () => {
-    webViewRef.current?.injectJavaScript(CAPTURE_JS);
+    if (Platform.OS === 'web') {
+      // Web: capture HTML from iframe
+      try {
+        const iframe = iframeRef.current;
+        if (!iframe || !iframe.contentWindow) {
+          Alert.alert('Error', 'Cannot access iframe content. Please try again.');
+          return;
+        }
+        const html = iframe.contentWindow.document.documentElement.outerHTML;
+        handleCapturedHTML(html);
+      } catch (err) {
+        Alert.alert('Capture Error', 'Cannot access iframe due to cross-origin restrictions. The bank website must be loaded in a popup instead.');
+        console.error('[SyncWebView] Web capture error:', err);
+      }
+    } else {
+      // Native: inject JS into WebView
+      webViewRef.current?.injectJavaScript(CAPTURE_JS);
+    }
   };
 
   const handleMessage = async (event) => {
@@ -67,8 +88,17 @@ export default function SyncWebView({ visible, bank, onClose, onSuccess }) {
       }
       if (data.type !== 'CAPTURE_HTML') return;
 
-      setSyncing(true);
+      await handleCapturedHTML(data.html);
+    } catch (err) {
+      Alert.alert('Sync Failed', err.message);
+      setSyncing(false);
+    }
+  };
 
+  const handleCapturedHTML = async (html) => {
+    setSyncing(true);
+
+    try {
       const user = getAuthInstance().currentUser;
       if (!user) throw new Error('You must be signed in to sync offers.');
 
@@ -80,7 +110,7 @@ export default function SyncWebView({ visible, bank, onClose, onSuccess }) {
           'Content-Type': 'application/json',
           Authorization: `Bearer ${token}`,
         },
-        body: JSON.stringify({ html: data.html, bank }),
+        body: JSON.stringify({ html, bank }),
       });
 
       const result = await response.json();
@@ -115,22 +145,44 @@ export default function SyncWebView({ visible, bank, onClose, onSuccess }) {
             <View style={{ width: 36 }} />
           </View>
 
-          {/* WebView */}
-          <WebView
-            ref={webViewRef}
-            source={{ uri: config.url }}
-            onMessage={handleMessage}
-            style={s.webview}
-            // Don't persist session between syncs
-            incognito={false}
-            sharedCookiesEnabled={true}
-            thirdPartyCookiesEnabled={true}
-          />
+          {/* WebView (native) or iframe (web) */}
+          {Platform.OS === 'web' ? (
+            <View style={s.webviewContainer}>
+              <Text style={s.webWarning}>
+                ⚠️ Web platform: iframe cannot access cross-origin content.
+                {"\n"}Please use a native mobile app for full sync functionality.
+                {"\n\n"}For testing, manually copy the HTML from the offers page.
+              </Text>
+              <iframe
+                ref={iframeRef}
+                src={config.url}
+                style={{
+                  flex: 1,
+                  border: 'none',
+                  width: '100%',
+                  height: '100%',
+                }}
+                sandbox="allow-same-origin allow-scripts allow-forms"
+              />
+            </View>
+          ) : (
+            <WebView
+              ref={webViewRef}
+              source={{ uri: config.url }}
+              onMessage={handleMessage}
+              style={s.webview}
+              incognito={false}
+              sharedCookiesEnabled={true}
+              thirdPartyCookiesEnabled={true}
+            />
+          )}
 
           {/* Footer */}
           <View style={s.footer}>
             <Text style={s.hint}>
-              Log in above, then tap Sync when your offers are visible.
+              {Platform.OS === 'web'
+                ? 'Web testing mode: Sync may not work due to browser restrictions.'
+                : 'Log in above, then tap Sync when your offers are visible.'}
             </Text>
             <TouchableOpacity
               style={[s.syncBtn, syncing && s.syncBtnDisabled]}
@@ -189,7 +241,16 @@ const s = StyleSheet.create({
   },
   closeBtnText: { fontSize: 14, color: '#374151', fontWeight: '600' },
   headerTitle:  { fontSize: 16, fontWeight: '700', color: '#1f2937' },
+  webviewContainer: { flex: 1 },
   webview:      { flex: 1 },
+  webWarning: {
+    backgroundColor: '#fef3c7',
+    padding: 12,
+    fontSize: 12,
+    color: '#92400e',
+    borderBottomWidth: 1,
+    borderBottomColor: '#fde68a',
+  },
   footer: {
     padding: 16,
     borderTopWidth: 1,
