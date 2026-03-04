@@ -33,16 +33,60 @@ async function verifyToken(req, res) {
 
 // ─────────────────────────────────────────────
 // Shared helper: write an offers array to Firestore
-// Returns { syncedCount, skippedCount }
+// Uses set with merge to prevent duplicates across multiple syncs
+// User-specific offerId ensures no cross-user conflicts
+// Returns { syncedCount, skippedCount, duplicateCount }
 // ─────────────────────────────────────────────
 async function writeOffersToDB(offers, { userId, bank, cardName }) {
   const batch = db.batch();
+  const offersCollection = db.collection('offers');
+  
   let syncedCount = 0;
   let skippedCount = 0;
+  let duplicateCount = 0;
+
+  // First, check which offers already exist to track duplicates
+  const offerIds = new Set();
+  const existingOfferIds = new Set();
 
   for (const offer of offers) {
     try {
       const offerId = generateOfferId(
+        userId,
+        offer.merchantName,
+        offer.cashbackAmount,
+        offer.expiryDate || new Date(Date.now() + 90 * 24 * 60 * 60 * 1000).toISOString()
+      );
+      offerIds.add(offerId);
+    } catch (error) {
+      console.error(`❌ Error generating ID for offer "${offer.merchantName}":`, error);
+      skippedCount++;
+    }
+  }
+
+  // Check existing offers in a single query for efficiency
+  if (offerIds.size > 0) {
+    const offerIdsArray = Array.from(offerIds);
+    // Firestore 'in' queries support max 10 items, so we batch check
+    for (let i = 0; i < offerIdsArray.length; i += 10) {
+      const batchIds = offerIdsArray.slice(i, i + 10);
+      const snapshot = await offersCollection
+        .where('offerId', 'in', batchIds)
+        .where('userId', '==', userId)
+        .select('offerId')
+        .get();
+      
+      snapshot.forEach(doc => {
+        existingOfferIds.add(doc.data().offerId);
+      });
+    }
+  }
+
+  // Now process each offer
+  for (const offer of offers) {
+    try {
+      const offerId = generateOfferId(
+        userId,
         offer.merchantName,
         offer.cashbackAmount,
         offer.expiryDate || new Date(Date.now() + 90 * 24 * 60 * 60 * 1000).toISOString()
@@ -65,8 +109,16 @@ async function writeOffersToDB(offers, { userId, bank, cardName }) {
         syncedAt: FieldValue.serverTimestamp(),
       };
 
-      batch.set(db.collection('offers').doc(offerId), offerDoc, { merge: true });
-      syncedCount++;
+      // Check if this is a duplicate from an earlier sync
+      if (existingOfferIds.has(offerId)) {
+        duplicateCount++;
+        // Still update syncedAt to track last sync time, but count as duplicate
+        batch.set(offersCollection.doc(offerId), { syncedAt: FieldValue.serverTimestamp() }, { merge: true });
+      } else {
+        // New offer - write full document
+        batch.set(offersCollection.doc(offerId), offerDoc, { merge: true });
+        syncedCount++;
+      }
     } catch (error) {
       console.error(`❌ Error processing offer "${offer.merchantName}":`, error);
       skippedCount++;
@@ -74,7 +126,7 @@ async function writeOffersToDB(offers, { userId, bank, cardName }) {
   }
 
   await batch.commit();
-  return { syncedCount, skippedCount };
+  return { syncedCount, skippedCount, duplicateCount };
 }
 
 /**
@@ -99,13 +151,14 @@ router.post('/sync', async (req, res) => {
 
     console.log(`🔄 Syncing ${offers.length} offers for user ${userId} (${bank} - ${cardName})`);
 
-    const { syncedCount, skippedCount } = await writeOffersToDB(offers, { userId, bank, cardName });
+    const { syncedCount, skippedCount, duplicateCount } = await writeOffersToDB(offers, { userId, bank, cardName });
 
-    console.log(`✅ Sync complete: ${syncedCount} synced, ${skippedCount} skipped`);
+    console.log(`✅ Sync complete: ${syncedCount} new, ${duplicateCount} duplicates, ${skippedCount} skipped`);
 
     res.json({
       success: true,
       synced: syncedCount,
+      duplicates: duplicateCount,
       skipped: skippedCount,
       total: offers.length,
     });
@@ -147,6 +200,7 @@ router.post('/parse', async (req, res) => {
         success: true,
         offers: [],
         synced: 0,
+        duplicates: 0,
         bank,
         message: 'No offers found in provided HTML. Selectors may need tuning.',
       });
@@ -154,18 +208,19 @@ router.post('/parse', async (req, res) => {
 
     const resolvedCardName = cardName || (bank === 'chase' ? 'Chase Card' : 'Amex Card');
 
-    const { syncedCount, skippedCount } = await writeOffersToDB(offers, {
+    const { syncedCount, skippedCount, duplicateCount } = await writeOffersToDB(offers, {
       userId,
       bank,
       cardName: resolvedCardName,
     });
 
-    console.log(`✅ Parse+sync complete: ${syncedCount} synced, ${skippedCount} skipped (${bank})`);
+    console.log(`✅ Parse+sync complete: ${syncedCount} new, ${duplicateCount} duplicates, ${skippedCount} skipped (${bank})`);
 
     res.json({
       success: true,
       offers,
       synced: syncedCount,
+      duplicates: duplicateCount,
       skipped: skippedCount,
       bank,
     });
