@@ -1,121 +1,73 @@
 // ─────────────────────────────────────────────
 // LOGIN SCREEN
-// Google Sign-In via expo-auth-session + Firebase credential
-// On success, _layout.js auth listener redirects to home automatically
-// Uses direct Android OAuth client (no proxy) for dev builds
+// Google Sign-In via WebBrowser + Firebase credential
+// Uses Web OAuth client for simplicity and reliability
 // ─────────────────────────────────────────────
-import React, { useEffect, useState } from 'react';
+import React, { useState } from 'react';
 import {
   View, Text, TouchableOpacity, ActivityIndicator,
   StyleSheet, SafeAreaView,
 } from 'react-native';
 import { Stack } from 'expo-router';
-import * as Google from 'expo-auth-session/providers/google';
 import * as WebBrowser from 'expo-web-browser';
 import { GoogleAuthProvider, signInWithCredential } from 'firebase/auth';
 import { getAuthInstance } from '../lib/firebaseClient.js';
 
-// Required to handle redirect back from browser after OAuth
 WebBrowser.maybeCompleteAuthSession();
 
-// Android OAuth client ID from Google Cloud Console
-// SHA-1: 5E:8F:16:06:2E:A3:CD:2C:4A:0D:54:78:76:BA:A6:F3:8C:AB:F6:25
-const ANDROID_CLIENT_ID = '963869613685-cbtfsrnsre4mbov0ujauvqjbi9a65egq.apps.googleusercontent.com';
+const WEB_CLIENT_ID = '963869613685-7u94c53t5grma47e1qnt5b0hucfa3bi5.apps.googleusercontent.com';
+const REDIRECT_URI = 'https://rewardsfindr-dev.firebaseapp.com/__/auth/handler';
 
 export default function LoginScreen() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
 
-  console.log('[LoginScreen] Component rendered');
-  console.log('[LoginScreen] Using Android client ID for native auth');
+  const handleGoogleSignIn = async () => {
+    console.log('[LoginScreen] Starting Google OAuth flow...');
+    setLoading(true);
+    setError(null);
 
-  // Use Android client directly - no proxy needed for dev builds
-  const [request, response, promptAsync] = Google.useAuthRequest({
-    androidClientId: ANDROID_CLIENT_ID,
-  });
+    try {
+      // Build OAuth URL
+      const authUrl = `https://accounts.google.com/o/oauth2/v2/auth?` +
+        `client_id=${WEB_CLIENT_ID}&` +
+        `redirect_uri=${encodeURIComponent(REDIRECT_URI)}&` +
+        `response_type=id_token&` +
+        `scope=openid%20email%20profile&` +
+        `nonce=${Math.random().toString(36)}`;
 
-  // DEBUG: Log request object
-  useEffect(() => {
-    console.log('[LoginScreen] Auth request object:', {
-      hasRequest: !!request,
-      url: request?.url,
-      codeVerifier: request?.codeVerifier ? 'present' : 'missing',
-    });
-  }, [request]);
-
-  useEffect(() => {
-    console.log('[LoginScreen] Response received:', {
-      type: response?.type,
-      error: response?.error,
-      errorCode: response?.error_code,
-      params: response?.params ? Object.keys(response.params) : 'none',
-      authentication: response?.authentication ? Object.keys(response.authentication) : 'none',
-    });
-
-    if (response?.type === 'success') {
-      console.log('[LoginScreen] OAuth success! Processing tokens...');
-      // Different response structure for web vs native
-      const idToken = response.params?.id_token || response.authentication?.idToken;
-      const accessToken = response.params?.access_token || response.authentication?.accessToken;
+      console.log('[LoginScreen] Opening browser for OAuth...');
+      const result = await WebBrowser.openAuthSessionAsync(authUrl, REDIRECT_URI);
       
-      console.log('[LoginScreen] Token check:', {
-        hasIdToken: !!idToken,
-        hasAccessToken: !!accessToken,
-      });
+      console.log('[LoginScreen] Browser result:', result.type);
 
-      if (idToken || accessToken) {
-        handleGoogleSignIn(idToken, accessToken);
-      } else {
-        console.error('[Login] No token in response:', response);
-        setError('Authentication failed. No token received.');
+      if (result.type === 'success') {
+        // Extract id_token from URL fragment
+        const url = result.url;
+        const idTokenMatch = url.match(/id_token=([^&]+)/);
+        
+        if (idTokenMatch && idTokenMatch[1]) {
+          const idToken = idTokenMatch[1];
+          console.log('[LoginScreen] Got id_token, signing in to Firebase...');
+          
+          const auth = getAuthInstance();
+          const credential = GoogleAuthProvider.credential(idToken);
+          const userCredential = await signInWithCredential(auth, credential);
+          
+          console.log('[LoginScreen] Firebase sign-in successful:', userCredential.user.email);
+          // Auth state listener in _layout.js will handle redirect
+        } else {
+          throw new Error('No id_token in response');
+        }
+      } else if (result.type === 'cancel') {
+        console.log('[LoginScreen] User cancelled');
         setLoading(false);
       }
-    } else if (response?.type === 'error') {
-      console.error('[Login] OAuth error response:', {
-        error: response.error,
-        errorDescription: response.params?.error_description,
-        url: response.url,
-      });
-      setError(`Google sign-in failed: ${response.error}. Check console for details.`);
-      setLoading(false);
-    } else if (response?.type === 'dismiss') {
-      console.log('[Login] User dismissed OAuth flow');
-      setLoading(false);
-    }
-  }, [response]);
-
-  const handleGoogleSignIn = async (idToken, accessToken) => {
-    console.log('[LoginScreen] Starting Firebase sign-in with Google credential...');
-    try {
-      const auth = getAuthInstance();
-      console.log('[LoginScreen] Auth instance obtained');
-      
-      const credential = GoogleAuthProvider.credential(idToken, accessToken);
-      console.log('[LoginScreen] Google credential created');
-      
-      const result = await signInWithCredential(auth, credential);
-      console.log('[LoginScreen] Firebase sign-in successful:', {
-        uid: result.user.uid,
-        email: result.user.email,
-      });
-      // _layout.js onAuthStateChanged fires and redirects to '/' automatically
     } catch (err) {
-      console.error('[Login] Sign-in error:', {
-        code: err.code,
-        message: err.message,
-        stack: err.stack,
-      });
+      console.error('[LoginScreen] Sign-in error:', err);
       setError(`Sign-in failed: ${err.message}`);
       setLoading(false);
     }
-  };
-
-  const handleSignInPress = () => {
-    console.log('[LoginScreen] Sign-in button pressed');
-    setError(null);
-    setLoading(true);
-    console.log('[LoginScreen] Calling promptAsync...');
-    promptAsync();
   };
 
   return (
@@ -137,9 +89,9 @@ export default function LoginScreen() {
         )}
 
         <TouchableOpacity
-          style={[s.googleBtn, (!request || loading) && s.disabled]}
-          onPress={handleSignInPress}
-          disabled={!request || loading}
+          style={[s.googleBtn, loading && s.disabled]}
+          onPress={handleGoogleSignIn}
+          disabled={loading}
         >
           {loading ? (
             <ActivityIndicator color="#1f2937" />
