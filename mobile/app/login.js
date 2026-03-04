@@ -1,82 +1,77 @@
 // ─────────────────────────────────────────────
 // LOGIN SCREEN
-// Google Sign-In via expo-auth-session with Android OAuth client
-// Package: com.rewardsfindr.app
-// SHA-1: 5E:8F:16:06:2E:A3:CD:2C:4A:0D:54:78:76:BA:A6:F3:8C:AB:F6:25
+// Server-side OAuth flow via API backend
+// This bypasses all mobile OAuth client configuration issues
 // ─────────────────────────────────────────────
-import React, { useEffect, useState } from 'react';
+import React, { useState, useRef } from 'react';
 import {
   View, Text, TouchableOpacity, ActivityIndicator,
   StyleSheet, SafeAreaView,
 } from 'react-native';
 import { Stack } from 'expo-router';
-import * as Google from 'expo-auth-session/providers/google';
-import * as WebBrowser from 'expo-web-browser';
-import { GoogleAuthProvider, signInWithCredential } from 'firebase/auth';
+import { WebView } from 'react-native-webview';
+import { signInWithCustomToken } from 'firebase/auth';
 import { getAuthInstance } from '../lib/firebaseClient.js';
 
-WebBrowser.maybeCompleteAuthSession();
-
-const ANDROID_CLIENT_ID = '963869613685-cbtfsrnsre4mbov0ujauvqjbi9a65egq.apps.googleusercontent.com';
+const API_URL = process.env.EXPO_PUBLIC_API_URL || 'http://localhost:3001';
 
 export default function LoginScreen() {
   const [loading, setLoading] = useState(false);
+  const [showWebView, setShowWebView] = useState(false);
   const [error, setError] = useState(null);
-
-  console.log('[LoginScreen] Initializing with Android client');
-
-  const [request, response, promptAsync] = Google.useAuthRequest({
-    androidClientId: ANDROID_CLIENT_ID,
-  });
-
-  useEffect(() => {
-    if (!response) return;
-    
-    console.log('[LoginScreen] Response type:', response.type);
-
-    if (response.type === 'success') {
-      console.log('[LoginScreen] OAuth success!');
-      const { authentication } = response;
-      
-      if (authentication?.idToken) {
-        handleFirebaseSignIn(authentication.idToken, authentication.accessToken);
-      } else {
-        console.error('[LoginScreen] No idToken in response');
-        setError('Authentication failed - no token received');
-        setLoading(false);
-      }
-    } else if (response.type === 'error') {
-      console.error('[LoginScreen] OAuth error:', response.error);
-      setError(`Sign-in failed: ${response.error}. Google OAuth may still be propagating (wait 5-60 min).`);
-      setLoading(false);
-    } else if (response.type === 'cancel') {
-      console.log('[LoginScreen] User cancelled');
-      setLoading(false);
-    }
-  }, [response]);
-
-  const handleFirebaseSignIn = async (idToken, accessToken) => {
-    console.log('[LoginScreen] Signing into Firebase...');
-    try {
-      const auth = getAuthInstance();
-      const credential = GoogleAuthProvider.credential(idToken, accessToken);
-      const result = await signInWithCredential(auth, credential);
-      
-      console.log('[LoginScreen] Firebase success:', result.user.email);
-      // Auth listener will redirect to home
-    } catch (err) {
-      console.error('[LoginScreen] Firebase error:', err);
-      setError(`Sign-in failed: ${err.message}`);
-      setLoading(false);
-    }
-  };
+  const webViewRef = useRef(null);
 
   const handleSignIn = () => {
-    console.log('[LoginScreen] Sign-in button pressed');
+    console.log('[LoginScreen] Opening server-side OAuth flow');
     setError(null);
     setLoading(true);
-    promptAsync();
+    setShowWebView(true);
   };
+
+  const handleWebViewNavigationStateChange = async (navState) => {
+    const { url } = navState;
+    console.log('[LoginScreen] WebView URL:', url);
+
+    // Check if we got redirected to success callback with token
+    if (url.includes('/auth/mobile/callback')) {
+      try {
+        // Extract custom token from URL
+        const urlObj = new URL(url);
+        const customToken = urlObj.searchParams.get('token');
+        
+        if (customToken) {
+          console.log('[LoginScreen] Got custom token, signing into Firebase');
+          setShowWebView(false);
+          
+          const auth = getAuthInstance();
+          const result = await signInWithCustomToken(auth, customToken);
+          console.log('[LoginScreen] Success:', result.user.email);
+          // Auth listener will redirect
+        } else {
+          throw new Error('No token in callback');
+        }
+      } catch (err) {
+        console.error('[LoginScreen] Error:', err);
+        setError(`Sign-in failed: ${err.message}`);
+        setShowWebView(false);
+        setLoading(false);
+      }
+    }
+  };
+
+  if (showWebView) {
+    return (
+      <SafeAreaView style={s.safe}>
+        <Stack.Screen options={{ headerShown: false }} />
+        <WebView
+          ref={webViewRef}
+          source={{ uri: `${API_URL}/auth/google/mobile` }}
+          onNavigationStateChange={handleWebViewNavigationStateChange}
+          startInLoadEnd={() => setLoading(false)}
+        />
+      </SafeAreaView>
+    );
+  }
 
   return (
     <SafeAreaView style={s.safe}>
@@ -97,9 +92,9 @@ export default function LoginScreen() {
         )}
 
         <TouchableOpacity
-          style={[s.googleBtn, (!request || loading) && s.disabled]}
+          style={[s.googleBtn, loading && s.disabled]}
           onPress={handleSignIn}
-          disabled={!request || loading}
+          disabled={loading}
         >
           {loading ? (
             <ActivityIndicator color="#1f2937" />
@@ -111,10 +106,6 @@ export default function LoginScreen() {
         <Text style={s.note}>
           Sign in with the same Google account you use in the Chrome extension
           to see your personalized card rewards.
-        </Text>
-
-        <Text style={s.debugNote}>
-          🔧 If sign-in fails, Google OAuth settings may need 5-60 minutes to propagate.
         </Text>
 
       </View>
@@ -138,6 +129,5 @@ const s = StyleSheet.create({
                    shadowColor: '#000', shadowOpacity: 0.1, shadowRadius: 8, elevation: 4 },
   disabled:      { opacity: 0.5 },
   googleBtnText: { fontSize: 16, fontWeight: '600', color: '#1f2937' },
-  note:          { fontSize: 13, color: '#9ca3af', textAlign: 'center', lineHeight: 22, marginBottom: 8 },
-  debugNote:     { fontSize: 11, color: '#d97706', textAlign: 'center', fontStyle: 'italic' },
+  note:          { fontSize: 13, color: '#9ca3af', textAlign: 'center', lineHeight: 22 },
 });
