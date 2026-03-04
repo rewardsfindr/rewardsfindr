@@ -3,7 +3,7 @@
     "name": "RewardsFindr",
     "slug": "rewardsfindr",
     "owner": "rewardsfindr",
-    "scheme": "rewardsfindr",
+    "scheme": "com.rewardsfindr.app",
     "version": "1.0.0",
     "orientation": "portrait",
     "userInterfaceStyle": "light",
@@ -14,7 +14,21 @@
     },
     "android": {
       "package": "com.rewardsfindr.app",
-      "versionCode": 1
+      "versionCode": 1,
+      "intentFilters": [
+        {
+          "action": "VIEW",
+          "data": [
+            {
+              "scheme": "com.rewardsfindr.app"
+            }
+          ],
+          "category": [
+            "BROWSABLE",
+            "DEFAULT"
+          ]
+        }
+      ]
     },
     "extra": {
       "eas": {
