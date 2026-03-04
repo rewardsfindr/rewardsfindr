@@ -2,7 +2,7 @@
 // LOGIN SCREEN
 // Google Sign-In via expo-auth-session + Firebase credential
 // On success, _layout.js auth listener redirects to home automatically
-// DEBUG LOGS ADDED FOR OAUTH TROUBLESHOOTING
+// Uses direct Android OAuth client (no proxy) for dev builds
 // ─────────────────────────────────────────────
 import React, { useEffect, useState } from 'react';
 import {
@@ -18,22 +18,20 @@ import { getAuthInstance } from '../lib/firebaseClient.js';
 // Required to handle redirect back from browser after OAuth
 WebBrowser.maybeCompleteAuthSession();
 
+// Android OAuth client ID from Google Cloud Console
+// SHA-1: 5E:8F:16:06:2E:A3:CD:2C:4A:0D:54:78:76:BA:A6:F3:8C:AB:F6:25
+const ANDROID_CLIENT_ID = '963869613685-cbtfsrnsre4mbov0ujauvqjbi9a65egq.apps.googleusercontent.com';
+
 export default function LoginScreen() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
 
   console.log('[LoginScreen] Component rendered');
-  console.log('[LoginScreen] Environment check:', {
-    hasClientId: !!process.env.EXPO_PUBLIC_GOOGLE_CLIENT_ID,
-    clientIdPreview: process.env.EXPO_PUBLIC_GOOGLE_CLIENT_ID?.substring(0, 20) + '...',
-  });
+  console.log('[LoginScreen] Using Android client ID for native auth');
 
+  // Use Android client directly - no proxy needed for dev builds
   const [request, response, promptAsync] = Google.useAuthRequest({
-    webClientId: process.env.EXPO_PUBLIC_GOOGLE_CLIENT_ID,
-    androidClientId: process.env.EXPO_PUBLIC_GOOGLE_CLIENT_ID,
-    iosClientId: process.env.EXPO_PUBLIC_GOOGLE_CLIENT_ID,
-  }, {
-    useProxy: true, // Force use of https://auth.expo.io proxy instead of exp:// local redirect
+    androidClientId: ANDROID_CLIENT_ID,
   });
 
   // DEBUG: Log request object
@@ -132,11 +130,6 @@ export default function LoginScreen() {
         <Text style={s.title}>RewardsFindr</Text>
         <Text style={s.subtitle}>Find the best card rewards{"\n"}for any store</Text>
 
-        {/* Debug banner */}
-        <View style={s.debugBox}>
-          <Text style={s.debugText}>🔧 Debug Mode: Check Metro console for OAuth logs</Text>
-        </View>
-
         {error && (
           <View style={s.errorBox}>
             <Text style={s.errorText}>⚠️ {error}</Text>
@@ -172,9 +165,6 @@ const s = StyleSheet.create({
   icon:          { fontSize: 44 },
   title:         { fontSize: 32, fontWeight: '900', color: '#4f46e5', marginBottom: 8 },
   subtitle:      { fontSize: 16, color: '#6b7280', textAlign: 'center', lineHeight: 26, marginBottom: 16 },
-  debugBox:      { backgroundColor: '#fff8dc', borderRadius: 12, padding: 10,
-                   marginBottom: 16, width: '100%', borderWidth: 2, borderColor: '#ffa500' },
-  debugText:     { color: '#b45309', fontSize: 12, textAlign: 'center', fontWeight: '600' },
   errorBox:      { backgroundColor: '#fee2e2', borderRadius: 12, padding: 12,
                    marginBottom: 16, width: '100%' },
   errorText:     { color: '#b91c1c', fontSize: 14, textAlign: 'center' },
