@@ -132,15 +132,16 @@ export const buildResultsForCategory = (category, allCards = []) => {
 
 // ─────────────────────────────────────────────
 // GENERATE OFFER ID
-// Deterministic hash — same offer always gets the same ID
-// Prevents duplicate offers on weekly re-sync
+// Deterministic hash — same offer for same user always gets the same ID
+// Prevents duplicate offers on multiple syncs
+// Updated to include userId to prevent cross-user conflicts
 // ─────────────────────────────────────────────
-export const generateOfferId = (merchantName, cashbackAmount, expiryDate) => {
-  const raw = `${merchantName.toLowerCase().trim()}_${cashbackAmount}_${expiryDate}`;
-  // Use full btoa then take last 20 chars (expiry is at the end — most unique part)
+export const generateOfferId = (userId, merchantName, cashbackAmount, expiryDate) => {
+  const raw = `${userId}_${merchantName.toLowerCase().trim()}_${cashbackAmount}_${expiryDate}`;
+  // Use full btoa then take last 28 chars for better uniqueness
   const encoded = btoa(unescape(encodeURIComponent(raw)))
     .replace(/[^a-zA-Z0-9]/g, '');
-  return encoded.slice(-20); // take LAST 20 chars, not first
+  return encoded.slice(-28);
 };
 
 
