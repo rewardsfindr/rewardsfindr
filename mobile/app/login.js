@@ -16,6 +16,7 @@ import { getAuthInstance } from '../lib/firebaseClient.js';
 // Configure Google Sign-In once at module level
 GoogleSignin.configure({
   webClientId: process.env.EXPO_PUBLIC_GOOGLE_CLIENT_ID,
+  scopes: ['profile', 'email'],
   offlineAccess: false,
 });
 
@@ -28,7 +29,7 @@ export default function LoginScreen() {
     setLoading(true);
     try {
       console.log('[Login] Checking Play Services...');
-      await GoogleSignin.hasPlayServices();
+      await GoogleSignin.hasPlayServices({ showPlayServicesUpdateDialog: true });
       
       console.log('[Login] Starting sign-in...');
       const userInfo = await GoogleSignin.signIn();
@@ -53,7 +54,6 @@ export default function LoginScreen() {
       console.error('[Login] Full error object:', JSON.stringify(err, Object.getOwnPropertyNames(err), 2));
       console.error('[Login] Error code:', err.code);
       console.error('[Login] Error message:', err.message);
-      console.error('[Login] Error stack:', err.stack);
       
       if (err.code === statusCodes.SIGN_IN_CANCELLED) {
         console.log('[Login] User cancelled');
@@ -62,6 +62,8 @@ export default function LoginScreen() {
         setError('Sign-in already in progress.');
       } else if (err.code === statusCodes.PLAY_SERVICES_NOT_AVAILABLE) {
         setError('Google Play Services not available.');
+      } else if (err.code === '12500') {
+        setError('Developer error. Check console logs.');
       } else {
         setError(`Sign-in failed: ${err.message}`);
       }
