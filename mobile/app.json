@@ -16,6 +16,14 @@
       "versionCode": 1
     },
     "plugins": [
+      [
+        "expo-build-properties",
+        {
+          "android": {
+            "kotlinVersion": "1.9.25"
+          }
+        }
+      ],
       "@react-native-google-signin/google-signin"
     ],
     "extra": {
