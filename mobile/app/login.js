@@ -27,28 +27,43 @@ export default function LoginScreen() {
     setError(null);
     setLoading(true);
     try {
+      console.log('[Login] Checking Play Services...');
       await GoogleSignin.hasPlayServices();
+      
+      console.log('[Login] Starting sign-in...');
       const userInfo = await GoogleSignin.signIn();
+      console.log('[Login] Sign-in response:', JSON.stringify(userInfo, null, 2));
+      
       const idToken = userInfo.data?.idToken ?? userInfo.idToken;
+      console.log('[Login] idToken present:', !!idToken);
 
       if (!idToken) {
         throw new Error('No idToken returned from Google Sign-In');
       }
 
+      console.log('[Login] Creating Firebase credential...');
       const auth = getAuthInstance();
       const credential = GoogleAuthProvider.credential(idToken);
+      
+      console.log('[Login] Signing in to Firebase...');
       await signInWithCredential(auth, credential);
+      console.log('[Login] ✅ Firebase sign-in successful');
       // _layout.js onAuthStateChanged fires and redirects to '/' automatically
     } catch (err) {
+      console.error('[Login] Full error object:', JSON.stringify(err, Object.getOwnPropertyNames(err), 2));
+      console.error('[Login] Error code:', err.code);
+      console.error('[Login] Error message:', err.message);
+      console.error('[Login] Error stack:', err.stack);
+      
       if (err.code === statusCodes.SIGN_IN_CANCELLED) {
+        console.log('[Login] User cancelled');
         // user cancelled - not an error
       } else if (err.code === statusCodes.IN_PROGRESS) {
         setError('Sign-in already in progress.');
       } else if (err.code === statusCodes.PLAY_SERVICES_NOT_AVAILABLE) {
         setError('Google Play Services not available.');
       } else {
-        console.error('[Login] Sign-in error:', err);
-        setError('Sign-in failed. Please try again.');
+        setError(`Sign-in failed: ${err.message}`);
       }
       setLoading(false);
     }
