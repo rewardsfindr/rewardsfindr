@@ -1,6 +1,6 @@
 // ─────────────────────────────────────────────
 // LOGIN SCREEN
-// Google Sign-In via expo-auth-session + Firebase credential
+// Google Sign-In via @react-native-google-signin + Firebase credential
 // On success, _layout.js auth listener redirects to home automatically
 // ─────────────────────────────────────────────
 import React, { useEffect, useState } from 'react';
@@ -9,62 +9,48 @@ import {
   StyleSheet, SafeAreaView,
 } from 'react-native';
 import { Stack } from 'expo-router';
-import * as Google from 'expo-auth-session/providers/google';
-import * as WebBrowser from 'expo-web-browser';
+import { GoogleSignin, statusCodes } from '@react-native-google-signin/google-signin';
 import { GoogleAuthProvider, signInWithCredential } from 'firebase/auth';
 import { getAuthInstance } from '../lib/firebaseClient.js';
 
-// Required to handle redirect back from browser after OAuth
-WebBrowser.maybeCompleteAuthSession();
-
-// Explicitly set to the URI registered in Google Cloud Console.
-// expo-auth-session no longer respects useProxy in the second argument;
-// without this, it auto-generates com.rewardsfindr.app:/oauthredirect
-// from app.json scheme, which Google rejects.
-const REDIRECT_URI = 'https://auth.expo.io/@rewardsfindr/rewardsfindr';
+// Configure Google Sign-In once at module level
+GoogleSignin.configure({
+  webClientId: process.env.EXPO_PUBLIC_GOOGLE_CLIENT_ID,
+  androidClientId: '963869613685-2n48sjs3ki0l08ks56ukjuik4nr9mesv.apps.googleusercontent.com',
+  offlineAccess: false,
+});
 
 export default function LoginScreen() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
 
-  const [request, response, promptAsync] = Google.useAuthRequest({
-    webClientId: process.env.EXPO_PUBLIC_GOOGLE_CLIENT_ID,
-    androidClientId: process.env.EXPO_PUBLIC_GOOGLE_CLIENT_ID,
-    iosClientId: process.env.EXPO_PUBLIC_GOOGLE_CLIENT_ID,
-    redirectUri: REDIRECT_URI,
-  });
-
-  useEffect(() => {
-    if (response?.type === 'success') {
-      // Different response structure for web vs native
-      const idToken = response.params?.id_token || response.authentication?.idToken;
-      const accessToken = response.params?.access_token || response.authentication?.accessToken;
-      
-      if (idToken || accessToken) {
-        handleGoogleSignIn(idToken, accessToken);
-      } else {
-        console.error('[Login] No token in response:', response);
-        setError('Authentication failed. No token received.');
-        setLoading(false);
-      }
-    } else if (response?.type === 'error') {
-      console.error('[Login] OAuth error:', response.error);
-      setError('Google sign-in failed. Please try again.');
-      setLoading(false);
-    } else if (response?.type === 'dismiss') {
-      setLoading(false);
-    }
-  }, [response]);
-
-  const handleGoogleSignIn = async (idToken, accessToken) => {
+  const handleSignIn = async () => {
+    setError(null);
+    setLoading(true);
     try {
+      await GoogleSignin.hasPlayServices();
+      const userInfo = await GoogleSignin.signIn();
+      const idToken = userInfo.data?.idToken ?? userInfo.idToken;
+
+      if (!idToken) {
+        throw new Error('No idToken returned from Google Sign-In');
+      }
+
       const auth = getAuthInstance();
-      const credential = GoogleAuthProvider.credential(idToken, accessToken);
+      const credential = GoogleAuthProvider.credential(idToken);
       await signInWithCredential(auth, credential);
       // _layout.js onAuthStateChanged fires and redirects to '/' automatically
     } catch (err) {
-      console.error('[Login] Sign-in error:', err);
-      setError('Sign-in failed. Please try again.');
+      if (err.code === statusCodes.SIGN_IN_CANCELLED) {
+        // user cancelled - not an error
+      } else if (err.code === statusCodes.IN_PROGRESS) {
+        setError('Sign-in already in progress.');
+      } else if (err.code === statusCodes.PLAY_SERVICES_NOT_AVAILABLE) {
+        setError('Google Play Services not available.');
+      } else {
+        console.error('[Login] Sign-in error:', err);
+        setError('Sign-in failed. Please try again.');
+      }
       setLoading(false);
     }
   };
@@ -88,13 +74,9 @@ export default function LoginScreen() {
         )}
 
         <TouchableOpacity
-          style={[s.googleBtn, (!request || loading) && s.disabled]}
-          onPress={() => {
-            setError(null);
-            setLoading(true);
-            promptAsync();
-          }}
-          disabled={!request || loading}
+          style={[s.googleBtn, loading && s.disabled]}
+          onPress={handleSignIn}
+          disabled={loading}
         >
           {loading ? (
             <ActivityIndicator color="#1f2937" />
