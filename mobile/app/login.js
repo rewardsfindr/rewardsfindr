@@ -17,6 +17,12 @@ import { getAuthInstance } from '../lib/firebaseClient.js';
 // Required to handle redirect back from browser after OAuth
 WebBrowser.maybeCompleteAuthSession();
 
+// Explicitly set to the URI registered in Google Cloud Console.
+// expo-auth-session no longer respects useProxy in the second argument;
+// without this, it auto-generates com.rewardsfindr.app:/oauthredirect
+// from app.json scheme, which Google rejects.
+const REDIRECT_URI = 'https://auth.expo.io/@rewardsfindr/rewardsfindr';
+
 export default function LoginScreen() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
@@ -25,8 +31,7 @@ export default function LoginScreen() {
     webClientId: process.env.EXPO_PUBLIC_GOOGLE_CLIENT_ID,
     androidClientId: process.env.EXPO_PUBLIC_GOOGLE_CLIENT_ID,
     iosClientId: process.env.EXPO_PUBLIC_GOOGLE_CLIENT_ID,
-  }, {
-    useProxy: true, // Force use of https://auth.expo.io proxy instead of exp:// local redirect
+    redirectUri: REDIRECT_URI,
   });
 
   useEffect(() => {
