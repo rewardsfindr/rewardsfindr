@@ -14,9 +14,10 @@ import { GoogleAuthProvider, signInWithCredential } from 'firebase/auth';
 import { getAuthInstance } from '../lib/firebaseClient.js';
 
 // Configure Google Sign-In once at module level
+// NOTE: androidClientId is NOT supported by this library version.
+// The Android client is auto-resolved from google-services.json via the native plugin.
 GoogleSignin.configure({
   webClientId: process.env.EXPO_PUBLIC_GOOGLE_CLIENT_ID,
-  androidClientId: '963869613685-2n48sjs3ki0l08ks56ukjuik4nr9mesv.apps.googleusercontent.com',
   scopes: ['profile', 'email'],
   offlineAccess: false,
 });
