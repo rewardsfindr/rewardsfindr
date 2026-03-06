@@ -16,6 +16,7 @@ import { getAuthInstance } from '../lib/firebaseClient.js';
 // Configure Google Sign-In once at module level
 GoogleSignin.configure({
   webClientId: process.env.EXPO_PUBLIC_GOOGLE_CLIENT_ID,
+  androidClientId: '963869613685-2n48sjs3ki0l08ks56ukjuik4nr9mesv.apps.googleusercontent.com',
   scopes: ['profile', 'email'],
   offlineAccess: false,
 });
