@@ -28,11 +28,6 @@
       ],
       "@react-native-google-signin/google-signin"
     ],
-    "extra": {
-      "eas": {
-        "projectId": "REPLACE_WITH_EAS_PROJECT_ID"
-      }
-    },
     "web": {
       "bundler": "metro"
     }
