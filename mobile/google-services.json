@@ -22,6 +22,14 @@
           }
         },
         {
+          "client_id": "963869613685-915at7ohp13d8g0br73vbas6t7e6cu9d.apps.googleusercontent.com",
+          "client_type": 1,
+          "android_info": {
+            "package_name": "com.rewardsfindr.app",
+            "certificate_hash": "0a793b29c8ecc61ada4a5e5bb04751d1f9ebd7e7"
+          }
+        },
+        {
           "client_id": "963869613685-7u94c53t5grma47e1qnt5b0hucfa3bi5.apps.googleusercontent.com",
           "client_type": 3
         }
