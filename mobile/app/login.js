@@ -3,7 +3,7 @@
 // Google Sign-In via @react-native-google-signin + Firebase credential
 // On success, _layout.js auth listener redirects to home automatically
 // ─────────────────────────────────────────────
-import React, { useEffect, useState } from 'react';
+import React, { useState } from 'react';
 import {
   View, Text, TouchableOpacity, ActivityIndicator,
   StyleSheet, SafeAreaView,
@@ -13,9 +13,8 @@ import { GoogleSignin, statusCodes } from '@react-native-google-signin/google-si
 import { GoogleAuthProvider, signInWithCredential } from 'firebase/auth';
 import { getAuthInstance } from '../lib/firebaseClient.js';
 
-// Configure Google Sign-In once at module level
-// NOTE: androidClientId is NOT supported by this library version.
-// The Android client is auto-resolved from google-services.json via the native plugin.
+// Android client is auto-resolved from google-services.json via the native plugin.
+// webClientId must be the Web OAuth client (type 3), NOT the Android client.
 GoogleSignin.configure({
   webClientId: process.env.EXPO_PUBLIC_GOOGLE_CLIENT_ID,
   scopes: ['profile', 'email'],
@@ -30,46 +29,38 @@ export default function LoginScreen() {
     setError(null);
     setLoading(true);
     try {
-      console.log('[Login] Checking Play Services...');
+      // Ensure Google Play Services is available and up to date
       await GoogleSignin.hasPlayServices({ showPlayServicesUpdateDialog: true });
-      
-      console.log('[Login] Starting sign-in...');
+
+      // Trigger the native Google account picker
       const userInfo = await GoogleSignin.signIn();
-      console.log('[Login] Sign-in response:', JSON.stringify(userInfo, null, 2));
-      
+
+      // Support both library v12 (userInfo.data.idToken) and v13+ (userInfo.idToken)
       const idToken = userInfo.data?.idToken ?? userInfo.idToken;
-      console.log('[Login] idToken present:', !!idToken);
 
       if (!idToken) {
         throw new Error('No idToken returned from Google Sign-In');
       }
 
-      console.log('[Login] Creating Firebase credential...');
+      // Exchange Google idToken for a Firebase credential and sign in
       const auth = getAuthInstance();
       const credential = GoogleAuthProvider.credential(idToken);
-      
-      console.log('[Login] Signing in to Firebase...');
       await signInWithCredential(auth, credential);
-      console.log('[Login] ✅ Firebase sign-in successful');
       // _layout.js onAuthStateChanged fires and redirects to '/' automatically
     } catch (err) {
-      console.error('[Login] Full error object:', JSON.stringify(err, Object.getOwnPropertyNames(err), 2));
-      console.error('[Login] Error code:', err.code);
-      console.error('[Login] Error message:', err.message);
-      
       if (err.code === statusCodes.SIGN_IN_CANCELLED) {
-        console.log('[Login] User cancelled');
-        // user cancelled - not an error
+        // User dismissed the picker — not an error, just reset loading
+        setLoading(false);
       } else if (err.code === statusCodes.IN_PROGRESS) {
         setError('Sign-in already in progress.');
+        setLoading(false);
       } else if (err.code === statusCodes.PLAY_SERVICES_NOT_AVAILABLE) {
         setError('Google Play Services not available.');
-      } else if (err.code === '12500') {
-        setError('Developer error. Check console logs.');
+        setLoading(false);
       } else {
         setError(`Sign-in failed: ${err.message}`);
+        setLoading(false);
       }
-      setLoading(false);
     }
   };
 
