@@ -30,6 +30,12 @@
     ],
     "web": {
       "bundler": "metro"
-    }
+    },
+    "extra": {
+      "eas": {
+        "projectId": "52455271-4119-470a-b45d-a02938f5b7ac"
+      }
+    },
+    "owner": "rewardsfindr"
   }
 }
