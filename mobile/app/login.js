@@ -1,66 +1,66 @@
 // ─────────────────────────────────────────────
 // LOGIN SCREEN
-// Google Sign-In via expo-auth-session + Firebase credential
+// Google Sign-In via @react-native-google-signin + Firebase credential
 // On success, _layout.js auth listener redirects to home automatically
 // ─────────────────────────────────────────────
-import React, { useEffect, useState } from 'react';
+import React, { useState } from 'react';
 import {
   View, Text, TouchableOpacity, ActivityIndicator,
   StyleSheet, SafeAreaView,
 } from 'react-native';
 import { Stack } from 'expo-router';
-import * as Google from 'expo-auth-session/providers/google';
-import * as WebBrowser from 'expo-web-browser';
+import { GoogleSignin, statusCodes } from '@react-native-google-signin/google-signin';
 import { GoogleAuthProvider, signInWithCredential } from 'firebase/auth';
 import { getAuthInstance } from '../lib/firebaseClient.js';
 
-// Required to handle redirect back from browser after OAuth
-WebBrowser.maybeCompleteAuthSession();
+// Android client is auto-resolved from google-services.json via the native plugin.
+// webClientId must be the Web OAuth client (type 3), NOT the Android client.
+GoogleSignin.configure({
+  webClientId: process.env.EXPO_PUBLIC_GOOGLE_CLIENT_ID,
+  scopes: ['profile', 'email'],
+  offlineAccess: false,
+});
 
 export default function LoginScreen() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
 
-  const [request, response, promptAsync] = Google.useAuthRequest({
-    webClientId: process.env.EXPO_PUBLIC_GOOGLE_CLIENT_ID,
-    androidClientId: process.env.EXPO_PUBLIC_GOOGLE_CLIENT_ID,
-    iosClientId: process.env.EXPO_PUBLIC_GOOGLE_CLIENT_ID,
-  }, {
-    useProxy: true, // Force use of https://auth.expo.io proxy instead of exp:// local redirect
-  });
-
-  useEffect(() => {
-    if (response?.type === 'success') {
-      // Different response structure for web vs native
-      const idToken = response.params?.id_token || response.authentication?.idToken;
-      const accessToken = response.params?.access_token || response.authentication?.accessToken;
-      
-      if (idToken || accessToken) {
-        handleGoogleSignIn(idToken, accessToken);
-      } else {
-        console.error('[Login] No token in response:', response);
-        setError('Authentication failed. No token received.');
-        setLoading(false);
-      }
-    } else if (response?.type === 'error') {
-      console.error('[Login] OAuth error:', response.error);
-      setError('Google sign-in failed. Please try again.');
-      setLoading(false);
-    } else if (response?.type === 'dismiss') {
-      setLoading(false);
-    }
-  }, [response]);
-
-  const handleGoogleSignIn = async (idToken, accessToken) => {
+  const handleSignIn = async () => {
+    setError(null);
+    setLoading(true);
     try {
+      // Ensure Google Play Services is available and up to date
+      await GoogleSignin.hasPlayServices({ showPlayServicesUpdateDialog: true });
+
+      // Trigger the native Google account picker
+      const userInfo = await GoogleSignin.signIn();
+
+      // Support both library v12 (userInfo.data.idToken) and v13+ (userInfo.idToken)
+      const idToken = userInfo.data?.idToken ?? userInfo.idToken;
+
+      if (!idToken) {
+        throw new Error('No idToken returned from Google Sign-In');
+      }
+
+      // Exchange Google idToken for a Firebase credential and sign in
       const auth = getAuthInstance();
-      const credential = GoogleAuthProvider.credential(idToken, accessToken);
+      const credential = GoogleAuthProvider.credential(idToken);
       await signInWithCredential(auth, credential);
       // _layout.js onAuthStateChanged fires and redirects to '/' automatically
     } catch (err) {
-      console.error('[Login] Sign-in error:', err);
-      setError('Sign-in failed. Please try again.');
-      setLoading(false);
+      if (err.code === statusCodes.SIGN_IN_CANCELLED) {
+        // User dismissed the picker — not an error, just reset loading
+        setLoading(false);
+      } else if (err.code === statusCodes.IN_PROGRESS) {
+        setError('Sign-in already in progress.');
+        setLoading(false);
+      } else if (err.code === statusCodes.PLAY_SERVICES_NOT_AVAILABLE) {
+        setError('Google Play Services not available.');
+        setLoading(false);
+      } else {
+        setError(`Sign-in failed: ${err.message}`);
+        setLoading(false);
+      }
     }
   };
 
@@ -83,13 +83,9 @@ export default function LoginScreen() {
         )}
 
         <TouchableOpacity
-          style={[s.googleBtn, (!request || loading) && s.disabled]}
-          onPress={() => {
-            setError(null);
-            setLoading(true);
-            promptAsync();
-          }}
-          disabled={!request || loading}
+          style={[s.googleBtn, loading && s.disabled]}
+          onPress={handleSignIn}
+          disabled={loading}
         >
           {loading ? (
             <ActivityIndicator color="#1f2937" />

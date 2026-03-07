@@ -2,25 +2,40 @@
   "expo": {
     "name": "RewardsFindr",
     "slug": "rewardsfindr",
+    "scheme": "rewardsfindr",
     "version": "1.0.0",
     "orientation": "portrait",
     "userInterfaceStyle": "light",
     "ios": {
       "supportsTablet": false,
       "bundleIdentifier": "com.rewardsfindr.app",
-      "buildNumber": "1"
+      "buildNumber": "1",
+      "googleServicesFile": "./GoogleService-Info.plist"
     },
     "android": {
       "package": "com.rewardsfindr.app",
-      "versionCode": 1
+      "versionCode": 1,
+      "googleServicesFile": "./google-services.json"
+    },
+    "plugins": [
+      [
+        "expo-build-properties",
+        {
+          "android": {
+            "kotlinVersion": "1.9.25"
+          }
+        }
+      ],
+      "@react-native-google-signin/google-signin"
+    ],
+    "web": {
+      "bundler": "metro"
     },
     "extra": {
       "eas": {
-        "projectId": "REPLACE_WITH_EAS_PROJECT_ID"
+        "projectId": "52455271-4119-470a-b45d-a02938f5b7ac"
       }
     },
-    "web": {
-      "bundler": "metro"
-    }
+    "owner": "rewardsfindr"
   }
 }
