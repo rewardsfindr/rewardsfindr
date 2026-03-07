@@ -60,5 +60,6 @@ mobile/ios/
 *.key
 *.mobileprovision
 *.orig.*
-google-services.json
-GoogleService-Info.plist
+# NOTE: google-services.json and GoogleService-Info.plist are intentionally tracked.
+# They contain no secrets — OAuth client IDs are public identifiers.
+# Required by EAS Build to configure native Android/iOS Google Sign-In.
