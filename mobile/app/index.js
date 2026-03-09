@@ -35,18 +35,15 @@ export default function HomeScreen() {
   };
 
   const navigateToResults = (data, query) => {
-    if (!data.store && (!data.personalizedOffers || data.personalizedOffers.length === 0)) {
+    if (!data.offers || data.offers.length === 0) {
       router.push({ pathname: '/results', params: { notFound: query } });
       return;
     }
     router.push({
       pathname: '/results',
       params: {
-        storeName: data.store || query,
-        category:  data.category,
-        quality:   data.quality,
-        results:   JSON.stringify(data.cards?.slice(0, 3) ?? []),
-        personalizedOffers: JSON.stringify(data.personalizedOffers ?? []),
+        storeName: query,
+        offers: JSON.stringify(data.offers),
       },
     });
   };
