@@ -5,40 +5,10 @@
 // Merchant:  span.r9jbijk  (mds-body-small-heavier)
 // Value:     span.r9jbijj  (mds-body-large-heavier)
 // Activated: aria-label contains "Add Offer" when not activated
-// Expiry, MinSpend, PurchaseType: parsed from full tile text content
+// Expiry + MinSpend: NOT available in grid tile HTML (Chase renders
+//   these in a click-to-open detail modal, outside the captured DOM).
 // ─────────────────────────────────────────────
 import * as cheerio from 'cheerio';
-
-function parseExpiryDate(text) {
-  // "Expires 5/31/25", "Expires 05/31/2025"
-  const slashMatch = text.match(/expires?\s+(\d{1,2}\/\d{1,2}\/\d{2,4})/i);
-  if (slashMatch) {
-    const d = new Date(slashMatch[1]);
-    if (!isNaN(d)) return d.toISOString().split('T')[0];
-  }
-  // "Expires May 31, 2025"
-  const wordMatch = text.match(/expires?\s+([A-Za-z]+ \d{1,2},?\s*\d{4})/i);
-  if (wordMatch) {
-    const d = new Date(wordMatch[1]);
-    if (!isNaN(d)) return d.toISOString().split('T')[0];
-  }
-  return null;
-}
-
-function parseMinimumSpend(text) {
-  const patterns = [
-    /minimum\s+(?:purchase\s+of\s+)?\$(\d+(?:\.\d+)?)/i,
-    /on\s+purchases?\s+of\s+\$(\d+(?:\.\d+)?)/i,
-    /spend\s+\$(\d+(?:\.\d+)?)/i,
-    /\$(\d+(?:\.\d+)?)\s+(?:or more|minimum)/i,
-    /min\.?\s+\$(\d+(?:\.\d+)?)/i,
-  ];
-  for (const pattern of patterns) {
-    const match = text.match(pattern);
-    if (match) return parseFloat(match[1]);
-  }
-  return 0;
-}
 
 function parsePurchaseType(text) {
   const lower = text.toLowerCase();
@@ -54,7 +24,6 @@ export function parseChaseOffers(html) {
   const $ = cheerio.load(html);
   const offers = [];
   const seen = new Set();
-  let debugCount = 0;
 
   $('[data-testid="commerce-tile"]').each((i, el) => {
     try {
@@ -76,28 +45,16 @@ export function parseChaseOffers(html) {
       else if (dollarMatch) { cashbackAmount = parseFloat(dollarMatch[1]); cashbackType = 'fixed'; }
 
       const ariaLabel = $el.attr('aria-label') || '';
-      const isActivated = !ariaLabel.toLowerCase().includes('add offer');
-
-      // Use full tile text for expiry, min spend, purchase type
-      const tileText = $el.text();
-
-      // DEBUG: log first 3 tile texts to verify format
-      if (debugCount < 3) {
-        console.log(`[Chase DEBUG] tile[${debugCount}] text: ${tileText.replace(/\s+/g, ' ').trim().substring(0, 200)}`);
-        debugCount++;
-      }
-
-      const expiryDate   = parseExpiryDate(tileText);
-      const minimumSpend = parseMinimumSpend(tileText);
-      const purchaseType = parsePurchaseType(tileText);
+      const isActivated  = !ariaLabel.toLowerCase().includes('add offer');
+      const purchaseType = parsePurchaseType($el.text());
 
       offers.push({
         merchantName,
         offerDescription: valueText,
         cashbackAmount,
         cashbackType,
-        minimumSpend,
-        expiryDate,
+        minimumSpend: 0,
+        expiryDate: null,
         purchaseType,
         category: 'other',
         isActivated,
