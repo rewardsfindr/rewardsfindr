@@ -16,12 +16,12 @@ import { getAuthInstance } from '../lib/firebaseClient.js';
 
 const BANK_CONFIG = {
   chase: {
-    url: 'https://www.chase.com/personal/credit-cards/cardmember-offers',
-    // Post-login authenticated offers URL (different domain + path after login)
+    // Chase homepage — always works, has login form
+    url: 'https://www.chase.com',
+    // Post-login authenticated offers URL
     offersUrl: 'https://secure.chase.com/web/auth/dashboard#/dashboard/merchantOffers/offer-hub',
     label: 'Chase Offers',
     color: '#1a3a6b',
-    // Matches both pre-login and post-login offers pages
     offersPaths: ['/cardmember-offers', 'merchantOffers'],
     loginPaths: ['/sign-in', '/logon', '/login', '/sso', '/auth', '/identify', '/challenge'],
     gridSelector: '[data-testid="grid-items-container"]',
@@ -116,11 +116,10 @@ const buildCaptureJs = (gridSelector) => `
 export default function SyncWebView({ visible, bank, onClose, onSuccess }) {
   const webViewRef = useRef(null);
   const [syncing, setSyncing]       = useState(false);
-  const [currentCard, setCurrentCard] = useState(null);  // e.g. "Sapphire Reserve (...0483)"
-  const [currentUrl, setCurrentUrl]   = useState('');    // tracks live WebView URL
+  const [currentCard, setCurrentCard] = useState(null);
+  const [currentUrl, setCurrentUrl]   = useState('');
   const config = BANK_CONFIG[bank] || BANK_CONFIG.chase;
 
-  // Reset state when modal closes so next open starts fresh
   useEffect(() => {
     if (!visible) {
       setCurrentCard(null);
@@ -138,13 +137,11 @@ export default function SyncWebView({ visible, bank, onClose, onSuccess }) {
     setCurrentUrl(navState.url);
   };
 
-  // Detect selected card each time a page finishes loading
   const handleLoadEnd = () => {
     webViewRef.current?.injectJavaScript(DETECT_CARD_JS);
   };
 
   const handleGoToOffers = () => {
-    // Use authenticated offersUrl if available, otherwise fall back to config.url
     const target = config.offersUrl || config.url;
     webViewRef.current?.injectJavaScript(
       `window.location.replace('${target}'); true;`
@@ -201,7 +198,6 @@ export default function SyncWebView({ visible, bank, onClose, onSuccess }) {
     }
   };
 
-  // Button label: "Sync Sapphire Reserve" or "Sync Offers" as fallback
   const { cardName } = parseCardLabel(currentCard);
   const syncBtnLabel = cardName ? `Sync ${cardName}` : 'Sync Offers';
 
@@ -238,7 +234,6 @@ export default function SyncWebView({ visible, bank, onClose, onSuccess }) {
 
           <View style={s.footer}>
             {isOnOffersPage ? (
-              // On offers page: show detected card + sync button
               <>
                 <Text style={s.hint} numberOfLines={1}>
                   {currentCard ? `💳 ${currentCard}` : 'Select a card above, then tap Sync.'}
@@ -254,7 +249,6 @@ export default function SyncWebView({ visible, bank, onClose, onSuccess }) {
                 </TouchableOpacity>
               </>
             ) : (
-              // Not on offers page: prompt user to navigate there
               <>
                 <Text style={s.hint}>
                   Log in above, then tap the button to go to your offers.
