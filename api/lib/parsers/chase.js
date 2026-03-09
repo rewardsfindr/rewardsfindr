@@ -4,18 +4,20 @@
 // Tile:      [data-testid="commerce-tile"]
 // Merchant:  span.r9jbijk  (mds-body-small-heavier)
 // Value:     span.r9jbijj  (mds-body-large-heavier)
-// Activated: aria-label ends with "Remove Offer" (vs "Add Offer")
-// Expiry, MinSpend, PurchaseType: parsed from aria-label text
+// Activated: aria-label contains "Add Offer" when not activated
+// Expiry, MinSpend, PurchaseType: parsed from full tile text content
 // ─────────────────────────────────────────────
 import * as cheerio from 'cheerio';
 
-function parseExpiryDate(ariaLabel) {
-  const slashMatch = ariaLabel.match(/expires?\s+(\d{1,2}\/\d{1,2}\/\d{2,4})/i);
+function parseExpiryDate(text) {
+  // "Expires 5/31/25", "Expires 05/31/2025"
+  const slashMatch = text.match(/expires?\s+(\d{1,2}\/\d{1,2}\/\d{2,4})/i);
   if (slashMatch) {
     const d = new Date(slashMatch[1]);
     if (!isNaN(d)) return d.toISOString().split('T')[0];
   }
-  const wordMatch = ariaLabel.match(/expires?\s+([A-Za-z]+ \d{1,2},?\s*\d{4})/i);
+  // "Expires May 31, 2025"
+  const wordMatch = text.match(/expires?\s+([A-Za-z]+ \d{1,2},?\s*\d{4})/i);
   if (wordMatch) {
     const d = new Date(wordMatch[1]);
     if (!isNaN(d)) return d.toISOString().split('T')[0];
@@ -23,22 +25,23 @@ function parseExpiryDate(ariaLabel) {
   return null;
 }
 
-function parseMinimumSpend(ariaLabel) {
+function parseMinimumSpend(text) {
   const patterns = [
     /minimum\s+(?:purchase\s+of\s+)?\$(\d+(?:\.\d+)?)/i,
     /on\s+purchases?\s+of\s+\$(\d+(?:\.\d+)?)/i,
     /spend\s+\$(\d+(?:\.\d+)?)/i,
     /\$(\d+(?:\.\d+)?)\s+(?:or more|minimum)/i,
+    /min\.?\s+\$(\d+(?:\.\d+)?)/i,
   ];
   for (const pattern of patterns) {
-    const match = ariaLabel.match(pattern);
+    const match = text.match(pattern);
     if (match) return parseFloat(match[1]);
   }
   return 0;
 }
 
-function parsePurchaseType(ariaLabel) {
-  const lower = ariaLabel.toLowerCase();
+function parsePurchaseType(text) {
+  const lower = text.toLowerCase();
   const hasOnline = lower.includes('online');
   const hasInStore = lower.includes('in-store') || lower.includes('in store') || lower.includes('in-stores');
   if (hasOnline && hasInStore) return 'both';
@@ -73,17 +76,20 @@ export function parseChaseOffers(html) {
       else if (dollarMatch) { cashbackAmount = parseFloat(dollarMatch[1]); cashbackType = 'fixed'; }
 
       const ariaLabel = $el.attr('aria-label') || '';
+      const isActivated = !ariaLabel.toLowerCase().includes('add offer');
 
-      // DEBUG: log first 3 aria-labels so we can see exact format for expiry/minspend
+      // Use full tile text for expiry, min spend, purchase type
+      const tileText = $el.text();
+
+      // DEBUG: log first 3 tile texts to verify format
       if (debugCount < 3) {
-        console.log(`[Chase DEBUG] aria-label[${debugCount}]: ${ariaLabel}`);
+        console.log(`[Chase DEBUG] tile[${debugCount}] text: ${tileText.replace(/\s+/g, ' ').trim().substring(0, 200)}`);
         debugCount++;
       }
 
-      const isActivated  = !ariaLabel.toLowerCase().includes('add offer');
-      const expiryDate   = parseExpiryDate(ariaLabel);
-      const minimumSpend = parseMinimumSpend(ariaLabel);
-      const purchaseType = parsePurchaseType(ariaLabel);
+      const expiryDate   = parseExpiryDate(tileText);
+      const minimumSpend = parseMinimumSpend(tileText);
+      const purchaseType = parsePurchaseType(tileText);
 
       offers.push({
         merchantName,
