@@ -4,7 +4,7 @@
 // Loads directly to bank's offers page.
 // After login, auto-redirects back to offers page.
 // Tapping "Sync Offers" extracts only the offers
-// section (≤300KB) and POSTs to /api/offers/parse.
+// section (≤200KB) and POSTs to /api/offers/parse.
 // ─────────────────────────────────────────────
 import React, { useRef, useState } from 'react';
 import {
@@ -36,8 +36,8 @@ const API_BASE_URL = process.env.EXPO_PUBLIC_API_URL || 'http://localhost:3001';
 
 // Injected when user taps "Sync Offers".
 // Tries to find just the offers container to avoid sending
-// the full page HTML (~5-10MB). Falls back to a 300KB
-// truncated slice of the full page if no container found.
+// the full page HTML (~5-10MB). Hard cap at 200KB to stay
+// within the backend's 512KB JSON body limit.
 const CAPTURE_JS = `
   (function() {
     try {
@@ -59,7 +59,7 @@ const CAPTURE_JS = `
         }
       }
       var html = container ? container.outerHTML : document.documentElement.outerHTML;
-      var MAX = 300000; // 300KB hard cap
+      var MAX = 200000; // 200KB hard cap
       if (html.length > MAX) html = html.substring(0, MAX);
       window.ReactNativeWebView.postMessage(JSON.stringify({ type: 'CAPTURE_HTML', html: html }));
     } catch(e) {

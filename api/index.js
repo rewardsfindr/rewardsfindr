@@ -12,7 +12,8 @@ const PORT = process.env.PORT || 3001;
 
 // Middleware
 app.use(cors());
-app.use(express.json());
+// Raised from default 100KB to 512KB to handle bank offers HTML payloads
+app.use(express.json({ limit: '512kb' }));
 
 // Request logging
 app.use((req, res, next) => {
