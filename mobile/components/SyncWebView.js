@@ -1,5 +1,14 @@
 // ─────────────────────────────────────────────
-// SYNC WEBVIEW MODAL - DEBUG BUILD
+// SYNC WEBVIEW MODAL
+// Multi-card flow:
+//   1. On first load, detect credit cards only (keyword filter).
+//      cardIndexRef is initialized to the position of the currently
+//      active card so we iterate from there and wrap around.
+//   2. User taps Sync — captures current card, sends to API.
+//   3. After sync, auto-switches to next card (wraps around).
+//   4. CARD_SWITCHED verifies label — retries up to 3x if not confirmed.
+//   5. On confirmed switch, Sync button reappears for next card.
+//   6. After all cards done, shows Done button.
 // ─────────────────────────────────────────────
 import React, { useRef, useState, useEffect } from 'react';
 import {
@@ -42,7 +51,6 @@ const CHASE_CREDIT_CARD_KEYWORDS = [
   'british', 'aeroplan', 'reserve', 'preferred', 'unlimited', 'plus',
 ];
 
-// DEBUG: logs ALL options (including filtered ones) so we can see exact labels/indices
 const DETECT_CARDS_JS = `
   (function() {
     try {
@@ -50,17 +58,14 @@ const DETECT_CARDS_JS = `
       var sel = document.querySelector('mds-select[id="select-credit-card-account"]');
       if (sel) {
         var opts = sel.querySelectorAll('mds-select-option');
-        var allOpts = [];
         var cards = [];
         opts.forEach(function(opt, i) {
           var rawLabel = opt.getAttribute('label') || '';
-          var value = opt.getAttribute('value') || String(i);
           var lowerLabel = rawLabel.toLowerCase();
           var isCreditCard = KEYWORDS.some(function(k) { return lowerLabel.indexOf(k) !== -1; });
-          allOpts.push({ domIndex: i, label: rawLabel, value: value, passedFilter: isCreditCard });
-          if (isCreditCard) {
-            cards.push({ label: rawLabel, value: value, index: i });
-          }
+          if (!isCreditCard) return;
+          var value = opt.getAttribute('value') || String(i);
+          cards.push({ label: rawLabel, value: value, index: i });
         });
         var selectedOpt = sel.querySelector('mds-select-option[selected="true"]');
         var selectedLabel = selectedOpt ? (selectedOpt.getAttribute('label') || '') : '';
@@ -68,14 +73,11 @@ const DETECT_CARDS_JS = `
           type: 'CARDS_DETECTED',
           cards: cards,
           selectedLabel: selectedLabel,
-          debug_allOptions: allOpts,
         }));
         return;
       }
-      window.ReactNativeWebView.postMessage(JSON.stringify({ type: 'CARDS_DETECTED', cards: [], selectedLabel: null, debug_allOptions: [] }));
-    } catch(e) {
-      window.ReactNativeWebView.postMessage(JSON.stringify({ type: 'CARDS_DETECTED', cards: [], selectedLabel: null, debug_error: e.message }));
-    }
+      window.ReactNativeWebView.postMessage(JSON.stringify({ type: 'CARDS_DETECTED', cards: [], selectedLabel: null }));
+    } catch(e) {}
   })();
   true;
 `;
@@ -91,7 +93,7 @@ const buildSwitchCardJs = (index, timeoutMs) => `
       var opts = sel.querySelectorAll('mds-select-option');
       var target = opts[${index}];
       if (!target) {
-        window.ReactNativeWebView.postMessage(JSON.stringify({ type: 'CARD_SWITCH_ERROR', message: 'Card index out of range: ' + ${index} + ' of ' + opts.length }));
+        window.ReactNativeWebView.postMessage(JSON.stringify({ type: 'CARD_SWITCH_ERROR', message: 'Card index out of range' }));
         return;
       }
       target.click();
@@ -154,11 +156,12 @@ const parseCardLabel = (label) => {
 export default function SyncWebView({ visible, bank, onClose, onSuccess }) {
   const webViewRef = useRef(null);
 
-  const cardOptionsRef     = useRef([]);
-  const cardIndexRef       = useRef(0);
-  const syncedCardsRef     = useRef([]);
-  const cardsDiscovered    = useRef(false);
-  const switchRetriesRef   = useRef(0);
+  const cardOptionsRef      = useRef([]);
+  const cardIndexRef        = useRef(0);
+  const syncedCardsRef      = useRef([]);
+  const cardsDiscovered     = useRef(false);
+  const switchRetriesRef    = useRef(0);
+  const syncedCountRef      = useRef(0); // how many cards have been synced this session
 
   const [syncing, setSyncing]         = useState(false);
   const [switching, setSwitching]     = useState(false);
@@ -177,6 +180,7 @@ export default function SyncWebView({ visible, bank, onClose, onSuccess }) {
       syncedCardsRef.current   = [];
       cardsDiscovered.current  = false;
       switchRetriesRef.current = 0;
+      syncedCountRef.current   = 0;
       setCurrentCard(null);
       setCurrentUrl('');
       setSyncing(false);
@@ -216,26 +220,24 @@ export default function SyncWebView({ visible, bank, onClose, onSuccess }) {
       const data = JSON.parse(event.nativeEvent.data);
 
       if (data.type === 'CARDS_DETECTED') {
-        // DEBUG — remove after diagnosis
-        console.log('[CARDS_DETECTED] selectedLabel:', data.selectedLabel);
-        console.log('[CARDS_DETECTED] filtered cards:', JSON.stringify(data.cards, null, 2));
-        console.log('[CARDS_DETECTED] ALL options:', JSON.stringify(data.debug_allOptions, null, 2));
-        if (data.debug_error) console.log('[CARDS_DETECTED] error:', data.debug_error);
-
         if (!cardsDiscovered.current && data.cards && data.cards.length > 0) {
           cardOptionsRef.current  = data.cards;
           cardsDiscovered.current = true;
           setCardCount(data.cards.length);
+
+          // Set cardIndexRef to the position of the currently active card.
+          // Chase opens on whichever card was last used, not necessarily index 0.
+          const activeIdx = data.cards.findIndex(
+            c => c.label === data.selectedLabel
+          );
+          cardIndexRef.current = activeIdx >= 0 ? activeIdx : 0;
+          setCardIndexUi(cardIndexRef.current);
         }
         setCurrentCard(data.selectedLabel || null);
         return;
       }
 
       if (data.type === 'CARD_SWITCHED') {
-        // DEBUG — remove after diagnosis
-        console.log('[CARD_SWITCHED] expectedIndex:', data.expectedIndex, '| actualLabel:', data.cardLabel);
-        console.log('[CARD_SWITCHED] cardOptionsRef:', JSON.stringify(cardOptionsRef.current));
-
         const expectedIndex = data.expectedIndex;
         const expectedLabel = cardOptionsRef.current.find(c => c.index === expectedIndex)?.label || '';
         const actualLabel   = data.cardLabel || '';
@@ -243,12 +245,9 @@ export default function SyncWebView({ visible, bank, onClose, onSuccess }) {
           ? actualLabel.trim() === expectedLabel.trim()
           : !!actualLabel;
 
-        console.log('[CARD_SWITCHED] expectedLabel:', expectedLabel, '| confirmed:', switchConfirmed);
-
         if (!switchConfirmed && switchRetriesRef.current < MAX_SWITCH_RETRIES) {
           switchRetriesRef.current += 1;
           const retryDelay = SWITCH_TIMEOUT_MS + (switchRetriesRef.current * 1500);
-          console.log('[CARD_SWITCHED] retry', switchRetriesRef.current, 'with delay', retryDelay);
           webViewRef.current?.injectJavaScript(buildSwitchCardJs(expectedIndex, retryDelay));
           return;
         }
@@ -260,21 +259,17 @@ export default function SyncWebView({ visible, bank, onClose, onSuccess }) {
       }
 
       if (data.type === 'CARD_SWITCH_ERROR') {
-        console.log('[CARD_SWITCH_ERROR]', data.message);
         setSwitching(false);
         Alert.alert('Card Switch Failed', data.message);
         return;
       }
 
       if (data.type === 'ERROR') {
-        console.log('[CAPTURE ERROR]', data.message);
         Alert.alert('Capture Error', data.message);
         return;
       }
 
       if (data.type !== 'CAPTURE_HTML') return;
-
-      console.log('[CAPTURE_HTML] cardLabel:', data.cardLabel, '| html length:', data.html?.length);
 
       setSyncing(true);
 
@@ -301,20 +296,19 @@ export default function SyncWebView({ visible, bank, onClose, onSuccess }) {
         { cardName: fullCardName || 'Unknown Card', count: result.synced ?? 0 },
       ];
 
-      const nextIndex  = cardIndexRef.current + 1;
+      syncedCountRef.current += 1;
       const totalCards = cardOptionsRef.current.length;
-
-      console.log('[AFTER SYNC] cardIndexRef:', cardIndexRef.current, '| nextIndex:', nextIndex, '| totalCards:', totalCards);
 
       setSyncing(false);
 
-      if (totalCards > 1 && nextIndex < totalCards) {
-        cardIndexRef.current = nextIndex;
-        setCardIndexUi(nextIndex);
+      if (syncedCountRef.current < totalCards) {
+        // Advance to next card position (wrapping around)
+        const nextPos = (cardIndexRef.current + 1) % totalCards;
+        cardIndexRef.current = nextPos;
+        setCardIndexUi(nextPos);
         setSwitching(true);
         switchRetriesRef.current = 0;
-        const domIndex = cardOptionsRef.current[nextIndex].index;
-        console.log('[SWITCHING TO] cardOptionsRef[' + nextIndex + ']:', JSON.stringify(cardOptionsRef.current[nextIndex]), '| domIndex:', domIndex);
+        const domIndex = cardOptionsRef.current[nextPos].index;
         webViewRef.current?.injectJavaScript(buildSwitchCardJs(domIndex, SWITCH_TIMEOUT_MS));
       } else {
         const total = syncedCardsRef.current.reduce((sum, c) => sum + c.count, 0);
@@ -322,7 +316,6 @@ export default function SyncWebView({ visible, bank, onClose, onSuccess }) {
         onSuccess(total, syncedCardsRef.current);
       }
     } catch (err) {
-      console.log('[SYNC ERROR]', err.message);
       setSyncing(false);
       setSwitching(false);
       Alert.alert('Sync Failed', err.message);
