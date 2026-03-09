@@ -1,17 +1,12 @@
 // ─────────────────────────────────────────────
 // SYNC WEBVIEW MODAL
 // Multi-card flow:
-//   1. On first load, detect credit cards only.
-//      Chase credit cards always contain a known brand keyword in the label
-//      (Sapphire, Freedom, Flex, Slate, Ink, Visa, United, Marriott, Hyatt,
-//      Southwest, Amazon, Prime, Disney, Starbucks, IHG, British, Aeroplan).
-//      Debit/checking accounts use a person's name (e.g. "Sharanya (...9222)")
-//      and don't match any brand keyword — skipped automatically.
-//      Multiple debit accounts are handled automatically by this filter.
+//   1. On first load, detect credit cards only (keyword filter on label).
+//      Debit/checking accounts use a person's name and are skipped.
 //   2. User taps Sync — captures card 0.
-//   3. After each sync, auto-switch to next card (3.5s timeout).
+//   3. After each sync, auto-switch to next card (3.5s for dropdown to register).
 //   4. CARD_SWITCHED verifies label matches expected — retries up to 3x if not.
-//   5. On confirmed switch, auto-captures next card (no tap needed).
+//   5. On confirmed switch, waits 2s more for grid to re-render, then auto-captures.
 //   6. After last card, shows Done button.
 // ─────────────────────────────────────────────
 import React, { useRef, useState, useEffect } from 'react';
@@ -46,19 +41,17 @@ const BANK_CONFIG = {
 };
 
 const API_BASE_URL = process.env.EXPO_PUBLIC_API_URL || 'http://localhost:3001';
-const SWITCH_TIMEOUT_MS = 3500;
-const MAX_SWITCH_RETRIES = 3;
+const SWITCH_TIMEOUT_MS    = 3500; // time to wait for dropdown to register the switch
+const POST_SWITCH_DELAY_MS = 2000; // extra wait after switch confirmed for grid re-render
+const MAX_SWITCH_RETRIES   = 3;
 
-// Chase credit card brand keywords — any label containing one of these is a credit card.
-// Debit/checking accounts show a person's name and won't match any of these.
 const CHASE_CREDIT_CARD_KEYWORDS = [
   'sapphire', 'freedom', 'flex', 'slate', 'ink', 'visa', 'united', 'marriott',
   'hyatt', 'southwest', 'amazon', 'prime', 'disney', 'starbucks', 'ihg',
   'british', 'aeroplan', 'reserve', 'preferred', 'unlimited', 'plus',
 ];
 
-// Run ONCE on first load.
-// Filters to credit cards only using brand keyword matching on the label.
+// Run ONCE on first load. Filters to credit cards by brand keyword.
 const DETECT_CARDS_JS = `
   (function() {
     try {
@@ -70,7 +63,7 @@ const DETECT_CARDS_JS = `
         opts.forEach(function(opt, i) {
           var label = (opt.getAttribute('label') || '').toLowerCase();
           var isCreditCard = KEYWORDS.some(function(k) { return label.indexOf(k) !== -1; });
-          if (!isCreditCard) return; // skip debit/checking accounts
+          if (!isCreditCard) return;
           var originalLabel = opt.getAttribute('label') || '';
           var value = opt.getAttribute('value') || String(i);
           cards.push({ label: originalLabel, value: value, index: i });
@@ -90,7 +83,7 @@ const DETECT_CARDS_JS = `
   true;
 `;
 
-// Switch to card at DOM index, wait timeoutMs, then report selected label
+// Switch to card at DOM index, wait timeoutMs for dropdown to register, then confirm
 const buildSwitchCardJs = (index, timeoutMs) => `
   (function() {
     try {
@@ -123,37 +116,43 @@ const buildSwitchCardJs = (index, timeoutMs) => `
   true;
 `;
 
-const buildCaptureJs = (gridSelector) => `
+// Wait delayMs then capture — gives grid time to re-render after card switch
+const buildDelayedCaptureJs = (gridSelector, delayMs) => `
   (function() {
-    try {
-      var html = null;
-      var MAX = 200000;
-      ${gridSelector ? `
-      var grid = document.querySelector('${gridSelector}');
-      if (grid && grid.innerHTML.length > 500) { html = grid.outerHTML; }
-      ` : ''}
-      if (!html) {
-        var selectors = ['[data-testid*="offer"]','[class*="offers"]','[id*="offers"]','main','[role="main"]'];
-        for (var i = 0; i < selectors.length; i++) {
-          var el = document.querySelector(selectors[i]);
-          if (el && el.innerHTML.length > 500) { html = el.outerHTML; break; }
+    setTimeout(function() {
+      try {
+        var html = null;
+        var MAX = 200000;
+        ${gridSelector ? `
+        var grid = document.querySelector('${gridSelector}');
+        if (grid && grid.innerHTML.length > 500) { html = grid.outerHTML; }
+        ` : ''}
+        if (!html) {
+          var selectors = ['[data-testid*="offer"]','[class*="offers"]','[id*="offers"]','main','[role="main"]'];
+          for (var i = 0; i < selectors.length; i++) {
+            var el = document.querySelector(selectors[i]);
+            if (el && el.innerHTML.length > 500) { html = el.outerHTML; break; }
+          }
         }
+        if (!html) html = document.documentElement.outerHTML;
+        if (html.length > MAX) html = html.substring(0, MAX);
+        var cardLabel = '';
+        var cardSel = document.querySelector('mds-select[id="select-credit-card-account"]');
+        if (cardSel) {
+          var cardOpt = cardSel.querySelector('mds-select-option[selected="true"]');
+          if (cardOpt) cardLabel = cardOpt.getAttribute('label') || '';
+        }
+        window.ReactNativeWebView.postMessage(JSON.stringify({ type: 'CAPTURE_HTML', html: html, cardLabel: cardLabel }));
+      } catch(e) {
+        window.ReactNativeWebView.postMessage(JSON.stringify({ type: 'ERROR', message: e.message }));
       }
-      if (!html) html = document.documentElement.outerHTML;
-      if (html.length > MAX) html = html.substring(0, MAX);
-      var cardLabel = '';
-      var cardSel = document.querySelector('mds-select[id="select-credit-card-account"]');
-      if (cardSel) {
-        var cardOpt = cardSel.querySelector('mds-select-option[selected="true"]');
-        if (cardOpt) cardLabel = cardOpt.getAttribute('label') || '';
-      }
-      window.ReactNativeWebView.postMessage(JSON.stringify({ type: 'CAPTURE_HTML', html: html, cardLabel: cardLabel }));
-    } catch(e) {
-      window.ReactNativeWebView.postMessage(JSON.stringify({ type: 'ERROR', message: e.message }));
-    }
+    }, ${delayMs || 0});
   })();
   true;
 `;
+
+// Immediate capture (for manual tap on first card)
+const buildCaptureJs = (gridSelector) => buildDelayedCaptureJs(gridSelector, 0);
 
 const parseCardLabel = (label) => {
   if (!label) return { cardName: null, cardLast4: null };
@@ -165,14 +164,12 @@ const parseCardLabel = (label) => {
 export default function SyncWebView({ visible, bank, onClose, onSuccess }) {
   const webViewRef = useRef(null);
 
-  // Refs — always current inside async handleMessage
   const cardOptionsRef     = useRef([]);
   const cardIndexRef       = useRef(0);
   const syncedCardsRef     = useRef([]);
   const cardsDiscovered    = useRef(false);
   const switchRetriesRef   = useRef(0);
 
-  // State — UI only
   const [syncing, setSyncing]         = useState(false);
   const [switching, setSwitching]     = useState(false);
   const [currentCard, setCurrentCard] = useState(null);
@@ -228,7 +225,6 @@ export default function SyncWebView({ visible, bank, onClose, onSuccess }) {
     try {
       const data = JSON.parse(event.nativeEvent.data);
 
-      // ── CARDS DETECTED (first load only, credit cards only) ──
       if (data.type === 'CARDS_DETECTED') {
         if (!cardsDiscovered.current && data.cards && data.cards.length > 0) {
           cardOptionsRef.current  = data.cards;
@@ -239,7 +235,6 @@ export default function SyncWebView({ visible, bank, onClose, onSuccess }) {
         return;
       }
 
-      // ── CARD SWITCHED ──
       if (data.type === 'CARD_SWITCHED') {
         const expectedIndex = data.expectedIndex;
         const expectedLabel = cardOptionsRef.current.find(c => c.index === expectedIndex)?.label || '';
@@ -259,8 +254,8 @@ export default function SyncWebView({ visible, bank, onClose, onSuccess }) {
         switchRetriesRef.current = 0;
         setSwitching(false);
         setCurrentCard(actualLabel || expectedLabel || null);
-        // Auto-capture — no tap needed for cards 2+
-        webViewRef.current?.injectJavaScript(buildCaptureJs(config.gridSelector));
+        // Wait POST_SWITCH_DELAY_MS for grid to re-render before capturing
+        webViewRef.current?.injectJavaScript(buildDelayedCaptureJs(config.gridSelector, POST_SWITCH_DELAY_MS));
         return;
       }
 
@@ -277,7 +272,6 @@ export default function SyncWebView({ visible, bank, onClose, onSuccess }) {
 
       if (data.type !== 'CAPTURE_HTML') return;
 
-      // ── CAPTURE HTML — send to backend ──
       setSyncing(true);
 
       const user = getAuthInstance().currentUser;
@@ -313,7 +307,6 @@ export default function SyncWebView({ visible, bank, onClose, onSuccess }) {
         setCardIndexUi(nextIndex);
         setSwitching(true);
         switchRetriesRef.current = 0;
-        // Use the real DOM index stored in cardOptionsRef for the switch
         webViewRef.current?.injectJavaScript(buildSwitchCardJs(cardOptionsRef.current[nextIndex].index, SWITCH_TIMEOUT_MS));
       } else {
         const total = syncedCardsRef.current.reduce((sum, c) => sum + c.count, 0);
@@ -338,7 +331,6 @@ export default function SyncWebView({ visible, bank, onClose, onSuccess }) {
       <View style={s.overlay}>
         <SafeAreaView style={s.sheet}>
           <View style={s.handle} />
-
           <View style={s.header}>
             <TouchableOpacity onPress={onClose} style={s.closeBtn} hitSlop={12}>
               <Text style={s.closeBtnText}>✕</Text>
@@ -346,7 +338,6 @@ export default function SyncWebView({ visible, bank, onClose, onSuccess }) {
             <Text style={s.headerTitle}>{config.label}</Text>
             <View style={{ width: 36 }} />
           </View>
-
           <WebView
             ref={webViewRef}
             source={{ uri: config.url }}
@@ -358,7 +349,6 @@ export default function SyncWebView({ visible, bank, onClose, onSuccess }) {
             sharedCookiesEnabled={true}
             thirdPartyCookiesEnabled={true}
           />
-
           <View style={s.footer}>
             {allDone ? (
               <>
