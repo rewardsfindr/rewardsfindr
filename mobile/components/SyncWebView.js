@@ -1,14 +1,15 @@
 // ─────────────────────────────────────────────
 // SYNC WEBVIEW MODAL
 // Multi-card flow (1 tap):
-//   1. On first load, detect credit cards only (keyword filter).
-//      cardIndexRef starts at the currently active card position.
-//   2. User taps Sync once — captures current card, sends to API.
-//   3. After sync, auto-switches to next card (3.5s for dropdown).
-//   4. CARD_SWITCHED confirms label — retries up to 3x if needed.
-//   5. After confirmed switch, waits POST_SWITCH_DELAY_MS for the
-//      offers grid to re-render, then auto-captures (no tap needed).
-//   6. Repeats until all cards done, then shows Done button.
+//   1. Detect credit cards on first load; start at active card position.
+//   2. User taps Sync once — arms captureArmed, captures card 1.
+//   3. After API call, auto-switches to next card.
+//   4. CARD_SWITCHED confirms label (retries up to 3x).
+//   5. On confirmed switch, arms captureArmed, waits POST_SWITCH_DELAY_MS
+//      for grid re-render, then auto-captures.
+//   6. CAPTURE_HTML is ignored unless captureArmed is true — prevents
+//      any stray messages from triggering duplicate syncs.
+//   7. Repeats until all cards done.
 // ─────────────────────────────────────────────
 import React, { useRef, useState, useEffect } from 'react';
 import {
@@ -42,8 +43,8 @@ const BANK_CONFIG = {
 };
 
 const API_BASE_URL = process.env.EXPO_PUBLIC_API_URL || 'http://localhost:3001';
-const SWITCH_TIMEOUT_MS    = 3500; // time for dropdown to register the switch
-const POST_SWITCH_DELAY_MS = 2000; // extra wait for offers grid to re-render
+const SWITCH_TIMEOUT_MS    = 3500;
+const POST_SWITCH_DELAY_MS = 2000;
 const MAX_SWITCH_RETRIES   = 3;
 
 const CHASE_CREDIT_CARD_KEYWORDS = [
@@ -115,7 +116,6 @@ const buildSwitchCardJs = (index, timeoutMs) => `
   true;
 `;
 
-// Waits delayMs then captures — gives grid time to re-render after card switch
 const buildDelayedCaptureJs = (gridSelector, delayMs) => `
   (function() {
     setTimeout(function() {
@@ -166,9 +166,11 @@ export default function SyncWebView({ visible, bank, onClose, onSuccess }) {
   const cardsDiscovered    = useRef(false);
   const switchRetriesRef   = useRef(0);
   const syncedCountRef     = useRef(0);
+  const captureArmed       = useRef(false); // CAPTURE_HTML only processed when true
 
   const [syncing, setSyncing]         = useState(false);
   const [switching, setSwitching]     = useState(false);
+  const [autoCapturing, setAutoCapturing] = useState(false); // waiting for post-switch delay
   const [currentCard, setCurrentCard] = useState(null);
   const [currentUrl, setCurrentUrl]   = useState('');
   const [cardCount, setCardCount]     = useState(0);
@@ -185,10 +187,12 @@ export default function SyncWebView({ visible, bank, onClose, onSuccess }) {
       cardsDiscovered.current  = false;
       switchRetriesRef.current = 0;
       syncedCountRef.current   = 0;
+      captureArmed.current     = false;
       setCurrentCard(null);
       setCurrentUrl('');
       setSyncing(false);
       setSwitching(false);
+      setAutoCapturing(false);
       setCardCount(0);
       setCardIndexUi(0);
       setAllDone(false);
@@ -216,7 +220,7 @@ export default function SyncWebView({ visible, bank, onClose, onSuccess }) {
   };
 
   const handleSyncPress = () => {
-    // Immediate capture for the first card (no delay needed, grid already loaded)
+    captureArmed.current = true;
     webViewRef.current?.injectJavaScript(buildDelayedCaptureJs(config.gridSelector, 0));
   };
 
@@ -229,7 +233,6 @@ export default function SyncWebView({ visible, bank, onClose, onSuccess }) {
           cardOptionsRef.current  = data.cards;
           cardsDiscovered.current = true;
           setCardCount(data.cards.length);
-          // Start at whichever card Chase currently has active
           const activeIdx = data.cards.findIndex(c => c.label === data.selectedLabel);
           cardIndexRef.current = activeIdx >= 0 ? activeIdx : 0;
           setCardIndexUi(cardIndexRef.current);
@@ -256,23 +259,34 @@ export default function SyncWebView({ visible, bank, onClose, onSuccess }) {
         switchRetriesRef.current = 0;
         setSwitching(false);
         setCurrentCard(actualLabel || expectedLabel || null);
-        // Auto-capture after grid re-renders
+        // Arm capture, show autoCapturing state during delay
+        captureArmed.current = true;
+        setAutoCapturing(true);
         webViewRef.current?.injectJavaScript(buildDelayedCaptureJs(config.gridSelector, POST_SWITCH_DELAY_MS));
         return;
       }
 
       if (data.type === 'CARD_SWITCH_ERROR') {
         setSwitching(false);
+        setAutoCapturing(false);
+        captureArmed.current = false;
         Alert.alert('Card Switch Failed', data.message);
         return;
       }
 
       if (data.type === 'ERROR') {
+        setAutoCapturing(false);
+        captureArmed.current = false;
         Alert.alert('Capture Error', data.message);
         return;
       }
 
       if (data.type !== 'CAPTURE_HTML') return;
+
+      // Drop any CAPTURE_HTML that wasn't explicitly armed
+      if (!captureArmed.current) return;
+      captureArmed.current = false;
+      setAutoCapturing(false);
 
       setSyncing(true);
 
@@ -305,7 +319,7 @@ export default function SyncWebView({ visible, bank, onClose, onSuccess }) {
       setSyncing(false);
 
       if (syncedCountRef.current < totalCards) {
-        const nextPos  = (cardIndexRef.current + 1) % totalCards;
+        const nextPos = (cardIndexRef.current + 1) % totalCards;
         cardIndexRef.current = nextPos;
         setCardIndexUi(nextPos);
         setSwitching(true);
@@ -318,6 +332,8 @@ export default function SyncWebView({ visible, bank, onClose, onSuccess }) {
         onSuccess(total, syncedCardsRef.current);
       }
     } catch (err) {
+      captureArmed.current = false;
+      setAutoCapturing(false);
       setSyncing(false);
       setSwitching(false);
       Alert.alert('Sync Failed', err.message);
@@ -328,7 +344,7 @@ export default function SyncWebView({ visible, bank, onClose, onSuccess }) {
   const totalCards    = cardCount || 1;
   const progressLabel = cardCount > 1 ? ` (${cardIndexUi + 1} of ${totalCards})` : '';
   const syncBtnLabel  = cardName ? `Sync ${cardName}${progressLabel}` : `Sync Offers${progressLabel}`;
-  const isBusy        = syncing || switching;
+  const isBusy        = syncing || switching || autoCapturing;
 
   return (
     <Modal visible={visible} animationType="slide" transparent={true} onRequestClose={onClose}>
@@ -368,12 +384,14 @@ export default function SyncWebView({ visible, bank, onClose, onSuccess }) {
               <>
                 <Text style={s.hint} numberOfLines={2}>
                   {switching
-                    ? `⏳ Switching to card ${cardIndexUi + 1} of ${totalCards}... (auto-syncing)`
-                    : syncing
-                      ? `🔄 Syncing ${currentCard || 'card'}...`
-                      : currentCard
-                        ? `💳 ${currentCard}${cardCount > 1 ? ` · Card ${cardIndexUi + 1} of ${totalCards}` : ''}`
-                        : 'Select a card above, then tap Sync.'}
+                    ? `⏳ Switching to next card (${cardIndexUi + 1} of ${totalCards})...`
+                    : autoCapturing
+                      ? `⏳ Loading card offers...`
+                      : syncing
+                        ? `🔄 Syncing ${currentCard || 'card'}...`
+                        : currentCard
+                          ? `💳 ${currentCard}${cardCount > 1 ? ` · Card ${cardIndexUi + 1} of ${totalCards}` : ''}`
+                          : 'Tap Sync to start.'}
                 </Text>
                 <TouchableOpacity
                   style={[s.syncBtn, isBusy && s.syncBtnDisabled]}
