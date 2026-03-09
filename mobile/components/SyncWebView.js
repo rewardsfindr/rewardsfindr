@@ -2,11 +2,11 @@
 // SYNC WEBVIEW MODAL
 // Opens as an 85% modal sheet over the home screen.
 // Loads directly to bank's offers page.
-// After login, auto-redirects back to offers page.
-// Detects which card is selected and shows it in the footer.
-// Captures just the offers grid (~20KB) and POSTs to /api/offers/parse.
+// Tracks current URL — shows Sync button only when on offers page.
+// Shows Go to Offers button on all other pages.
+// Detects selected card and shows it in hint + button text.
 // ─────────────────────────────────────────────
-import React, { useRef, useState } from 'react';
+import React, { useRef, useState, useEffect } from 'react';
 import {
   Modal, View, Text, TouchableOpacity,
   StyleSheet, ActivityIndicator, Alert, SafeAreaView,
@@ -62,7 +62,7 @@ const parseCardLabel = (label) => {
   return { cardName: label.trim(), cardLast4: null };
 };
 
-// Captures offers grid HTML and reads selected card in one injection
+// Captures offers grid HTML + reads selected card in one injection
 const buildCaptureJs = (gridSelector) => `
   (function() {
     try {
@@ -88,7 +88,6 @@ const buildCaptureJs = (gridSelector) => `
       if (!html) html = document.documentElement.outerHTML;
       if (html.length > MAX) html = html.substring(0, MAX);
 
-      // Also read selected card at capture time (user may have changed it)
       var cardLabel = '';
       var cardSel = document.querySelector('mds-select[id="select-credit-card-account"]');
       if (cardSel) {
@@ -112,25 +111,36 @@ const buildCaptureJs = (gridSelector) => `
  */
 export default function SyncWebView({ visible, bank, onClose, onSuccess }) {
   const webViewRef = useRef(null);
-  const [syncing, setSyncing] = useState(false);
-  const [currentCard, setCurrentCard] = useState(null); // e.g. "Sapphire Reserve (...0483)"
+  const [syncing, setSyncing]       = useState(false);
+  const [currentCard, setCurrentCard] = useState(null);  // e.g. "Sapphire Reserve (...0483)"
+  const [currentUrl, setCurrentUrl]   = useState('');    // tracks live WebView URL
   const config = BANK_CONFIG[bank] || BANK_CONFIG.chase;
 
-  const handleNavigationStateChange = (navState) => {
-    if (!navState.url || navState.loading) return;
-    const url = navState.url.toLowerCase();
-    const isOnOffersPage = url.includes(config.offersPath);
-    const isOnLoginPage = config.loginPaths.some(p => url.includes(p));
-    if (!isOnOffersPage && !isOnLoginPage) {
-      webViewRef.current?.injectJavaScript(
-        `window.location.replace('${config.url}'); true;`
-      );
+  // Reset state when modal closes so next open starts fresh
+  useEffect(() => {
+    if (!visible) {
+      setCurrentCard(null);
+      setCurrentUrl('');
+      setSyncing(false);
     }
+  }, [visible]);
+
+  const isOnOffersPage = currentUrl.toLowerCase().includes(config.offersPath);
+
+  const handleNavigationStateChange = (navState) => {
+    if (!navState.url) return;
+    setCurrentUrl(navState.url);
   };
 
-  // Detect selected card each time the page finishes loading
+  // Detect selected card each time a page finishes loading
   const handleLoadEnd = () => {
     webViewRef.current?.injectJavaScript(DETECT_CARD_JS);
+  };
+
+  const handleGoToOffers = () => {
+    webViewRef.current?.injectJavaScript(
+      `window.location.replace('${config.url}'); true;`
+    );
   };
 
   const handleSyncPress = () => {
@@ -158,7 +168,6 @@ export default function SyncWebView({ visible, bank, onClose, onSuccess }) {
 
       const token = await user.getIdToken();
 
-      // Build full card name with last 4 for display + dedup
       const { cardName, cardLast4 } = parseCardLabel(data.cardLabel);
       const fullCardName = cardName
         ? (cardLast4 ? `${cardName} (...${cardLast4})` : cardName)
@@ -183,6 +192,10 @@ export default function SyncWebView({ visible, bank, onClose, onSuccess }) {
       setSyncing(false);
     }
   };
+
+  // Button label: "Sync Sapphire Reserve" or "Sync Offers" as fallback
+  const { cardName } = parseCardLabel(currentCard);
+  const syncBtnLabel = cardName ? `Sync ${cardName}` : 'Sync Offers';
 
   return (
     <Modal
@@ -216,20 +229,33 @@ export default function SyncWebView({ visible, bank, onClose, onSuccess }) {
           />
 
           <View style={s.footer}>
-            <Text style={s.hint} numberOfLines={1}>
-              {currentCard
-                ? `💳 Syncing offers for: ${currentCard}`
-                : "Log in above — you'll be taken straight to your offers."}
-            </Text>
-            <TouchableOpacity
-              style={[s.syncBtn, syncing && s.syncBtnDisabled]}
-              onPress={handleSyncPress}
-              disabled={syncing}
-            >
-              {syncing
-                ? <ActivityIndicator color="white" size="small" />
-                : <Text style={s.syncBtnText}>Sync Offers</Text>}
-            </TouchableOpacity>
+            {isOnOffersPage ? (
+              // On offers page: show detected card + sync button
+              <>
+                <Text style={s.hint} numberOfLines={1}>
+                  {currentCard ? `💳 ${currentCard}` : 'Select a card above, then tap Sync.'}
+                </Text>
+                <TouchableOpacity
+                  style={[s.syncBtn, syncing && s.syncBtnDisabled]}
+                  onPress={handleSyncPress}
+                  disabled={syncing}
+                >
+                  {syncing
+                    ? <ActivityIndicator color="white" size="small" />
+                    : <Text style={s.syncBtnText}>{syncBtnLabel}</Text>}
+                </TouchableOpacity>
+              </>
+            ) : (
+              // Not on offers page: prompt user to navigate there
+              <>
+                <Text style={s.hint}>
+                  Log in above, then tap the button to go to your offers.
+                </Text>
+                <TouchableOpacity style={s.goToOffersBtn} onPress={handleGoToOffers}>
+                  <Text style={s.syncBtnText}>Go to Offers Page →</Text>
+                </TouchableOpacity>
+              </>
+            )}
           </View>
         </SafeAreaView>
       </View>
@@ -251,51 +277,32 @@ const s = StyleSheet.create({
     overflow: 'hidden',
   },
   handle: {
-    width: 40,
-    height: 4,
-    backgroundColor: '#d1d5db',
-    borderRadius: 99,
-    alignSelf: 'center',
-    marginTop: 10,
-    marginBottom: 4,
+    width: 40, height: 4, backgroundColor: '#d1d5db',
+    borderRadius: 99, alignSelf: 'center', marginTop: 10, marginBottom: 4,
   },
   header: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingHorizontal: 16,
-    paddingVertical: 12,
-    borderBottomWidth: 1,
-    borderBottomColor: '#e5e7eb',
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
+    paddingHorizontal: 16, paddingVertical: 12,
+    borderBottomWidth: 1, borderBottomColor: '#e5e7eb',
   },
   closeBtn: {
-    width: 36,
-    height: 36,
-    borderRadius: 18,
-    backgroundColor: '#f3f4f6',
-    alignItems: 'center',
-    justifyContent: 'center',
+    width: 36, height: 36, borderRadius: 18,
+    backgroundColor: '#f3f4f6', alignItems: 'center', justifyContent: 'center',
   },
-  closeBtnText: { fontSize: 14, color: '#374151', fontWeight: '600' },
-  headerTitle:  { fontSize: 16, fontWeight: '700', color: '#1f2937' },
-  webview:      { flex: 1 },
+  closeBtnText:  { fontSize: 14, color: '#374151', fontWeight: '600' },
+  headerTitle:   { fontSize: 16, fontWeight: '700', color: '#1f2937' },
+  webview:       { flex: 1 },
   footer: {
-    padding: 16,
-    borderTopWidth: 1,
-    borderTopColor: '#e5e7eb',
-    backgroundColor: 'white',
+    padding: 16, borderTopWidth: 1, borderTopColor: '#e5e7eb', backgroundColor: 'white',
   },
   hint: {
-    fontSize: 12,
-    color: '#6b7280',
-    textAlign: 'center',
-    marginBottom: 10,
+    fontSize: 12, color: '#6b7280', textAlign: 'center', marginBottom: 10,
   },
   syncBtn: {
-    backgroundColor: '#4f46e5',
-    borderRadius: 12,
-    paddingVertical: 14,
-    alignItems: 'center',
+    backgroundColor: '#4f46e5', borderRadius: 12, paddingVertical: 14, alignItems: 'center',
+  },
+  goToOffersBtn: {
+    backgroundColor: '#059669', borderRadius: 12, paddingVertical: 14, alignItems: 'center',
   },
   syncBtnDisabled: { opacity: 0.6 },
   syncBtnText: { color: 'white', fontSize: 16, fontWeight: '700' },
