@@ -76,12 +76,14 @@ export default function HomeScreen() {
     }
   };
 
-  const handleSyncSuccess = (count) => {
+  // cardName will be e.g. "Sapphire Reserve (...0483)" or null
+  const handleSyncSuccess = (count, cardName) => {
     setSyncBank(null);
+    const cardInfo = cardName ? ` for ${cardName}` : '';
     Alert.alert(
       'Sync Complete',
       count > 0
-        ? `${count} offer${count !== 1 ? 's' : ''} synced successfully!`
+        ? `${count} offer${count !== 1 ? 's' : ''} synced${cardInfo}!`
         : 'No offers found. Make sure you are on the offers page before syncing.',
       [{ text: 'OK' }]
     );

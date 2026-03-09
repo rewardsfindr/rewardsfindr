@@ -12,9 +12,6 @@ import { parseAmexOffers } from '../lib/parsers/amex.js';
 
 const router = express.Router();
 
-// ─────────────────────────────────────────────
-// Shared helper: verify Firebase Bearer token
-// ─────────────────────────────────────────────
 async function verifyToken(req, res) {
   const authHeader = req.headers.authorization;
   if (!authHeader?.startsWith('Bearer ')) {
@@ -33,7 +30,8 @@ async function verifyToken(req, res) {
 
 // ─────────────────────────────────────────────
 // Shared helper: write an offers array to Firestore
-// Returns { syncedCount, skippedCount }
+// offerId includes cardName so the same offer on two
+// different cards generates distinct Firestore documents.
 // ─────────────────────────────────────────────
 async function writeOffersToDB(offers, { userId, bank, cardName }) {
   const batch = db.batch();
@@ -45,7 +43,8 @@ async function writeOffersToDB(offers, { userId, bank, cardName }) {
       const offerId = generateOfferId(
         offer.merchantName,
         offer.cashbackAmount,
-        offer.expiryDate || new Date(Date.now() + 90 * 24 * 60 * 60 * 1000).toISOString()
+        offer.expiryDate || new Date(Date.now() + 90 * 24 * 60 * 60 * 1000).toISOString(),
+        cardName  // included for per-card deduplication
       );
 
       const offerDoc = {
@@ -136,7 +135,6 @@ router.post('/parse', async (req, res) => {
       return res.status(400).json({ error: "bank must be 'chase' or 'amex'" });
     }
 
-    // Select the right parser
     const parseFn = bank === 'chase' ? parseChaseOffers : parseAmexOffers;
     const offers = parseFn(html);
 
@@ -160,7 +158,7 @@ router.post('/parse', async (req, res) => {
       cardName: resolvedCardName,
     });
 
-    console.log(`✅ Parse+sync complete: ${syncedCount} synced, ${skippedCount} skipped (${bank})`);
+    console.log(`✅ Parse+sync complete: ${syncedCount} synced, ${skippedCount} skipped (${bank} — ${resolvedCardName})`);
 
     res.json({
       success: true,
@@ -168,6 +166,7 @@ router.post('/parse', async (req, res) => {
       synced: syncedCount,
       skipped: skippedCount,
       bank,
+      cardName: resolvedCardName,
     });
   } catch (error) {
     console.error('❌ Offers parse error:', error);
