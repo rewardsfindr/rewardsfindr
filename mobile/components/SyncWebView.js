@@ -5,8 +5,8 @@
 // If user not logged in, Chase redirects to login then back to offers.
 // Tracks current URL — shows Sync button only when on offers page.
 // Shows Go to Offers button on all other pages.
-// Multi-card: reads all cards from Chase dropdown, cycles through each.
-// After all cards synced, shows "Done" button to close modal.
+// Multi-card: reads all cards from Chase dropdown on first load only,
+// then cycles through each. After all cards synced, shows Done button.
 //
 // NOTE: cardIndex and cardOptions are tracked as refs (not just state)
 // to avoid stale closure bugs inside handleMessage.
@@ -23,7 +23,6 @@ const CHASE_OFFERS_URL = 'https://secure.chase.com/web/auth/dashboard#/dashboard
 
 const BANK_CONFIG = {
   chase: {
-    // Open directly to offers page — Chase will redirect to login if needed, then back here
     url: CHASE_OFFERS_URL,
     offersUrl: CHASE_OFFERS_URL,
     label: 'Chase Offers',
@@ -45,6 +44,7 @@ const BANK_CONFIG = {
 
 const API_BASE_URL = process.env.EXPO_PUBLIC_API_URL || 'http://localhost:3001';
 
+// Run ONCE on first load to discover all cards in dropdown
 const DETECT_CARDS_JS = `
   (function() {
     try {
@@ -150,9 +150,10 @@ export default function SyncWebView({ visible, bank, onClose, onSuccess }) {
   const webViewRef = useRef(null);
 
   // Refs — always current inside async handleMessage closure
-  const cardOptionsRef = useRef([]);
-  const cardIndexRef   = useRef(0);
-  const syncedCardsRef = useRef([]);
+  const cardOptionsRef    = useRef([]);
+  const cardIndexRef      = useRef(0);
+  const syncedCardsRef    = useRef([]);
+  const cardsDiscovered   = useRef(false); // guard: only run DETECT_CARDS_JS once per session
 
   // State — drives UI re-renders
   const [syncing, setSyncing]         = useState(false);
@@ -167,9 +168,10 @@ export default function SyncWebView({ visible, bank, onClose, onSuccess }) {
 
   useEffect(() => {
     if (!visible) {
-      cardOptionsRef.current = [];
-      cardIndexRef.current   = 0;
-      syncedCardsRef.current = [];
+      cardOptionsRef.current  = [];
+      cardIndexRef.current    = 0;
+      syncedCardsRef.current  = [];
+      cardsDiscovered.current = false;
       setCurrentCard(null);
       setCurrentUrl('');
       setSyncing(false);
@@ -190,7 +192,8 @@ export default function SyncWebView({ visible, bank, onClose, onSuccess }) {
   };
 
   const handleLoadEnd = () => {
-    if (bank === 'chase') {
+    // Only detect cards once per session — prevents re-triggering after card switches
+    if (bank === 'chase' && !cardsDiscovered.current) {
       webViewRef.current?.injectJavaScript(DETECT_CARDS_JS);
     }
   };
@@ -209,8 +212,10 @@ export default function SyncWebView({ visible, bank, onClose, onSuccess }) {
       const data = JSON.parse(event.nativeEvent.data);
 
       if (data.type === 'CARDS_DETECTED') {
-        if (data.cards && data.cards.length > 0) {
-          cardOptionsRef.current = data.cards;
+        // Only store card list on first detection
+        if (!cardsDiscovered.current && data.cards && data.cards.length > 0) {
+          cardOptionsRef.current  = data.cards;
+          cardsDiscovered.current = true;
           setCardCount(data.cards.length);
         }
         setCurrentCard(data.selectedLabel || null);
@@ -219,8 +224,8 @@ export default function SyncWebView({ visible, bank, onClose, onSuccess }) {
 
       if (data.type === 'CARD_SWITCHED') {
         setSwitching(false);
+        // Use the label from the switch confirmation directly — no need to re-run DETECT_CARDS_JS
         setCurrentCard(data.cardLabel || null);
-        webViewRef.current?.injectJavaScript(DETECT_CARDS_JS);
         return;
       }
 
