@@ -1,11 +1,12 @@
 // ─────────────────────────────────────────────
-// SYNC WEBVIEW MODAL (Option B — bottom sheet)
+// SYNC WEBVIEW MODAL
 // Opens as an 85% modal sheet over the home screen.
-// User logs into Chase/Amex inside the WebView, then
-// taps "Sync Offers" → JS captures outerHTML → POST
-// to /api/offers/parse → success toast + close.
+// Loads directly to bank's offers page.
+// Tracks current URL — shows Sync button only when on offers page.
+// Shows Go to Offers button on all other pages.
+// Detects selected card and shows it in hint + button text.
 // ─────────────────────────────────────────────
-import React, { useRef, useState } from 'react';
+import React, { useRef, useState, useEffect } from 'react';
 import {
   Modal, View, Text, TouchableOpacity,
   StyleSheet, ActivityIndicator, Alert, SafeAreaView,
@@ -15,26 +16,90 @@ import { getAuthInstance } from '../lib/firebaseClient.js';
 
 const BANK_CONFIG = {
   chase: {
-    url: 'https://www.chase.com/personal/credit-cards/cardmember-offers',
+    // Chase homepage — always works, has login form
+    url: 'https://www.chase.com',
+    // Post-login authenticated offers URL
+    offersUrl: 'https://secure.chase.com/web/auth/dashboard#/dashboard/merchantOffers/offer-hub',
     label: 'Chase Offers',
     color: '#1a3a6b',
+    offersPaths: ['/cardmember-offers', 'merchantOffers'],
+    loginPaths: ['/sign-in', '/logon', '/login', '/sso', '/auth', '/identify', '/challenge'],
+    gridSelector: '[data-testid="grid-items-container"]',
   },
   amex: {
     url: 'https://www.americanexpress.com/en-us/benefits/offers/',
+    offersUrl: null,
     label: 'Amex Offers',
     color: '#007ac1',
+    offersPaths: ['/benefits/offers'],
+    loginPaths: ['/login', '/sign-in', '/identity', '/auth', '/challenge'],
+    gridSelector: null, // TODO: inspect Amex DOM
   },
 };
 
 const API_BASE_URL = process.env.EXPO_PUBLIC_API_URL || 'http://localhost:3001';
 
-// Injected into the WebView when user taps "Sync Offers".
-// Captures full page HTML and sends it back to React Native.
-const CAPTURE_JS = `
+// Injected on page load — reads currently selected card from Chase dropdown
+const DETECT_CARD_JS = `
   (function() {
     try {
-      var html = document.documentElement.outerHTML;
-      window.ReactNativeWebView.postMessage(JSON.stringify({ type: 'CAPTURE_HTML', html: html }));
+      var sel = document.querySelector('mds-select[id="select-credit-card-account"]');
+      if (sel) {
+        var opt = sel.querySelector('mds-select-option[selected="true"]');
+        if (opt) {
+          var label = opt.getAttribute('label') || '';
+          window.ReactNativeWebView.postMessage(JSON.stringify({ type: 'CARD_DETECTED', cardLabel: label }));
+          return;
+        }
+      }
+      window.ReactNativeWebView.postMessage(JSON.stringify({ type: 'CARD_DETECTED', cardLabel: null }));
+    } catch(e) {}
+  })();
+  true;
+`;
+
+// "Sapphire Reserve (...0483)" → { cardName: "Sapphire Reserve", cardLast4: "0483" }
+const parseCardLabel = (label) => {
+  if (!label) return { cardName: null, cardLast4: null };
+  const match = label.match(/^(.+?)\s*\(\.\.\.([\w\d]+)\)\s*$/);
+  if (match) return { cardName: match[1].trim(), cardLast4: match[2] };
+  return { cardName: label.trim(), cardLast4: null };
+};
+
+// Captures offers grid HTML + reads selected card in one injection
+const buildCaptureJs = (gridSelector) => `
+  (function() {
+    try {
+      var html = null;
+      var MAX = 200000;
+
+      ${ gridSelector ? `
+      var grid = document.querySelector('${gridSelector}');
+      if (grid && grid.innerHTML.length > 500) { html = grid.outerHTML; }
+      ` : '' }
+
+      if (!html) {
+        var selectors = [
+          '[data-testid*="offer"]', '[class*="offers"]', '[id*="offers"]',
+          'main', '[role="main"]',
+        ];
+        for (var i = 0; i < selectors.length; i++) {
+          var el = document.querySelector(selectors[i]);
+          if (el && el.innerHTML.length > 500) { html = el.outerHTML; break; }
+        }
+      }
+
+      if (!html) html = document.documentElement.outerHTML;
+      if (html.length > MAX) html = html.substring(0, MAX);
+
+      var cardLabel = '';
+      var cardSel = document.querySelector('mds-select[id="select-credit-card-account"]');
+      if (cardSel) {
+        var cardOpt = cardSel.querySelector('mds-select-option[selected="true"]');
+        if (cardOpt) cardLabel = cardOpt.getAttribute('label') || '';
+      }
+
+      window.ReactNativeWebView.postMessage(JSON.stringify({ type: 'CAPTURE_HTML', html: html, cardLabel: cardLabel }));
     } catch(e) {
       window.ReactNativeWebView.postMessage(JSON.stringify({ type: 'ERROR', message: e.message }));
     }
@@ -46,21 +111,55 @@ const CAPTURE_JS = `
  * @param {boolean}  visible  - controls modal visibility
  * @param {'chase'|'amex'} bank - which bank to open
  * @param {function} onClose  - called when user dismisses
- * @param {function} onSuccess(syncedCount) - called after successful sync
+ * @param {function} onSuccess(syncedCount, cardName) - called after successful sync
  */
 export default function SyncWebView({ visible, bank, onClose, onSuccess }) {
   const webViewRef = useRef(null);
-  const [syncing, setSyncing] = useState(false);
+  const [syncing, setSyncing]       = useState(false);
+  const [currentCard, setCurrentCard] = useState(null);
+  const [currentUrl, setCurrentUrl]   = useState('');
   const config = BANK_CONFIG[bank] || BANK_CONFIG.chase;
 
+  useEffect(() => {
+    if (!visible) {
+      setCurrentCard(null);
+      setCurrentUrl('');
+      setSyncing(false);
+    }
+  }, [visible]);
+
+  const isOnOffersPage = (config.offersPaths || []).some(
+    (p) => currentUrl.toLowerCase().includes(p.toLowerCase())
+  );
+
+  const handleNavigationStateChange = (navState) => {
+    if (!navState.url) return;
+    setCurrentUrl(navState.url);
+  };
+
+  const handleLoadEnd = () => {
+    webViewRef.current?.injectJavaScript(DETECT_CARD_JS);
+  };
+
+  const handleGoToOffers = () => {
+    const target = config.offersUrl || config.url;
+    webViewRef.current?.injectJavaScript(
+      `window.location.replace('${target}'); true;`
+    );
+  };
+
   const handleSyncPress = () => {
-    webViewRef.current?.injectJavaScript(CAPTURE_JS);
+    webViewRef.current?.injectJavaScript(buildCaptureJs(config.gridSelector));
   };
 
   const handleMessage = async (event) => {
     try {
       const data = JSON.parse(event.nativeEvent.data);
 
+      if (data.type === 'CARD_DETECTED') {
+        setCurrentCard(data.cardLabel || null);
+        return;
+      }
       if (data.type === 'ERROR') {
         Alert.alert('Capture Error', data.message);
         return;
@@ -74,25 +173,33 @@ export default function SyncWebView({ visible, bank, onClose, onSuccess }) {
 
       const token = await user.getIdToken();
 
+      const { cardName, cardLast4 } = parseCardLabel(data.cardLabel);
+      const fullCardName = cardName
+        ? (cardLast4 ? `${cardName} (...${cardLast4})` : cardName)
+        : null;
+
       const response = await fetch(`${API_BASE_URL}/api/offers/parse`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
           Authorization: `Bearer ${token}`,
         },
-        body: JSON.stringify({ html: data.html, bank }),
+        body: JSON.stringify({ html: data.html, bank, cardName: fullCardName }),
       });
 
       const result = await response.json();
       if (!response.ok) throw new Error(result.error || 'Sync failed');
 
-      onSuccess(result.synced ?? 0);
+      onSuccess(result.synced ?? 0, fullCardName);
     } catch (err) {
       Alert.alert('Sync Failed', err.message);
     } finally {
       setSyncing(false);
     }
   };
+
+  const { cardName } = parseCardLabel(currentCard);
+  const syncBtnLabel = cardName ? `Sync ${cardName}` : 'Sync Offers';
 
   return (
     <Modal
@@ -103,10 +210,8 @@ export default function SyncWebView({ visible, bank, onClose, onSuccess }) {
     >
       <View style={s.overlay}>
         <SafeAreaView style={s.sheet}>
-          {/* Drag handle */}
           <View style={s.handle} />
 
-          {/* Header */}
           <View style={s.header}>
             <TouchableOpacity onPress={onClose} style={s.closeBtn} hitSlop={12}>
               <Text style={s.closeBtnText}>✕</Text>
@@ -115,32 +220,44 @@ export default function SyncWebView({ visible, bank, onClose, onSuccess }) {
             <View style={{ width: 36 }} />
           </View>
 
-          {/* WebView */}
           <WebView
             ref={webViewRef}
             source={{ uri: config.url }}
             onMessage={handleMessage}
+            onNavigationStateChange={handleNavigationStateChange}
+            onLoadEnd={handleLoadEnd}
             style={s.webview}
-            // Don't persist session between syncs
             incognito={false}
             sharedCookiesEnabled={true}
             thirdPartyCookiesEnabled={true}
           />
 
-          {/* Footer */}
           <View style={s.footer}>
-            <Text style={s.hint}>
-              Log in above, then tap Sync when your offers are visible.
-            </Text>
-            <TouchableOpacity
-              style={[s.syncBtn, syncing && s.syncBtnDisabled]}
-              onPress={handleSyncPress}
-              disabled={syncing}
-            >
-              {syncing
-                ? <ActivityIndicator color="white" size="small" />
-                : <Text style={s.syncBtnText}>Sync Offers</Text>}
-            </TouchableOpacity>
+            {isOnOffersPage ? (
+              <>
+                <Text style={s.hint} numberOfLines={1}>
+                  {currentCard ? `💳 ${currentCard}` : 'Select a card above, then tap Sync.'}
+                </Text>
+                <TouchableOpacity
+                  style={[s.syncBtn, syncing && s.syncBtnDisabled]}
+                  onPress={handleSyncPress}
+                  disabled={syncing}
+                >
+                  {syncing
+                    ? <ActivityIndicator color="white" size="small" />
+                    : <Text style={s.syncBtnText}>{syncBtnLabel}</Text>}
+                </TouchableOpacity>
+              </>
+            ) : (
+              <>
+                <Text style={s.hint}>
+                  Log in above, then tap the button to go to your offers.
+                </Text>
+                <TouchableOpacity style={s.goToOffersBtn} onPress={handleGoToOffers}>
+                  <Text style={s.syncBtnText}>Go to Offers Page →</Text>
+                </TouchableOpacity>
+              </>
+            )}
           </View>
         </SafeAreaView>
       </View>
@@ -162,51 +279,32 @@ const s = StyleSheet.create({
     overflow: 'hidden',
   },
   handle: {
-    width: 40,
-    height: 4,
-    backgroundColor: '#d1d5db',
-    borderRadius: 99,
-    alignSelf: 'center',
-    marginTop: 10,
-    marginBottom: 4,
+    width: 40, height: 4, backgroundColor: '#d1d5db',
+    borderRadius: 99, alignSelf: 'center', marginTop: 10, marginBottom: 4,
   },
   header: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingHorizontal: 16,
-    paddingVertical: 12,
-    borderBottomWidth: 1,
-    borderBottomColor: '#e5e7eb',
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
+    paddingHorizontal: 16, paddingVertical: 12,
+    borderBottomWidth: 1, borderBottomColor: '#e5e7eb',
   },
   closeBtn: {
-    width: 36,
-    height: 36,
-    borderRadius: 18,
-    backgroundColor: '#f3f4f6',
-    alignItems: 'center',
-    justifyContent: 'center',
+    width: 36, height: 36, borderRadius: 18,
+    backgroundColor: '#f3f4f6', alignItems: 'center', justifyContent: 'center',
   },
-  closeBtnText: { fontSize: 14, color: '#374151', fontWeight: '600' },
-  headerTitle:  { fontSize: 16, fontWeight: '700', color: '#1f2937' },
-  webview:      { flex: 1 },
+  closeBtnText:  { fontSize: 14, color: '#374151', fontWeight: '600' },
+  headerTitle:   { fontSize: 16, fontWeight: '700', color: '#1f2937' },
+  webview:       { flex: 1 },
   footer: {
-    padding: 16,
-    borderTopWidth: 1,
-    borderTopColor: '#e5e7eb',
-    backgroundColor: 'white',
+    padding: 16, borderTopWidth: 1, borderTopColor: '#e5e7eb', backgroundColor: 'white',
   },
   hint: {
-    fontSize: 12,
-    color: '#6b7280',
-    textAlign: 'center',
-    marginBottom: 10,
+    fontSize: 12, color: '#6b7280', textAlign: 'center', marginBottom: 10,
   },
   syncBtn: {
-    backgroundColor: '#4f46e5',
-    borderRadius: 12,
-    paddingVertical: 14,
-    alignItems: 'center',
+    backgroundColor: '#4f46e5', borderRadius: 12, paddingVertical: 14, alignItems: 'center',
+  },
+  goToOffersBtn: {
+    backgroundColor: '#059669', borderRadius: 12, paddingVertical: 14, alignItems: 'center',
   },
   syncBtnDisabled: { opacity: 0.6 },
   syncBtnText: { color: 'white', fontSize: 16, fontWeight: '700' },
