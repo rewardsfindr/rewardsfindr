@@ -1,14 +1,14 @@
 // ─────────────────────────────────────────────
 // SYNC WEBVIEW MODAL
-// Multi-card flow:
+// Multi-card flow (1 tap):
 //   1. On first load, detect credit cards only (keyword filter).
-//      cardIndexRef is initialized to the position of the currently
-//      active card so we iterate from there and wrap around.
-//   2. User taps Sync — captures current card, sends to API.
-//   3. After sync, auto-switches to next card (wraps around).
-//   4. CARD_SWITCHED verifies label — retries up to 3x if not confirmed.
-//   5. On confirmed switch, Sync button reappears for next card.
-//   6. After all cards done, shows Done button.
+//      cardIndexRef starts at the currently active card position.
+//   2. User taps Sync once — captures current card, sends to API.
+//   3. After sync, auto-switches to next card (3.5s for dropdown).
+//   4. CARD_SWITCHED confirms label — retries up to 3x if needed.
+//   5. After confirmed switch, waits POST_SWITCH_DELAY_MS for the
+//      offers grid to re-render, then auto-captures (no tap needed).
+//   6. Repeats until all cards done, then shows Done button.
 // ─────────────────────────────────────────────
 import React, { useRef, useState, useEffect } from 'react';
 import {
@@ -42,8 +42,9 @@ const BANK_CONFIG = {
 };
 
 const API_BASE_URL = process.env.EXPO_PUBLIC_API_URL || 'http://localhost:3001';
-const SWITCH_TIMEOUT_MS  = 3500;
-const MAX_SWITCH_RETRIES = 3;
+const SWITCH_TIMEOUT_MS    = 3500; // time for dropdown to register the switch
+const POST_SWITCH_DELAY_MS = 2000; // extra wait for offers grid to re-render
+const MAX_SWITCH_RETRIES   = 3;
 
 const CHASE_CREDIT_CARD_KEYWORDS = [
   'sapphire', 'freedom', 'flex', 'slate', 'ink', 'visa', 'united', 'marriott',
@@ -114,34 +115,37 @@ const buildSwitchCardJs = (index, timeoutMs) => `
   true;
 `;
 
-const buildCaptureJs = (gridSelector) => `
+// Waits delayMs then captures — gives grid time to re-render after card switch
+const buildDelayedCaptureJs = (gridSelector, delayMs) => `
   (function() {
-    try {
-      var html = null;
-      var MAX = 200000;
-      ${gridSelector ? `
-      var grid = document.querySelector('${gridSelector}');
-      if (grid && grid.innerHTML.length > 500) { html = grid.outerHTML; }
-      ` : ''}
-      if (!html) {
-        var selectors = ['[data-testid*="offer"]','[class*="offers"]','[id*="offers"]','main','[role="main"]'];
-        for (var i = 0; i < selectors.length; i++) {
-          var el = document.querySelector(selectors[i]);
-          if (el && el.innerHTML.length > 500) { html = el.outerHTML; break; }
+    setTimeout(function() {
+      try {
+        var html = null;
+        var MAX = 200000;
+        ${gridSelector ? `
+        var grid = document.querySelector('${gridSelector}');
+        if (grid && grid.innerHTML.length > 500) { html = grid.outerHTML; }
+        ` : ''}
+        if (!html) {
+          var selectors = ['[data-testid*="offer"]','[class*="offers"]','[id*="offers"]','main','[role="main"]'];
+          for (var i = 0; i < selectors.length; i++) {
+            var el = document.querySelector(selectors[i]);
+            if (el && el.innerHTML.length > 500) { html = el.outerHTML; break; }
+          }
         }
+        if (!html) html = document.documentElement.outerHTML;
+        if (html.length > MAX) html = html.substring(0, MAX);
+        var cardLabel = '';
+        var cardSel = document.querySelector('mds-select[id="select-credit-card-account"]');
+        if (cardSel) {
+          var cardOpt = cardSel.querySelector('mds-select-option[selected="true"]');
+          if (cardOpt) cardLabel = cardOpt.getAttribute('label') || '';
+        }
+        window.ReactNativeWebView.postMessage(JSON.stringify({ type: 'CAPTURE_HTML', html: html, cardLabel: cardLabel }));
+      } catch(e) {
+        window.ReactNativeWebView.postMessage(JSON.stringify({ type: 'ERROR', message: e.message }));
       }
-      if (!html) html = document.documentElement.outerHTML;
-      if (html.length > MAX) html = html.substring(0, MAX);
-      var cardLabel = '';
-      var cardSel = document.querySelector('mds-select[id="select-credit-card-account"]');
-      if (cardSel) {
-        var cardOpt = cardSel.querySelector('mds-select-option[selected="true"]');
-        if (cardOpt) cardLabel = cardOpt.getAttribute('label') || '';
-      }
-      window.ReactNativeWebView.postMessage(JSON.stringify({ type: 'CAPTURE_HTML', html: html, cardLabel: cardLabel }));
-    } catch(e) {
-      window.ReactNativeWebView.postMessage(JSON.stringify({ type: 'ERROR', message: e.message }));
-    }
+    }, ${delayMs || 0});
   })();
   true;
 `;
@@ -156,12 +160,12 @@ const parseCardLabel = (label) => {
 export default function SyncWebView({ visible, bank, onClose, onSuccess }) {
   const webViewRef = useRef(null);
 
-  const cardOptionsRef      = useRef([]);
-  const cardIndexRef        = useRef(0);
-  const syncedCardsRef      = useRef([]);
-  const cardsDiscovered     = useRef(false);
-  const switchRetriesRef    = useRef(0);
-  const syncedCountRef      = useRef(0); // how many cards have been synced this session
+  const cardOptionsRef     = useRef([]);
+  const cardIndexRef       = useRef(0);
+  const syncedCardsRef     = useRef([]);
+  const cardsDiscovered    = useRef(false);
+  const switchRetriesRef   = useRef(0);
+  const syncedCountRef     = useRef(0);
 
   const [syncing, setSyncing]         = useState(false);
   const [switching, setSwitching]     = useState(false);
@@ -212,7 +216,8 @@ export default function SyncWebView({ visible, bank, onClose, onSuccess }) {
   };
 
   const handleSyncPress = () => {
-    webViewRef.current?.injectJavaScript(buildCaptureJs(config.gridSelector));
+    // Immediate capture for the first card (no delay needed, grid already loaded)
+    webViewRef.current?.injectJavaScript(buildDelayedCaptureJs(config.gridSelector, 0));
   };
 
   const handleMessage = async (event) => {
@@ -224,12 +229,8 @@ export default function SyncWebView({ visible, bank, onClose, onSuccess }) {
           cardOptionsRef.current  = data.cards;
           cardsDiscovered.current = true;
           setCardCount(data.cards.length);
-
-          // Set cardIndexRef to the position of the currently active card.
-          // Chase opens on whichever card was last used, not necessarily index 0.
-          const activeIdx = data.cards.findIndex(
-            c => c.label === data.selectedLabel
-          );
+          // Start at whichever card Chase currently has active
+          const activeIdx = data.cards.findIndex(c => c.label === data.selectedLabel);
           cardIndexRef.current = activeIdx >= 0 ? activeIdx : 0;
           setCardIndexUi(cardIndexRef.current);
         }
@@ -255,6 +256,8 @@ export default function SyncWebView({ visible, bank, onClose, onSuccess }) {
         switchRetriesRef.current = 0;
         setSwitching(false);
         setCurrentCard(actualLabel || expectedLabel || null);
+        // Auto-capture after grid re-renders
+        webViewRef.current?.injectJavaScript(buildDelayedCaptureJs(config.gridSelector, POST_SWITCH_DELAY_MS));
         return;
       }
 
@@ -302,8 +305,7 @@ export default function SyncWebView({ visible, bank, onClose, onSuccess }) {
       setSyncing(false);
 
       if (syncedCountRef.current < totalCards) {
-        // Advance to next card position (wrapping around)
-        const nextPos = (cardIndexRef.current + 1) % totalCards;
+        const nextPos  = (cardIndexRef.current + 1) % totalCards;
         cardIndexRef.current = nextPos;
         setCardIndexUi(nextPos);
         setSwitching(true);
@@ -366,10 +368,12 @@ export default function SyncWebView({ visible, bank, onClose, onSuccess }) {
               <>
                 <Text style={s.hint} numberOfLines={2}>
                   {switching
-                    ? `⏳ Switching to card ${cardIndexUi + 1} of ${totalCards}...`
-                    : currentCard
-                      ? `💳 ${currentCard}${cardCount > 1 ? ` · Card ${cardIndexUi + 1} of ${totalCards}` : ''}`
-                      : 'Select a card above, then tap Sync.'}
+                    ? `⏳ Switching to card ${cardIndexUi + 1} of ${totalCards}... (auto-syncing)`
+                    : syncing
+                      ? `🔄 Syncing ${currentCard || 'card'}...`
+                      : currentCard
+                        ? `💳 ${currentCard}${cardCount > 1 ? ` · Card ${cardIndexUi + 1} of ${totalCards}` : ''}`
+                        : 'Select a card above, then tap Sync.'}
                 </Text>
                 <TouchableOpacity
                   style={[s.syncBtn, isBusy && s.syncBtnDisabled]}
