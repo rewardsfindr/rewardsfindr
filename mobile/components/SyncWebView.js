@@ -2,6 +2,7 @@
 // SYNC WEBVIEW MODAL
 // Opens as an 87% modal sheet over the home screen.
 // Loads directly to bank's offers page.
+// If user not logged in, Chase redirects to login then back to offers.
 // Tracks current URL — shows Sync button only when on offers page.
 // Shows Go to Offers button on all other pages.
 // Multi-card: reads all cards from Chase dropdown, cycles through each.
@@ -18,10 +19,13 @@ import {
 import { WebView } from 'react-native-webview';
 import { getAuthInstance } from '../lib/firebaseClient.js';
 
+const CHASE_OFFERS_URL = 'https://secure.chase.com/web/auth/dashboard#/dashboard/merchantOffers/offer-hub';
+
 const BANK_CONFIG = {
   chase: {
-    url: 'https://www.chase.com',
-    offersUrl: 'https://secure.chase.com/web/auth/dashboard#/dashboard/merchantOffers/offer-hub',
+    // Open directly to offers page — Chase will redirect to login if needed, then back here
+    url: CHASE_OFFERS_URL,
+    offersUrl: CHASE_OFFERS_URL,
     label: 'Chase Offers',
     color: '#1a3a6b',
     offersPaths: ['/cardmember-offers', 'merchantOffers'],
@@ -146,17 +150,17 @@ export default function SyncWebView({ visible, bank, onClose, onSuccess }) {
   const webViewRef = useRef(null);
 
   // Refs — always current inside async handleMessage closure
-  const cardOptionsRef = useRef([]);  // [{ label, value, index }]
-  const cardIndexRef   = useRef(0);   // which card we're on
-  const syncedCardsRef = useRef([]);  // [{ cardName, count }]
+  const cardOptionsRef = useRef([]);
+  const cardIndexRef   = useRef(0);
+  const syncedCardsRef = useRef([]);
 
   // State — drives UI re-renders
   const [syncing, setSyncing]         = useState(false);
   const [switching, setSwitching]     = useState(false);
   const [currentCard, setCurrentCard] = useState(null);
   const [currentUrl, setCurrentUrl]   = useState('');
-  const [cardCount, setCardCount]     = useState(0);   // mirrors cardOptionsRef.length for render
-  const [cardIndexUi, setCardIndexUi] = useState(0);   // mirrors cardIndexRef for render
+  const [cardCount, setCardCount]     = useState(0);
+  const [cardIndexUi, setCardIndexUi] = useState(0);
   const [allDone, setAllDone]         = useState(false);
 
   const config = BANK_CONFIG[bank] || BANK_CONFIG.chase;
@@ -216,7 +220,6 @@ export default function SyncWebView({ visible, bank, onClose, onSuccess }) {
       if (data.type === 'CARD_SWITCHED') {
         setSwitching(false);
         setCurrentCard(data.cardLabel || null);
-        // Re-read dropdown to confirm new selected state
         webViewRef.current?.injectJavaScript(DETECT_CARDS_JS);
         return;
       }
@@ -258,8 +261,6 @@ export default function SyncWebView({ visible, bank, onClose, onSuccess }) {
       if (!response.ok) throw new Error(result.error || 'Sync failed');
 
       const syncedCount = result.synced ?? 0;
-
-      // Update refs directly — no stale closure
       syncedCardsRef.current = [
         ...syncedCardsRef.current,
         { cardName: fullCardName || 'Unknown Card', count: syncedCount },
@@ -271,13 +272,11 @@ export default function SyncWebView({ visible, bank, onClose, onSuccess }) {
       setSyncing(false);
 
       if (totalCards > 1 && nextIndex < totalCards) {
-        // Advance to next card
         cardIndexRef.current = nextIndex;
         setCardIndexUi(nextIndex);
         setSwitching(true);
         webViewRef.current?.injectJavaScript(buildSwitchCardJs(nextIndex));
       } else {
-        // All done
         const total = syncedCardsRef.current.reduce((sum, c) => sum + c.count, 0);
         setAllDone(true);
         onSuccess(total, syncedCardsRef.current);
