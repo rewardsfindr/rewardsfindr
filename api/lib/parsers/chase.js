@@ -9,11 +9,6 @@
 // ─────────────────────────────────────────────
 import * as cheerio from 'cheerio';
 
-/**
- * Extract expiry date string from Chase aria-label.
- * Handles: "expires 5/31/25", "expires 05/31/2025", "expires May 31, 2025"
- * Returns ISO date string (YYYY-MM-DD) or null.
- */
 function parseExpiryDate(ariaLabel) {
   const slashMatch = ariaLabel.match(/expires?\s+(\d{1,2}\/\d{1,2}\/\d{2,4})/i);
   if (slashMatch) {
@@ -28,11 +23,6 @@ function parseExpiryDate(ariaLabel) {
   return null;
 }
 
-/**
- * Extract minimum spend from Chase aria-label.
- * Handles: "minimum purchase of $50", "on purchases of $50 or more", "spend $50"
- * Returns number or 0.
- */
 function parseMinimumSpend(ariaLabel) {
   const patterns = [
     /minimum\s+(?:purchase\s+of\s+)?\$(\d+(?:\.\d+)?)/i,
@@ -47,10 +37,6 @@ function parseMinimumSpend(ariaLabel) {
   return 0;
 }
 
-/**
- * Detect whether offer applies online, in-store, or both.
- * Returns: 'online' | 'in-store' | 'both' | null
- */
 function parsePurchaseType(ariaLabel) {
   const lower = ariaLabel.toLowerCase();
   const hasOnline = lower.includes('online');
@@ -61,47 +47,39 @@ function parsePurchaseType(ariaLabel) {
   return null;
 }
 
-/**
- * Parse raw Chase offers page HTML into a normalized offer array.
- * @param {string} html - HTML captured from the Chase offers grid
- * @returns {Array} offers
- */
 export function parseChaseOffers(html) {
   const $ = cheerio.load(html);
   const offers = [];
   const seen = new Set();
+  let debugCount = 0;
 
   $('[data-testid="commerce-tile"]').each((i, el) => {
     try {
       const $el = $(el);
 
-      // Merchant name
       const merchantName = $el.find('span.r9jbijk').first().text().trim();
       if (!merchantName) return;
 
-      // Deduplicate (carousel + grid both render tiles)
       if (seen.has(merchantName.toLowerCase())) return;
       seen.add(merchantName.toLowerCase());
 
-      // Cashback value — e.g. "25% back", "$20 cash back"
       const valueText = $el.find('span.r9jbijj').first().text().trim();
 
       let cashbackAmount = 0;
       let cashbackType = 'percent';
-
       const percentMatch = valueText.match(/(\d+(?:\.\d+)?)\s*%/);
       const dollarMatch  = valueText.match(/\$(\d+(?:\.\d+)?)/);
+      if (percentMatch) { cashbackAmount = parseFloat(percentMatch[1]); cashbackType = 'percent'; }
+      else if (dollarMatch) { cashbackAmount = parseFloat(dollarMatch[1]); cashbackType = 'fixed'; }
 
-      if (percentMatch) {
-        cashbackAmount = parseFloat(percentMatch[1]);
-        cashbackType = 'percent';
-      } else if (dollarMatch) {
-        cashbackAmount = parseFloat(dollarMatch[1]);
-        cashbackType = 'fixed';
+      const ariaLabel = $el.attr('aria-label') || '';
+
+      // DEBUG: log first 3 aria-labels so we can see exact format for expiry/minspend
+      if (debugCount < 3) {
+        console.log(`[Chase DEBUG] aria-label[${debugCount}]: ${ariaLabel}`);
+        debugCount++;
       }
 
-      // Full aria-label contains expiry, min spend, purchase type
-      const ariaLabel = $el.attr('aria-label') || '';
       const isActivated  = !ariaLabel.toLowerCase().includes('add offer');
       const expiryDate   = parseExpiryDate(ariaLabel);
       const minimumSpend = parseMinimumSpend(ariaLabel);
