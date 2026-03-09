@@ -73,17 +73,11 @@ export default function HomeScreen() {
     }
   };
 
-  // cardName will be e.g. "Sapphire Reserve (...0483)" or null
-  const handleSyncSuccess = (count, cardName) => {
-    setSyncBank(null);
-    const cardInfo = cardName ? ` for ${cardName}` : '';
-    Alert.alert(
-      'Sync Complete',
-      count > 0
-        ? `${count} offer${count !== 1 ? 's' : ''} synced${cardInfo}!`
-        : 'No offers found. Make sure you are on the offers page before syncing.',
-      [{ text: 'OK' }]
-    );
+  // Called after all cards synced: totalSynced (int), cardResults ([{ cardName, count }])
+  const handleSyncSuccess = (totalSynced, cardResults) => {
+    // Modal stays open and shows Done button — no alert needed here.
+    // This callback is fired so parent knows sync is complete.
+    // The modal itself handles the Done / Go Back UI.
   };
 
   const isSearching = searching || localSearching;
