@@ -1,8 +1,12 @@
 // ─────────────────────────────────────────────
 // SYNC WEBVIEW MODAL
 // Multi-card flow:
-//   1. On first load, detect credit cards only (options with an img child).
-//      Debit/checking accounts have no card image and are skipped.
+//   1. On first load, detect credit cards only.
+//      Chase credit cards always contain a known brand keyword in the label
+//      (Sapphire, Freedom, Flex, Slate, Ink, Visa, United, Marriott, Hyatt,
+//      Southwest, Amazon, Prime, Disney, Starbucks, IHG, British, Aeroplan).
+//      Debit/checking accounts use a person's name (e.g. "Sharanya (...9222)")
+//      and don't match any brand keyword — skipped automatically.
 //      Multiple debit accounts are handled automatically by this filter.
 //   2. User taps Sync — captures card 0.
 //   3. After each sync, auto-switch to next card (3.5s timeout).
@@ -45,23 +49,31 @@ const API_BASE_URL = process.env.EXPO_PUBLIC_API_URL || 'http://localhost:3001';
 const SWITCH_TIMEOUT_MS = 3500;
 const MAX_SWITCH_RETRIES = 3;
 
+// Chase credit card brand keywords — any label containing one of these is a credit card.
+// Debit/checking accounts show a person's name and won't match any of these.
+const CHASE_CREDIT_CARD_KEYWORDS = [
+  'sapphire', 'freedom', 'flex', 'slate', 'ink', 'visa', 'united', 'marriott',
+  'hyatt', 'southwest', 'amazon', 'prime', 'disney', 'starbucks', 'ihg',
+  'british', 'aeroplan', 'reserve', 'preferred', 'unlimited', 'plus',
+];
+
 // Run ONCE on first load.
-// Only includes options that have an <img> child — credit cards have card art images,
-// debit/checking accounts do not. Handles 1 or many debit accounts automatically.
+// Filters to credit cards only using brand keyword matching on the label.
 const DETECT_CARDS_JS = `
   (function() {
     try {
+      var KEYWORDS = ${JSON.stringify(CHASE_CREDIT_CARD_KEYWORDS)};
       var sel = document.querySelector('mds-select[id="select-credit-card-account"]');
       if (sel) {
         var opts = sel.querySelectorAll('mds-select-option');
         var cards = [];
         opts.forEach(function(opt, i) {
-          // Skip debit/checking accounts — they have no card image
-          var hasImage = opt.querySelector('img') !== null;
-          if (!hasImage) return;
-          var label = opt.getAttribute('label') || '';
+          var label = (opt.getAttribute('label') || '').toLowerCase();
+          var isCreditCard = KEYWORDS.some(function(k) { return label.indexOf(k) !== -1; });
+          if (!isCreditCard) return; // skip debit/checking accounts
+          var originalLabel = opt.getAttribute('label') || '';
           var value = opt.getAttribute('value') || String(i);
-          cards.push({ label: label, value: value, index: i });
+          cards.push({ label: originalLabel, value: value, index: i });
         });
         var selectedOpt = sel.querySelector('mds-select-option[selected="true"]');
         var selectedLabel = selectedOpt ? (selectedOpt.getAttribute('label') || '') : '';
@@ -230,7 +242,7 @@ export default function SyncWebView({ visible, bank, onClose, onSuccess }) {
       // ── CARD SWITCHED ──
       if (data.type === 'CARD_SWITCHED') {
         const expectedIndex = data.expectedIndex;
-        const expectedLabel = cardOptionsRef.current[expectedIndex]?.label || '';
+        const expectedLabel = cardOptionsRef.current.find(c => c.index === expectedIndex)?.label || '';
         const actualLabel   = data.cardLabel || '';
 
         const switchConfirmed = expectedLabel
@@ -301,6 +313,7 @@ export default function SyncWebView({ visible, bank, onClose, onSuccess }) {
         setCardIndexUi(nextIndex);
         setSwitching(true);
         switchRetriesRef.current = 0;
+        // Use the real DOM index stored in cardOptionsRef for the switch
         webViewRef.current?.injectJavaScript(buildSwitchCardJs(cardOptionsRef.current[nextIndex].index, SWITCH_TIMEOUT_MS));
       } else {
         const total = syncedCardsRef.current.reduce((sum, c) => sum + c.count, 0);
