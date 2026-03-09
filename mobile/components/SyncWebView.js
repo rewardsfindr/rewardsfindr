@@ -1,10 +1,15 @@
 // ─────────────────────────────────────────────
 // SYNC WEBVIEW MODAL
-// Opens as an 85% modal sheet over the home screen.
-// Loads directly to bank's offers page.
-// Tracks current URL — shows Sync button only when on offers page.
-// Shows Go to Offers button on all other pages.
-// Detects selected card and shows it in hint + button text.
+// Multi-card flow (1 tap):
+//   1. Detect credit cards on first load; start at active card position.
+//   2. User taps Sync once — arms captureArmed, captures card 1.
+//   3. After API call, auto-switches to next card.
+//   4. CARD_SWITCHED confirms label (retries up to 3x).
+//   5. On confirmed switch, arms captureArmed, waits POST_SWITCH_DELAY_MS
+//      for grid re-render, then auto-captures.
+//   6. CAPTURE_HTML is ignored unless captureArmed is true — prevents
+//      any stray messages from triggering duplicate syncs.
+//   7. Repeats until all cards done.
 // ─────────────────────────────────────────────
 import React, { useRef, useState, useEffect } from 'react';
 import {
@@ -14,12 +19,12 @@ import {
 import { WebView } from 'react-native-webview';
 import { getAuthInstance } from '../lib/firebaseClient.js';
 
+const CHASE_OFFERS_URL = 'https://secure.chase.com/web/auth/dashboard#/dashboard/merchantOffers/offer-hub';
+
 const BANK_CONFIG = {
   chase: {
-    // Chase homepage — always works, has login form
-    url: 'https://www.chase.com',
-    // Post-login authenticated offers URL
-    offersUrl: 'https://secure.chase.com/web/auth/dashboard#/dashboard/merchantOffers/offer-hub',
+    url: CHASE_OFFERS_URL,
+    offersUrl: CHASE_OFFERS_URL,
     label: 'Chase Offers',
     color: '#1a3a6b',
     offersPaths: ['/cardmember-offers', 'merchantOffers'],
@@ -33,32 +38,118 @@ const BANK_CONFIG = {
     color: '#007ac1',
     offersPaths: ['/benefits/offers'],
     loginPaths: ['/login', '/sign-in', '/identity', '/auth', '/challenge'],
-    gridSelector: null, // TODO: inspect Amex DOM
+    gridSelector: null,
   },
 };
 
 const API_BASE_URL = process.env.EXPO_PUBLIC_API_URL || 'http://localhost:3001';
+const SWITCH_TIMEOUT_MS    = 3500;
+const POST_SWITCH_DELAY_MS = 2000;
+const MAX_SWITCH_RETRIES   = 3;
 
-// Injected on page load — reads currently selected card from Chase dropdown
-const DETECT_CARD_JS = `
+const CHASE_CREDIT_CARD_KEYWORDS = [
+  'sapphire', 'freedom', 'flex', 'slate', 'ink', 'visa', 'united', 'marriott',
+  'hyatt', 'southwest', 'amazon', 'prime', 'disney', 'starbucks', 'ihg',
+  'british', 'aeroplan', 'reserve', 'preferred', 'unlimited', 'plus',
+];
+
+const DETECT_CARDS_JS = `
   (function() {
     try {
+      var KEYWORDS = ${JSON.stringify(CHASE_CREDIT_CARD_KEYWORDS)};
       var sel = document.querySelector('mds-select[id="select-credit-card-account"]');
       if (sel) {
-        var opt = sel.querySelector('mds-select-option[selected="true"]');
-        if (opt) {
-          var label = opt.getAttribute('label') || '';
-          window.ReactNativeWebView.postMessage(JSON.stringify({ type: 'CARD_DETECTED', cardLabel: label }));
-          return;
-        }
+        var opts = sel.querySelectorAll('mds-select-option');
+        var cards = [];
+        opts.forEach(function(opt, i) {
+          var rawLabel = opt.getAttribute('label') || '';
+          var lowerLabel = rawLabel.toLowerCase();
+          var isCreditCard = KEYWORDS.some(function(k) { return lowerLabel.indexOf(k) !== -1; });
+          if (!isCreditCard) return;
+          var value = opt.getAttribute('value') || String(i);
+          cards.push({ label: rawLabel, value: value, index: i });
+        });
+        var selectedOpt = sel.querySelector('mds-select-option[selected="true"]');
+        var selectedLabel = selectedOpt ? (selectedOpt.getAttribute('label') || '') : '';
+        window.ReactNativeWebView.postMessage(JSON.stringify({
+          type: 'CARDS_DETECTED',
+          cards: cards,
+          selectedLabel: selectedLabel,
+        }));
+        return;
       }
-      window.ReactNativeWebView.postMessage(JSON.stringify({ type: 'CARD_DETECTED', cardLabel: null }));
+      window.ReactNativeWebView.postMessage(JSON.stringify({ type: 'CARDS_DETECTED', cards: [], selectedLabel: null }));
     } catch(e) {}
   })();
   true;
 `;
 
-// "Sapphire Reserve (...0483)" → { cardName: "Sapphire Reserve", cardLast4: "0483" }
+const buildSwitchCardJs = (index, timeoutMs) => `
+  (function() {
+    try {
+      var sel = document.querySelector('mds-select[id="select-credit-card-account"]');
+      if (!sel) {
+        window.ReactNativeWebView.postMessage(JSON.stringify({ type: 'CARD_SWITCH_ERROR', message: 'Dropdown not found' }));
+        return;
+      }
+      var opts = sel.querySelectorAll('mds-select-option');
+      var target = opts[${index}];
+      if (!target) {
+        window.ReactNativeWebView.postMessage(JSON.stringify({ type: 'CARD_SWITCH_ERROR', message: 'Card index out of range' }));
+        return;
+      }
+      target.click();
+      sel.dispatchEvent(new Event('change', { bubbles: true }));
+      setTimeout(function() {
+        var updated = sel.querySelector('mds-select-option[selected="true"]');
+        var label = updated ? (updated.getAttribute('label') || '') : '';
+        window.ReactNativeWebView.postMessage(JSON.stringify({
+          type: 'CARD_SWITCHED',
+          cardLabel: label,
+          expectedIndex: ${index},
+        }));
+      }, ${timeoutMs || SWITCH_TIMEOUT_MS});
+    } catch(e) {
+      window.ReactNativeWebView.postMessage(JSON.stringify({ type: 'CARD_SWITCH_ERROR', message: e.message }));
+    }
+  })();
+  true;
+`;
+
+const buildDelayedCaptureJs = (gridSelector, delayMs) => `
+  (function() {
+    setTimeout(function() {
+      try {
+        var html = null;
+        var MAX = 200000;
+        ${gridSelector ? `
+        var grid = document.querySelector('${gridSelector}');
+        if (grid && grid.innerHTML.length > 500) { html = grid.outerHTML; }
+        ` : ''}
+        if (!html) {
+          var selectors = ['[data-testid*="offer"]','[class*="offers"]','[id*="offers"]','main','[role="main"]'];
+          for (var i = 0; i < selectors.length; i++) {
+            var el = document.querySelector(selectors[i]);
+            if (el && el.innerHTML.length > 500) { html = el.outerHTML; break; }
+          }
+        }
+        if (!html) html = document.documentElement.outerHTML;
+        if (html.length > MAX) html = html.substring(0, MAX);
+        var cardLabel = '';
+        var cardSel = document.querySelector('mds-select[id="select-credit-card-account"]');
+        if (cardSel) {
+          var cardOpt = cardSel.querySelector('mds-select-option[selected="true"]');
+          if (cardOpt) cardLabel = cardOpt.getAttribute('label') || '';
+        }
+        window.ReactNativeWebView.postMessage(JSON.stringify({ type: 'CAPTURE_HTML', html: html, cardLabel: cardLabel }));
+      } catch(e) {
+        window.ReactNativeWebView.postMessage(JSON.stringify({ type: 'ERROR', message: e.message }));
+      }
+    }, ${delayMs || 0});
+  })();
+  true;
+`;
+
 const parseCardLabel = (label) => {
   if (!label) return { cardName: null, cardLast4: null };
   const match = label.match(/^(.+?)\s*\(\.\.\.([\w\d]+)\)\s*$/);
@@ -66,65 +157,45 @@ const parseCardLabel = (label) => {
   return { cardName: label.trim(), cardLast4: null };
 };
 
-// Captures offers grid HTML + reads selected card in one injection
-const buildCaptureJs = (gridSelector) => `
-  (function() {
-    try {
-      var html = null;
-      var MAX = 200000;
-
-      ${ gridSelector ? `
-      var grid = document.querySelector('${gridSelector}');
-      if (grid && grid.innerHTML.length > 500) { html = grid.outerHTML; }
-      ` : '' }
-
-      if (!html) {
-        var selectors = [
-          '[data-testid*="offer"]', '[class*="offers"]', '[id*="offers"]',
-          'main', '[role="main"]',
-        ];
-        for (var i = 0; i < selectors.length; i++) {
-          var el = document.querySelector(selectors[i]);
-          if (el && el.innerHTML.length > 500) { html = el.outerHTML; break; }
-        }
-      }
-
-      if (!html) html = document.documentElement.outerHTML;
-      if (html.length > MAX) html = html.substring(0, MAX);
-
-      var cardLabel = '';
-      var cardSel = document.querySelector('mds-select[id="select-credit-card-account"]');
-      if (cardSel) {
-        var cardOpt = cardSel.querySelector('mds-select-option[selected="true"]');
-        if (cardOpt) cardLabel = cardOpt.getAttribute('label') || '';
-      }
-
-      window.ReactNativeWebView.postMessage(JSON.stringify({ type: 'CAPTURE_HTML', html: html, cardLabel: cardLabel }));
-    } catch(e) {
-      window.ReactNativeWebView.postMessage(JSON.stringify({ type: 'ERROR', message: e.message }));
-    }
-  })();
-  true;
-`;
-
-/**
- * @param {boolean}  visible  - controls modal visibility
- * @param {'chase'|'amex'} bank - which bank to open
- * @param {function} onClose  - called when user dismisses
- * @param {function} onSuccess(syncedCount, cardName) - called after successful sync
- */
 export default function SyncWebView({ visible, bank, onClose, onSuccess }) {
   const webViewRef = useRef(null);
-  const [syncing, setSyncing]       = useState(false);
+
+  const cardOptionsRef     = useRef([]);
+  const cardIndexRef       = useRef(0);
+  const syncedCardsRef     = useRef([]);
+  const cardsDiscovered    = useRef(false);
+  const switchRetriesRef   = useRef(0);
+  const syncedCountRef     = useRef(0);
+  const captureArmed       = useRef(false); // CAPTURE_HTML only processed when true
+
+  const [syncing, setSyncing]         = useState(false);
+  const [switching, setSwitching]     = useState(false);
+  const [autoCapturing, setAutoCapturing] = useState(false); // waiting for post-switch delay
   const [currentCard, setCurrentCard] = useState(null);
   const [currentUrl, setCurrentUrl]   = useState('');
+  const [cardCount, setCardCount]     = useState(0);
+  const [cardIndexUi, setCardIndexUi] = useState(0);
+  const [allDone, setAllDone]         = useState(false);
+
   const config = BANK_CONFIG[bank] || BANK_CONFIG.chase;
 
   useEffect(() => {
     if (!visible) {
+      cardOptionsRef.current   = [];
+      cardIndexRef.current     = 0;
+      syncedCardsRef.current   = [];
+      cardsDiscovered.current  = false;
+      switchRetriesRef.current = 0;
+      syncedCountRef.current   = 0;
+      captureArmed.current     = false;
       setCurrentCard(null);
       setCurrentUrl('');
       setSyncing(false);
+      setSwitching(false);
+      setAutoCapturing(false);
+      setCardCount(0);
+      setCardIndexUi(0);
+      setAllDone(false);
     }
   }, [visible]);
 
@@ -138,39 +209,89 @@ export default function SyncWebView({ visible, bank, onClose, onSuccess }) {
   };
 
   const handleLoadEnd = () => {
-    webViewRef.current?.injectJavaScript(DETECT_CARD_JS);
+    if (bank === 'chase' && !cardsDiscovered.current) {
+      webViewRef.current?.injectJavaScript(DETECT_CARDS_JS);
+    }
   };
 
   const handleGoToOffers = () => {
     const target = config.offersUrl || config.url;
-    webViewRef.current?.injectJavaScript(
-      `window.location.replace('${target}'); true;`
-    );
+    webViewRef.current?.injectJavaScript(`window.location.replace('${target}'); true;`);
   };
 
   const handleSyncPress = () => {
-    webViewRef.current?.injectJavaScript(buildCaptureJs(config.gridSelector));
+    captureArmed.current = true;
+    webViewRef.current?.injectJavaScript(buildDelayedCaptureJs(config.gridSelector, 0));
   };
 
   const handleMessage = async (event) => {
     try {
       const data = JSON.parse(event.nativeEvent.data);
 
-      if (data.type === 'CARD_DETECTED') {
-        setCurrentCard(data.cardLabel || null);
+      if (data.type === 'CARDS_DETECTED') {
+        if (!cardsDiscovered.current && data.cards && data.cards.length > 0) {
+          cardOptionsRef.current  = data.cards;
+          cardsDiscovered.current = true;
+          setCardCount(data.cards.length);
+          const activeIdx = data.cards.findIndex(c => c.label === data.selectedLabel);
+          cardIndexRef.current = activeIdx >= 0 ? activeIdx : 0;
+          setCardIndexUi(cardIndexRef.current);
+        }
+        setCurrentCard(data.selectedLabel || null);
         return;
       }
+
+      if (data.type === 'CARD_SWITCHED') {
+        const expectedIndex = data.expectedIndex;
+        const expectedLabel = cardOptionsRef.current.find(c => c.index === expectedIndex)?.label || '';
+        const actualLabel   = data.cardLabel || '';
+        const switchConfirmed = expectedLabel
+          ? actualLabel.trim() === expectedLabel.trim()
+          : !!actualLabel;
+
+        if (!switchConfirmed && switchRetriesRef.current < MAX_SWITCH_RETRIES) {
+          switchRetriesRef.current += 1;
+          const retryDelay = SWITCH_TIMEOUT_MS + (switchRetriesRef.current * 1500);
+          webViewRef.current?.injectJavaScript(buildSwitchCardJs(expectedIndex, retryDelay));
+          return;
+        }
+
+        switchRetriesRef.current = 0;
+        setSwitching(false);
+        setCurrentCard(actualLabel || expectedLabel || null);
+        // Arm capture, show autoCapturing state during delay
+        captureArmed.current = true;
+        setAutoCapturing(true);
+        webViewRef.current?.injectJavaScript(buildDelayedCaptureJs(config.gridSelector, POST_SWITCH_DELAY_MS));
+        return;
+      }
+
+      if (data.type === 'CARD_SWITCH_ERROR') {
+        setSwitching(false);
+        setAutoCapturing(false);
+        captureArmed.current = false;
+        Alert.alert('Card Switch Failed', data.message);
+        return;
+      }
+
       if (data.type === 'ERROR') {
+        setAutoCapturing(false);
+        captureArmed.current = false;
         Alert.alert('Capture Error', data.message);
         return;
       }
+
       if (data.type !== 'CAPTURE_HTML') return;
+
+      // Drop any CAPTURE_HTML that wasn't explicitly armed
+      if (!captureArmed.current) return;
+      captureArmed.current = false;
+      setAutoCapturing(false);
 
       setSyncing(true);
 
       const user = getAuthInstance().currentUser;
       if (!user) throw new Error('You must be signed in to sync offers.');
-
       const token = await user.getIdToken();
 
       const { cardName, cardLast4 } = parseCardLabel(data.cardLabel);
@@ -180,38 +301,56 @@ export default function SyncWebView({ visible, bank, onClose, onSuccess }) {
 
       const response = await fetch(`${API_BASE_URL}/api/offers/parse`, {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${token}`,
-        },
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
         body: JSON.stringify({ html: data.html, bank, cardName: fullCardName }),
       });
 
       const result = await response.json();
       if (!response.ok) throw new Error(result.error || 'Sync failed');
 
-      onSuccess(result.synced ?? 0, fullCardName);
-    } catch (err) {
-      Alert.alert('Sync Failed', err.message);
-    } finally {
+      syncedCardsRef.current = [
+        ...syncedCardsRef.current,
+        { cardName: fullCardName || 'Unknown Card', count: result.synced ?? 0 },
+      ];
+
+      syncedCountRef.current += 1;
+      const totalCards = cardOptionsRef.current.length;
+
       setSyncing(false);
+
+      if (syncedCountRef.current < totalCards) {
+        const nextPos = (cardIndexRef.current + 1) % totalCards;
+        cardIndexRef.current = nextPos;
+        setCardIndexUi(nextPos);
+        setSwitching(true);
+        switchRetriesRef.current = 0;
+        const domIndex = cardOptionsRef.current[nextPos].index;
+        webViewRef.current?.injectJavaScript(buildSwitchCardJs(domIndex, SWITCH_TIMEOUT_MS));
+      } else {
+        const total = syncedCardsRef.current.reduce((sum, c) => sum + c.count, 0);
+        setAllDone(true);
+        onSuccess(total, syncedCardsRef.current);
+      }
+    } catch (err) {
+      captureArmed.current = false;
+      setAutoCapturing(false);
+      setSyncing(false);
+      setSwitching(false);
+      Alert.alert('Sync Failed', err.message);
     }
   };
 
   const { cardName } = parseCardLabel(currentCard);
-  const syncBtnLabel = cardName ? `Sync ${cardName}` : 'Sync Offers';
+  const totalCards    = cardCount || 1;
+  const progressLabel = cardCount > 1 ? ` (${cardIndexUi + 1} of ${totalCards})` : '';
+  const syncBtnLabel  = cardName ? `Sync ${cardName}${progressLabel}` : `Sync Offers${progressLabel}`;
+  const isBusy        = syncing || switching || autoCapturing;
 
   return (
-    <Modal
-      visible={visible}
-      animationType="slide"
-      transparent={true}
-      onRequestClose={onClose}
-    >
+    <Modal visible={visible} animationType="slide" transparent={true} onRequestClose={onClose}>
       <View style={s.overlay}>
         <SafeAreaView style={s.sheet}>
           <View style={s.handle} />
-
           <View style={s.header}>
             <TouchableOpacity onPress={onClose} style={s.closeBtn} hitSlop={12}>
               <Text style={s.closeBtnText}>✕</Text>
@@ -219,7 +358,6 @@ export default function SyncWebView({ visible, bank, onClose, onSuccess }) {
             <Text style={s.headerTitle}>{config.label}</Text>
             <View style={{ width: 36 }} />
           </View>
-
           <WebView
             ref={webViewRef}
             source={{ uri: config.url }}
@@ -231,28 +369,43 @@ export default function SyncWebView({ visible, bank, onClose, onSuccess }) {
             sharedCookiesEnabled={true}
             thirdPartyCookiesEnabled={true}
           />
-
           <View style={s.footer}>
-            {isOnOffersPage ? (
+            {allDone ? (
               <>
-                <Text style={s.hint} numberOfLines={1}>
-                  {currentCard ? `💳 ${currentCard}` : 'Select a card above, then tap Sync.'}
+                <Text style={s.hint}>
+                  ✅ All {syncedCardsRef.current.length} card{syncedCardsRef.current.length !== 1 ? 's' : ''} synced!{'  '}
+                  {syncedCardsRef.current.map(c => `${c.cardName}: ${c.count} offers`).join(' · ')}
+                </Text>
+                <TouchableOpacity style={s.doneBtn} onPress={onClose}>
+                  <Text style={s.syncBtnText}>✓ Done — Go Back to App</Text>
+                </TouchableOpacity>
+              </>
+            ) : isOnOffersPage ? (
+              <>
+                <Text style={s.hint} numberOfLines={2}>
+                  {switching
+                    ? `⏳ Switching to next card (${cardIndexUi + 1} of ${totalCards})...`
+                    : autoCapturing
+                      ? `⏳ Loading card offers...`
+                      : syncing
+                        ? `🔄 Syncing ${currentCard || 'card'}...`
+                        : currentCard
+                          ? `💳 ${currentCard}${cardCount > 1 ? ` · Card ${cardIndexUi + 1} of ${totalCards}` : ''}`
+                          : 'Tap Sync to start.'}
                 </Text>
                 <TouchableOpacity
-                  style={[s.syncBtn, syncing && s.syncBtnDisabled]}
+                  style={[s.syncBtn, isBusy && s.syncBtnDisabled]}
                   onPress={handleSyncPress}
-                  disabled={syncing}
+                  disabled={isBusy}
                 >
-                  {syncing
+                  {isBusy
                     ? <ActivityIndicator color="white" size="small" />
                     : <Text style={s.syncBtnText}>{syncBtnLabel}</Text>}
                 </TouchableOpacity>
               </>
             ) : (
               <>
-                <Text style={s.hint}>
-                  Log in above, then tap the button to go to your offers.
-                </Text>
+                <Text style={s.hint}>Log in above, then tap the button to go to your offers.</Text>
                 <TouchableOpacity style={s.goToOffersBtn} onPress={handleGoToOffers}>
                   <Text style={s.syncBtnText}>Go to Offers Page →</Text>
                 </TouchableOpacity>
@@ -266,46 +419,19 @@ export default function SyncWebView({ visible, bank, onClose, onSuccess }) {
 }
 
 const s = StyleSheet.create({
-  overlay: {
-    flex: 1,
-    justifyContent: 'flex-end',
-    backgroundColor: 'rgba(0, 0, 0, 0.45)',
-  },
-  sheet: {
-    height: '87%',
-    backgroundColor: 'white',
-    borderTopLeftRadius: 20,
-    borderTopRightRadius: 20,
-    overflow: 'hidden',
-  },
-  handle: {
-    width: 40, height: 4, backgroundColor: '#d1d5db',
-    borderRadius: 99, alignSelf: 'center', marginTop: 10, marginBottom: 4,
-  },
-  header: {
-    flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
-    paddingHorizontal: 16, paddingVertical: 12,
-    borderBottomWidth: 1, borderBottomColor: '#e5e7eb',
-  },
-  closeBtn: {
-    width: 36, height: 36, borderRadius: 18,
-    backgroundColor: '#f3f4f6', alignItems: 'center', justifyContent: 'center',
-  },
-  closeBtnText:  { fontSize: 14, color: '#374151', fontWeight: '600' },
-  headerTitle:   { fontSize: 16, fontWeight: '700', color: '#1f2937' },
-  webview:       { flex: 1 },
-  footer: {
-    padding: 16, borderTopWidth: 1, borderTopColor: '#e5e7eb', backgroundColor: 'white',
-  },
-  hint: {
-    fontSize: 12, color: '#6b7280', textAlign: 'center', marginBottom: 10,
-  },
-  syncBtn: {
-    backgroundColor: '#4f46e5', borderRadius: 12, paddingVertical: 14, alignItems: 'center',
-  },
-  goToOffersBtn: {
-    backgroundColor: '#059669', borderRadius: 12, paddingVertical: 14, alignItems: 'center',
-  },
+  overlay:         { flex: 1, justifyContent: 'flex-end', backgroundColor: 'rgba(0,0,0,0.45)' },
+  sheet:           { height: '87%', backgroundColor: 'white', borderTopLeftRadius: 20, borderTopRightRadius: 20, overflow: 'hidden' },
+  handle:          { width: 40, height: 4, backgroundColor: '#d1d5db', borderRadius: 99, alignSelf: 'center', marginTop: 10, marginBottom: 4 },
+  header:          { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 16, paddingVertical: 12, borderBottomWidth: 1, borderBottomColor: '#e5e7eb' },
+  closeBtn:        { width: 36, height: 36, borderRadius: 18, backgroundColor: '#f3f4f6', alignItems: 'center', justifyContent: 'center' },
+  closeBtnText:    { fontSize: 14, color: '#374151', fontWeight: '600' },
+  headerTitle:     { fontSize: 16, fontWeight: '700', color: '#1f2937' },
+  webview:         { flex: 1 },
+  footer:          { padding: 16, borderTopWidth: 1, borderTopColor: '#e5e7eb', backgroundColor: 'white' },
+  hint:            { fontSize: 12, color: '#6b7280', textAlign: 'center', marginBottom: 10 },
+  syncBtn:         { backgroundColor: '#4f46e5', borderRadius: 12, paddingVertical: 14, alignItems: 'center' },
+  goToOffersBtn:   { backgroundColor: '#059669', borderRadius: 12, paddingVertical: 14, alignItems: 'center' },
+  doneBtn:         { backgroundColor: '#16a34a', borderRadius: 12, paddingVertical: 14, alignItems: 'center' },
   syncBtnDisabled: { opacity: 0.6 },
-  syncBtnText: { color: 'white', fontSize: 16, fontWeight: '700' },
+  syncBtnText:     { color: 'white', fontSize: 16, fontWeight: '700' },
 });
