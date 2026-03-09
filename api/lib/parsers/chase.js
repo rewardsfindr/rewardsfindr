@@ -1,59 +1,43 @@
 // ─────────────────────────────────────────────
 // CHASE OFFERS PARSER
-// Parses raw HTML from Chase offers page using cheerio.
-// Selectors are based on Chase's current DOM structure
-// and may need tuning as Chase updates their frontend.
+// Selectors based on real Chase DOM (inspected March 2026).
+// Tile:     [data-testid="commerce-tile"]
+// Merchant: span.r9jbijk  (mds-body-small-heavier)
+// Value:    span.r9jbijj  (mds-body-large-heavier)
+// Activated: aria-label ends with "Remove Offer" (vs "Add Offer")
 // ─────────────────────────────────────────────
 import * as cheerio from 'cheerio';
 
 /**
  * Parse raw Chase offers page HTML into a normalized offer array.
- * @param {string} html - Raw outerHTML captured from the Chase offers page
- * @returns {Array} offers - Array of normalized offer objects
+ * @param {string} html - HTML captured from the Chase offers grid
+ * @returns {Array} offers
  */
 export function parseChaseOffers(html) {
   const $ = cheerio.load(html);
   const offers = [];
+  const seen = new Set();
 
-  // Chase renders offer tiles inside a list/grid.
-  // Try multiple selector strategies in priority order.
-  const tileSelector = [
-    '[data-testid="offer-tile"]',
-    '.offer-tile',
-    '.offers-list-item',
-    '[class*="OfferTile"]',
-    '[class*="offer-card"]',
-  ].join(', ');
-
-  $(tileSelector).each((i, el) => {
+  $('[data-testid="commerce-tile"]').each((i, el) => {
     try {
       const $el = $(el);
 
-      // ── Merchant Name ──────────────────────────────
-      const merchantName = $el
-        .find(
-          '[data-testid="merchant-name"], .merchant-name, .offer-merchant, [class*="MerchantName"], [class*="merchantName"]'
-        )
-        .first()
-        .text()
-        .trim();
+      // Merchant name
+      const merchantName = $el.find('span.r9jbijk').first().text().trim();
+      if (!merchantName) return;
 
-      if (!merchantName) return; // skip tiles without a merchant
+      // Deduplicate (carousel + grid both render tiles)
+      if (seen.has(merchantName.toLowerCase())) return;
+      seen.add(merchantName.toLowerCase());
 
-      // ── Headline / Offer Value ──────────────────────
-      const headlineText = $el
-        .find(
-          '[data-testid="offer-headline"], .offer-headline, .offer-title, [class*="OfferHeadline"], [class*="offerHeadline"]'
-        )
-        .first()
-        .text()
-        .trim();
+      // Cashback value — e.g. "25% back", "$20 cash back", "20% cash back"
+      const valueText = $el.find('span.r9jbijj').first().text().trim();
 
       let cashbackAmount = 0;
       let cashbackType = 'percent';
 
-      const percentMatch = headlineText.match(/(\d+(?:\.\d+)?)\s*%/);
-      const dollarMatch = headlineText.match(/\$(\d+(?:\.\d+)?)/);
+      const percentMatch = valueText.match(/(\d+(?:\.\d+)?)\s*%/);
+      const dollarMatch  = valueText.match(/\$(\d+(?:\.\d+)?)/);
 
       if (percentMatch) {
         cashbackAmount = parseFloat(percentMatch[1]);
@@ -63,53 +47,18 @@ export function parseChaseOffers(html) {
         cashbackType = 'fixed';
       }
 
-      // ── Description / Terms ────────────────────────
-      const offerDescription = $el
-        .find(
-          '.offer-description, .offer-terms, [data-testid="offer-description"], [class*="OfferDescription"]'
-        )
-        .first()
-        .text()
-        .trim();
-
-      // ── Minimum Spend ──────────────────────────────
-      let minimumSpend = 0;
-      const combinedText = (headlineText + ' ' + offerDescription).toLowerCase();
-      const minSpendMatch = combinedText.match(/(?:spend|purchase)\s+\$?(\d+)/);
-      if (minSpendMatch) minimumSpend = parseFloat(minSpendMatch[1]);
-
-      // ── Expiry Date ────────────────────────────────
-      const expiryText = $el
-        .find(
-          '.expiration-date, .offer-expiry, [data-testid="expiry-date"], [class*="ExpiryDate"], [class*="expirationDate"]'
-        )
-        .first()
-        .text()
-        .trim();
-
-      let expiryDate = null;
-      if (expiryText) {
-        const cleaned = expiryText.replace(/expires?/i, '').trim();
-        const parsed = new Date(cleaned);
-        if (!isNaN(parsed.getTime())) expiryDate = parsed.toISOString();
-      }
-
-      // ── Activation Status ──────────────────────────
-      const btnText = $el.find('button').text().toLowerCase();
-      const isActivated =
-        btnText.includes('added') ||
-        btnText.includes('activated') ||
-        btnText.includes('remove') ||
-        $el.find('[class*="activated"], [class*="added"]').length > 0;
+      // Activation status — aria-label ends with "Add Offer" when not activated
+      const ariaLabel = ($el.attr('aria-label') || '').toLowerCase();
+      const isActivated = !ariaLabel.includes('add offer');
 
       offers.push({
         merchantName,
-        offerDescription,
+        offerDescription: valueText,
         cashbackAmount,
         cashbackType,
-        minimumSpend,
-        category: 'other', // TODO: infer from merchant if needed
-        expiryDate,
+        minimumSpend: 0,
+        category: 'other',
+        expiryDate: null,
         isActivated,
       });
     } catch (err) {
@@ -117,5 +66,6 @@ export function parseChaseOffers(html) {
     }
   });
 
+  console.log(`🔍 Chase parser found ${offers.length} tiles from ${$('[data-testid="commerce-tile"]').length} total`);
   return offers;
 }

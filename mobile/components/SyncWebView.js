@@ -3,8 +3,9 @@
 // Opens as an 85% modal sheet over the home screen.
 // Loads directly to bank's offers page.
 // After login, auto-redirects back to offers page.
-// Tapping "Sync Offers" extracts only the offers
-// section (≤200KB) and POSTs to /api/offers/parse.
+// Tapping "Sync Offers" targets just the offers grid
+// container to send a small payload (~20KB) instead
+// of the full page. POSTs to /api/offers/parse.
 // ─────────────────────────────────────────────
 import React, { useRef, useState } from 'react';
 import {
@@ -20,8 +21,9 @@ const BANK_CONFIG = {
     label: 'Chase Offers',
     color: '#1a3a6b',
     offersPath: '/cardmember-offers',
-    // URL fragments that indicate we're on a login/auth page — don't redirect from these
     loginPaths: ['/sign-in', '/logon', '/login', '/sso', '/auth', '/identify', '/challenge'],
+    // Selector for the offers grid — skip nav, banner, carousel
+    gridSelector: '[data-testid="grid-items-container"]',
   },
   amex: {
     url: 'https://www.americanexpress.com/en-us/benefits/offers/',
@@ -29,38 +31,49 @@ const BANK_CONFIG = {
     color: '#007ac1',
     offersPath: '/benefits/offers',
     loginPaths: ['/login', '/sign-in', '/identity', '/auth', '/challenge'],
+    gridSelector: null, // TODO: inspect Amex DOM and set real selector
   },
 };
 
 const API_BASE_URL = process.env.EXPO_PUBLIC_API_URL || 'http://localhost:3001';
 
 // Injected when user taps "Sync Offers".
-// Tries to find just the offers container to avoid sending
-// the full page HTML (~5-10MB). Hard cap at 200KB to stay
-// within the backend's 512KB JSON body limit.
-const CAPTURE_JS = `
+// 1. Try bank-specific grid selector first (smallest payload, ~20KB)
+// 2. Fall back to common offer container selectors
+// 3. Last resort: truncated outerHTML at 200KB
+const buildCaptureJs = (gridSelector) => `
   (function() {
     try {
-      var selectors = [
-        '[data-testid*="offer"]',
-        '[class*="offers"]',
-        '[id*="offers"]',
-        '[class*="offer-"]',
-        '[id*="offer-"]',
-        'main',
-        '[role="main"]',
-      ];
-      var container = null;
-      for (var i = 0; i < selectors.length; i++) {
-        var el = document.querySelector(selectors[i]);
-        if (el && el.innerHTML.length > 500) {
-          container = el;
-          break;
+      var html = null;
+      var MAX = 200000;
+
+      // Priority 1: bank-specific grid container
+      ${gridSelector ? `
+      var grid = document.querySelector('${gridSelector}');
+      if (grid && grid.innerHTML.length > 500) {
+        html = grid.outerHTML;
+      }
+      ` : ''}
+
+      // Priority 2: generic offer container selectors
+      if (!html) {
+        var selectors = [
+          '[data-testid*="offer"]',
+          '[class*="offers"]',
+          '[id*="offers"]',
+          'main',
+          '[role="main"]',
+        ];
+        for (var i = 0; i < selectors.length; i++) {
+          var el = document.querySelector(selectors[i]);
+          if (el && el.innerHTML.length > 500) { html = el.outerHTML; break; }
         }
       }
-      var html = container ? container.outerHTML : document.documentElement.outerHTML;
-      var MAX = 200000; // 200KB hard cap
+
+      // Priority 3: full page truncated
+      if (!html) html = document.documentElement.outerHTML;
       if (html.length > MAX) html = html.substring(0, MAX);
+
       window.ReactNativeWebView.postMessage(JSON.stringify({ type: 'CAPTURE_HTML', html: html }));
     } catch(e) {
       window.ReactNativeWebView.postMessage(JSON.stringify({ type: 'ERROR', message: e.message }));
@@ -80,8 +93,7 @@ export default function SyncWebView({ visible, bank, onClose, onSuccess }) {
   const [syncing, setSyncing] = useState(false);
   const config = BANK_CONFIG[bank] || BANK_CONFIG.chase;
 
-  // After the user logs in, the bank typically redirects to their main dashboard.
-  // Detect this and redirect straight back to the offers page.
+  // After login, bank redirects to dashboard — send back to offers page
   const handleNavigationStateChange = (navState) => {
     if (!navState.url || navState.loading) return;
     const url = navState.url.toLowerCase();
@@ -95,7 +107,8 @@ export default function SyncWebView({ visible, bank, onClose, onSuccess }) {
   };
 
   const handleSyncPress = () => {
-    webViewRef.current?.injectJavaScript(CAPTURE_JS);
+    const captureJs = buildCaptureJs(config.gridSelector);
+    webViewRef.current?.injectJavaScript(captureJs);
   };
 
   const handleMessage = async (event) => {
