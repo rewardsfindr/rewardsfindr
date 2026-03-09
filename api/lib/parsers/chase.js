@@ -4,11 +4,16 @@
 // Tile:      [data-testid="commerce-tile"]
 // Merchant:  span.r9jbijk  (mds-body-small-heavier)
 // Value:     span.r9jbijj  (mds-body-large-heavier)
-// Activated: aria-label contains "Add Offer" when not activated
-// Expiry + MinSpend: NOT available in grid tile HTML (Chase renders
-//   these in a click-to-open detail modal, outside the captured DOM).
+// Activated: presence of [data-testid="offer-tile-alert-container-success"]
+//            inside the tile (checkmark SVG). Unactivated tiles have
+//            [data-testid="commerce-tile-button"] (plus SVG) instead.
+// tileId:    id attr e.g. "carousel_0_FIGG:1894293" → used for deep link
+// Expiry:    data-testid="days-left-banner" when present
+// MinSpend:  NOT available in grid tile HTML
 // ─────────────────────────────────────────────
 import * as cheerio from 'cheerio';
+
+const CHASE_OFFERS_BASE_URL = 'https://secure.chase.com/web/auth/dashboard#/dashboard/merchantOffers/offer-hub';
 
 function parsePurchaseType(text) {
   const lower = text.toLowerCase();
@@ -44,9 +49,19 @@ export function parseChaseOffers(html) {
       if (percentMatch) { cashbackAmount = parseFloat(percentMatch[1]); cashbackType = 'percent'; }
       else if (dollarMatch) { cashbackAmount = parseFloat(dollarMatch[1]); cashbackType = 'fixed'; }
 
-      const ariaLabel = $el.attr('aria-label') || '';
-      const isActivated  = !ariaLabel.toLowerCase().includes('add offer');
+      // Activated = checkmark SVG present; unactivated = plus SVG
+      const isActivated = $el.find('[data-testid="offer-tile-alert-container-success"]').length > 0;
+
       const purchaseType = parsePurchaseType($el.text());
+
+      // Days left banner e.g. "22d left" — use as a proxy expiry hint
+      const daysLeftText = $el.find('[data-testid="days-left-banner"]').text().trim();
+
+      // Extract tile ID for deep link — format: "carousel_0_FIGG:1894293"
+      const tileId = $el.attr('id') || '';
+      const offerDeepLink = tileId
+        ? `${CHASE_OFFERS_BASE_URL}?offerId=${encodeURIComponent(tileId)}`
+        : CHASE_OFFERS_BASE_URL;
 
       offers.push({
         merchantName,
@@ -54,10 +69,11 @@ export function parseChaseOffers(html) {
         cashbackAmount,
         cashbackType,
         minimumSpend: 0,
-        expiryDate: null,
+        expiryDate: daysLeftText || null,
         purchaseType,
         category: 'other',
         isActivated,
+        offerDeepLink,
       });
     } catch (err) {
       console.error('⚠️ Error parsing Chase offer tile:', err);

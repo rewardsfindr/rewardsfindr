@@ -30,8 +30,6 @@ async function verifyToken(req, res) {
 
 // ─────────────────────────────────────────────
 // Shared helper: write an offers array to Firestore
-// offerId includes cardName so the same offer on two
-// different cards generates distinct Firestore documents.
 // ─────────────────────────────────────────────
 async function writeOffersToDB(offers, { userId, bank, cardName }) {
   const batch = db.batch();
@@ -44,7 +42,7 @@ async function writeOffersToDB(offers, { userId, bank, cardName }) {
         offer.merchantName,
         offer.cashbackAmount,
         offer.expiryDate || new Date(Date.now() + 90 * 24 * 60 * 60 * 1000).toISOString(),
-        cardName  // included for per-card deduplication
+        cardName
       );
 
       const offerDoc = {
@@ -58,7 +56,8 @@ async function writeOffersToDB(offers, { userId, bank, cardName }) {
         minimumSpend: offer.minimumSpend || 0,
         category: offer.category || 'other',
         expiryDate: offer.expiryDate || null,
-        isActivated: offer.isActivated || false,
+        isActivated: offer.isActivated ?? false,
+        offerDeepLink: offer.offerDeepLink || null,
         bank,
         cardName,
         syncedAt: FieldValue.serverTimestamp(),
@@ -78,8 +77,6 @@ async function writeOffersToDB(offers, { userId, bank, cardName }) {
 
 /**
  * POST /api/offers/sync
- * Sync pre-parsed offers from Chrome extension to Firestore.
- * Body: { offers: [], bank: string, cardName: string }
  */
 router.post('/sync', async (req, res) => {
   try {
@@ -97,17 +94,10 @@ router.post('/sync', async (req, res) => {
     }
 
     console.log(`🔄 Syncing ${offers.length} offers for user ${userId} (${bank} - ${cardName})`);
-
     const { syncedCount, skippedCount } = await writeOffersToDB(offers, { userId, bank, cardName });
-
     console.log(`✅ Sync complete: ${syncedCount} synced, ${skippedCount} skipped`);
 
-    res.json({
-      success: true,
-      synced: syncedCount,
-      skipped: skippedCount,
-      total: offers.length,
-    });
+    res.json({ success: true, synced: syncedCount, skipped: skippedCount, total: offers.length });
   } catch (error) {
     console.error('❌ Offers sync error:', error);
     res.status(500).json({ error: 'Failed to sync offers' });
@@ -116,9 +106,6 @@ router.post('/sync', async (req, res) => {
 
 /**
  * POST /api/offers/parse
- * Parse raw HTML from mobile WebView and sync offers to Firestore.
- * Body: { html: string, bank: 'chase' | 'amex', cardName?: string }
- * Auth: Required (Firebase Bearer token)
  */
 router.post('/parse', async (req, res) => {
   try {
@@ -141,33 +128,15 @@ router.post('/parse', async (req, res) => {
     console.log(`🔍 Parsed ${offers.length} offers from ${bank} HTML for user ${userId}`);
 
     if (offers.length === 0) {
-      return res.json({
-        success: true,
-        offers: [],
-        synced: 0,
-        bank,
-        message: 'No offers found in provided HTML. Selectors may need tuning.',
-      });
+      return res.json({ success: true, offers: [], synced: 0, bank, message: 'No offers found in provided HTML.' });
     }
 
     const resolvedCardName = cardName || (bank === 'chase' ? 'Chase Card' : 'Amex Card');
-
-    const { syncedCount, skippedCount } = await writeOffersToDB(offers, {
-      userId,
-      bank,
-      cardName: resolvedCardName,
-    });
+    const { syncedCount, skippedCount } = await writeOffersToDB(offers, { userId, bank, cardName: resolvedCardName });
 
     console.log(`✅ Parse+sync complete: ${syncedCount} synced, ${skippedCount} skipped (${bank} — ${resolvedCardName})`);
 
-    res.json({
-      success: true,
-      offers,
-      synced: syncedCount,
-      skipped: skippedCount,
-      bank,
-      cardName: resolvedCardName,
-    });
+    res.json({ success: true, offers, synced: syncedCount, skipped: skippedCount, bank, cardName: resolvedCardName });
   } catch (error) {
     console.error('❌ Offers parse error:', error);
     res.status(500).json({ error: 'Failed to parse and sync offers' });

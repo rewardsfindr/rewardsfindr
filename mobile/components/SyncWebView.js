@@ -1,4 +1,4 @@
-// ─────────────────────────────────────────────
+// ─────────────────────────────────────────────────────────────────
 // SYNC WEBVIEW MODAL
 // Multi-card flow (1 tap):
 //   1. Detect credit cards on first load; start at active card position.
@@ -7,10 +7,8 @@
 //   4. CARD_SWITCHED confirms label (retries up to 3x).
 //   5. On confirmed switch, arms captureArmed, waits POST_SWITCH_DELAY_MS
 //      for grid re-render, then auto-captures.
-//   6. CAPTURE_HTML is ignored unless captureArmed is true — prevents
-//      any stray messages from triggering duplicate syncs.
-//   7. Repeats until all cards done.
-// ─────────────────────────────────────────────
+//   6. CAPTURE_HTML only processed when captureArmed=true.
+// ─────────────────────────────────────────────────────────────────
 import React, { useRef, useState, useEffect } from 'react';
 import {
   Modal, View, Text, TouchableOpacity,
@@ -116,36 +114,34 @@ const buildSwitchCardJs = (index, timeoutMs) => `
   true;
 `;
 
-const buildDelayedCaptureJs = (gridSelector, delayMs) => `
+const buildCaptureJs = (gridSelector) => `
   (function() {
-    setTimeout(function() {
-      try {
-        var html = null;
-        var MAX = 200000;
-        ${gridSelector ? `
-        var grid = document.querySelector('${gridSelector}');
-        if (grid && grid.innerHTML.length > 500) { html = grid.outerHTML; }
-        ` : ''}
-        if (!html) {
-          var selectors = ['[data-testid*="offer"]','[class*="offers"]','[id*="offers"]','main','[role="main"]'];
-          for (var i = 0; i < selectors.length; i++) {
-            var el = document.querySelector(selectors[i]);
-            if (el && el.innerHTML.length > 500) { html = el.outerHTML; break; }
-          }
+    try {
+      var html = null;
+      var MAX = 200000;
+      ${gridSelector ? `
+      var grid = document.querySelector('${gridSelector}');
+      if (grid && grid.innerHTML.length > 500) { html = grid.outerHTML; }
+      ` : ''}
+      if (!html) {
+        var selectors = ['[data-testid*="offer"]','[class*="offers"]','[id*="offers"]','main','[role="main"]'];
+        for (var i = 0; i < selectors.length; i++) {
+          var el = document.querySelector(selectors[i]);
+          if (el && el.innerHTML.length > 500) { html = el.outerHTML; break; }
         }
-        if (!html) html = document.documentElement.outerHTML;
-        if (html.length > MAX) html = html.substring(0, MAX);
-        var cardLabel = '';
-        var cardSel = document.querySelector('mds-select[id="select-credit-card-account"]');
-        if (cardSel) {
-          var cardOpt = cardSel.querySelector('mds-select-option[selected="true"]');
-          if (cardOpt) cardLabel = cardOpt.getAttribute('label') || '';
-        }
-        window.ReactNativeWebView.postMessage(JSON.stringify({ type: 'CAPTURE_HTML', html: html, cardLabel: cardLabel }));
-      } catch(e) {
-        window.ReactNativeWebView.postMessage(JSON.stringify({ type: 'ERROR', message: e.message }));
       }
-    }, ${delayMs || 0});
+      if (!html) html = document.documentElement.outerHTML;
+      if (html.length > MAX) html = html.substring(0, MAX);
+      var cardLabel = '';
+      var cardSel = document.querySelector('mds-select[id="select-credit-card-account"]');
+      if (cardSel) {
+        var cardOpt = cardSel.querySelector('mds-select-option[selected="true"]');
+        if (cardOpt) cardLabel = cardOpt.getAttribute('label') || '';
+      }
+      window.ReactNativeWebView.postMessage(JSON.stringify({ type: 'CAPTURE_HTML', html: html, cardLabel: cardLabel }));
+    } catch(e) {
+      window.ReactNativeWebView.postMessage(JSON.stringify({ type: 'ERROR', message: e.message }));
+    }
   })();
   true;
 `;
@@ -166,11 +162,11 @@ export default function SyncWebView({ visible, bank, onClose, onSuccess }) {
   const cardsDiscovered    = useRef(false);
   const switchRetriesRef   = useRef(0);
   const syncedCountRef     = useRef(0);
-  const captureArmed       = useRef(false); // CAPTURE_HTML only processed when true
+  const captureArmed       = useRef(false);
+  const autoCapturing      = useRef(false);
 
   const [syncing, setSyncing]         = useState(false);
   const [switching, setSwitching]     = useState(false);
-  const [autoCapturing, setAutoCapturing] = useState(false); // waiting for post-switch delay
   const [currentCard, setCurrentCard] = useState(null);
   const [currentUrl, setCurrentUrl]   = useState('');
   const [cardCount, setCardCount]     = useState(0);
@@ -188,11 +184,11 @@ export default function SyncWebView({ visible, bank, onClose, onSuccess }) {
       switchRetriesRef.current = 0;
       syncedCountRef.current   = 0;
       captureArmed.current     = false;
+      autoCapturing.current    = false;
       setCurrentCard(null);
       setCurrentUrl('');
       setSyncing(false);
       setSwitching(false);
-      setAutoCapturing(false);
       setCardCount(0);
       setCardIndexUi(0);
       setAllDone(false);
@@ -221,13 +217,14 @@ export default function SyncWebView({ visible, bank, onClose, onSuccess }) {
 
   const handleSyncPress = () => {
     captureArmed.current = true;
-    webViewRef.current?.injectJavaScript(buildDelayedCaptureJs(config.gridSelector, 0));
+    webViewRef.current?.injectJavaScript(buildCaptureJs(config.gridSelector));
   };
 
   const handleMessage = async (event) => {
     try {
       const data = JSON.parse(event.nativeEvent.data);
 
+      // ── Card detection ──────────────────────────────────────
       if (data.type === 'CARDS_DETECTED') {
         if (!cardsDiscovered.current && data.cards && data.cards.length > 0) {
           cardOptionsRef.current  = data.cards;
@@ -241,6 +238,7 @@ export default function SyncWebView({ visible, bank, onClose, onSuccess }) {
         return;
       }
 
+      // ── Card switched → wait for grid then capture ──────────
       if (data.type === 'CARD_SWITCHED') {
         const expectedIndex = data.expectedIndex;
         const expectedLabel = cardOptionsRef.current.find(c => c.index === expectedIndex)?.label || '';
@@ -259,34 +257,31 @@ export default function SyncWebView({ visible, bank, onClose, onSuccess }) {
         switchRetriesRef.current = 0;
         setSwitching(false);
         setCurrentCard(actualLabel || expectedLabel || null);
-        // Arm capture, show autoCapturing state during delay
-        captureArmed.current = true;
-        setAutoCapturing(true);
-        webViewRef.current?.injectJavaScript(buildDelayedCaptureJs(config.gridSelector, POST_SWITCH_DELAY_MS));
+        autoCapturing.current = true;
+        setTimeout(() => {
+          captureArmed.current = true;
+          autoCapturing.current = false;
+          webViewRef.current?.injectJavaScript(buildCaptureJs(config.gridSelector));
+        }, POST_SWITCH_DELAY_MS);
         return;
       }
 
       if (data.type === 'CARD_SWITCH_ERROR') {
         setSwitching(false);
-        setAutoCapturing(false);
         captureArmed.current = false;
         Alert.alert('Card Switch Failed', data.message);
         return;
       }
 
       if (data.type === 'ERROR') {
-        setAutoCapturing(false);
         captureArmed.current = false;
         Alert.alert('Capture Error', data.message);
         return;
       }
 
       if (data.type !== 'CAPTURE_HTML') return;
-
-      // Drop any CAPTURE_HTML that wasn't explicitly armed
       if (!captureArmed.current) return;
       captureArmed.current = false;
-      setAutoCapturing(false);
 
       setSyncing(true);
 
@@ -333,7 +328,7 @@ export default function SyncWebView({ visible, bank, onClose, onSuccess }) {
       }
     } catch (err) {
       captureArmed.current = false;
-      setAutoCapturing(false);
+      autoCapturing.current = false;
       setSyncing(false);
       setSwitching(false);
       Alert.alert('Sync Failed', err.message);
@@ -344,7 +339,15 @@ export default function SyncWebView({ visible, bank, onClose, onSuccess }) {
   const totalCards    = cardCount || 1;
   const progressLabel = cardCount > 1 ? ` (${cardIndexUi + 1} of ${totalCards})` : '';
   const syncBtnLabel  = cardName ? `Sync ${cardName}${progressLabel}` : `Sync Offers${progressLabel}`;
-  const isBusy        = syncing || switching || autoCapturing;
+  const isBusy        = syncing || switching || autoCapturing.current;
+
+  const hintText = switching
+    ? `⏳ Switching to card ${cardIndexUi + 1} of ${totalCards}...`
+    : syncing
+      ? `🔄 Syncing ${currentCard || 'card'}...`
+      : currentCard
+        ? `💳 ${currentCard}${cardCount > 1 ? ` · Card ${cardIndexUi + 1} of ${totalCards}` : ''}`
+        : 'Tap Sync to start.';
 
   return (
     <Modal visible={visible} animationType="slide" transparent={true} onRequestClose={onClose}>
@@ -373,8 +376,7 @@ export default function SyncWebView({ visible, bank, onClose, onSuccess }) {
             {allDone ? (
               <>
                 <Text style={s.hint}>
-                  ✅ All {syncedCardsRef.current.length} card{syncedCardsRef.current.length !== 1 ? 's' : ''} synced!{'  '}
-                  {syncedCardsRef.current.map(c => `${c.cardName}: ${c.count} offers`).join(' · ')}
+                  ✅ All {syncedCardsRef.current.length} card{syncedCardsRef.current.length !== 1 ? 's' : ''} synced!
                 </Text>
                 <TouchableOpacity style={s.doneBtn} onPress={onClose}>
                   <Text style={s.syncBtnText}>✓ Done — Go Back to App</Text>
@@ -382,17 +384,7 @@ export default function SyncWebView({ visible, bank, onClose, onSuccess }) {
               </>
             ) : isOnOffersPage ? (
               <>
-                <Text style={s.hint} numberOfLines={2}>
-                  {switching
-                    ? `⏳ Switching to next card (${cardIndexUi + 1} of ${totalCards})...`
-                    : autoCapturing
-                      ? `⏳ Loading card offers...`
-                      : syncing
-                        ? `🔄 Syncing ${currentCard || 'card'}...`
-                        : currentCard
-                          ? `💳 ${currentCard}${cardCount > 1 ? ` · Card ${cardIndexUi + 1} of ${totalCards}` : ''}`
-                          : 'Tap Sync to start.'}
-                </Text>
+                <Text style={s.hint} numberOfLines={2}>{hintText}</Text>
                 <TouchableOpacity
                   style={[s.syncBtn, isBusy && s.syncBtnDisabled]}
                   onPress={handleSyncPress}
