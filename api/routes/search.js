@@ -40,29 +40,15 @@ router.get('/', async (req, res) => {
       const userId = decodedToken.uid;
 
       const normalizedQuery = normalizeMerchant(query);
-      console.log(`🔍 Normalized query: "${normalizedQuery}"`);
 
       const offersSnapshot = await db.collection('offers')
         .where('userId', '==', userId)
         .get();
 
-      console.log(`📄 Total offers in Firestore for user: ${offersSnapshot.size}`);
-
-      // Debug: log sample doc fields to diagnose normalizedMerchant mismatch
-      if (offersSnapshot.size > 0) {
-        const sample = offersSnapshot.docs.slice(0, 3).map(d => {
-          const data = d.data();
-          return { merchantName: data.merchantName, normalizedMerchant: data.normalizedMerchant };
-        });
-        console.log('Sample docs:', JSON.stringify(sample));
-      }
-
       const allOffers = offersSnapshot.docs.map(doc => doc.data());
 
       personalizedOffers = allOffers.filter(offer => {
-        // Primary: exact normalizedMerchant match
         if (offer.normalizedMerchant === normalizedQuery) return true;
-        // Fallback: merchantName starts with query (handles old docs without normalizedMerchant)
         const merchantLower = (offer.merchantName || '').toLowerCase().trim();
         return merchantLower.startsWith(normalizedQuery);
       });
@@ -70,7 +56,7 @@ router.get('/', async (req, res) => {
       if (personalizedOffers.length > 0) {
         console.log(`✅ Found ${personalizedOffers.length} offers for "${query}" (user: ${userId})`);
       } else {
-        console.log(`ℹ️  No offers found for "${query}" (normalized: "${normalizedQuery}", user: ${userId})`);
+        console.log(`ℹ️  No offers found for "${query}" (user: ${userId})`);
       }
     } catch (err) {
       console.warn('[Search] Error:', err.message);
@@ -78,18 +64,10 @@ router.get('/', async (req, res) => {
     }
 
     if (personalizedOffers.length === 0) {
-      console.log(`❌ No match found for "${query}"`);
-      return res.json({
-        offers: [],
-        message: `No offers found for "${query}"`,
-        query,
-      });
+      return res.json({ offers: [], message: `No offers found for "${query}"`, query });
     }
 
-    res.json({
-      offers: personalizedOffers,
-      query,
-    });
+    res.json({ offers: personalizedOffers, query });
 
   } catch (error) {
     console.error('Search error:', error);
