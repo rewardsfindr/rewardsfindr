@@ -1,12 +1,13 @@
 // ─────────────────────────────────────────────
 // SYNC WEBVIEW MODAL
-// Opens as an 85% modal sheet over the home screen.
+// Opens as an 87% modal sheet over the home screen.
 // Loads directly to bank's offers page.
 // Tracks current URL — shows Sync button only when on offers page.
 // Shows Go to Offers button on all other pages.
-// Detects selected card and shows it in hint + button text.
+// Multi-card: reads all cards from Chase dropdown, cycles through each.
+// After all cards synced, shows "Done" button to close modal.
 // ─────────────────────────────────────────────
-import React, { useRef, useState, useEffect } from 'react';
+import React, { useRef, useState, useEffect, useCallback } from 'react';
 import {
   Modal, View, Text, TouchableOpacity,
   StyleSheet, ActivityIndicator, Alert, SafeAreaView,
@@ -16,9 +17,7 @@ import { getAuthInstance } from '../lib/firebaseClient.js';
 
 const BANK_CONFIG = {
   chase: {
-    // Chase homepage — always works, has login form
     url: 'https://www.chase.com',
-    // Post-login authenticated offers URL
     offersUrl: 'https://secure.chase.com/web/auth/dashboard#/dashboard/merchantOffers/offer-hub',
     label: 'Chase Offers',
     color: '#1a3a6b',
@@ -33,50 +32,88 @@ const BANK_CONFIG = {
     color: '#007ac1',
     offersPaths: ['/benefits/offers'],
     loginPaths: ['/login', '/sign-in', '/identity', '/auth', '/challenge'],
-    gridSelector: null, // TODO: inspect Amex DOM
+    gridSelector: null,
   },
 };
 
 const API_BASE_URL = process.env.EXPO_PUBLIC_API_URL || 'http://localhost:3001';
 
-// Injected on page load — reads currently selected card from Chase dropdown
-const DETECT_CARD_JS = `
+// Reads ALL card options from Chase dropdown + currently selected card
+const DETECT_CARDS_JS = `
   (function() {
     try {
       var sel = document.querySelector('mds-select[id="select-credit-card-account"]');
       if (sel) {
-        var opt = sel.querySelector('mds-select-option[selected="true"]');
-        if (opt) {
+        var opts = sel.querySelectorAll('mds-select-option');
+        var cards = [];
+        opts.forEach(function(opt, i) {
           var label = opt.getAttribute('label') || '';
-          window.ReactNativeWebView.postMessage(JSON.stringify({ type: 'CARD_DETECTED', cardLabel: label }));
-          return;
-        }
+          var value = opt.getAttribute('value') || String(i);
+          cards.push({ label: label, value: value, index: i });
+        });
+        var selectedOpt = sel.querySelector('mds-select-option[selected="true"]');
+        var selectedLabel = selectedOpt ? (selectedOpt.getAttribute('label') || '') : '';
+        window.ReactNativeWebView.postMessage(JSON.stringify({
+          type: 'CARDS_DETECTED',
+          cards: cards,
+          selectedLabel: selectedLabel,
+        }));
+        return;
       }
-      window.ReactNativeWebView.postMessage(JSON.stringify({ type: 'CARD_DETECTED', cardLabel: null }));
+      // No dropdown — single card account
+      window.ReactNativeWebView.postMessage(JSON.stringify({
+        type: 'CARDS_DETECTED',
+        cards: [],
+        selectedLabel: null,
+      }));
     } catch(e) {}
   })();
   true;
 `;
 
-// "Sapphire Reserve (...0483)" → { cardName: "Sapphire Reserve", cardLast4: "0483" }
-const parseCardLabel = (label) => {
-  if (!label) return { cardName: null, cardLast4: null };
-  const match = label.match(/^(.+?)\s*\(\.\.\.([\w\d]+)\)\s*$/);
-  if (match) return { cardName: match[1].trim(), cardLast4: match[2] };
-  return { cardName: label.trim(), cardLast4: null };
-};
+// Switch Chase dropdown to card at given index, then wait for grid to reload
+const buildSwitchCardJs = (index) => `
+  (function() {
+    try {
+      var sel = document.querySelector('mds-select[id="select-credit-card-account"]');
+      if (!sel) {
+        window.ReactNativeWebView.postMessage(JSON.stringify({ type: 'CARD_SWITCH_ERROR', message: 'Dropdown not found' }));
+        return;
+      }
+      var opts = sel.querySelectorAll('mds-select-option');
+      var target = opts[${index}];
+      if (!target) {
+        window.ReactNativeWebView.postMessage(JSON.stringify({ type: 'CARD_SWITCH_ERROR', message: 'Card index out of range' }));
+        return;
+      }
+      // Click the option to select it
+      target.click();
+      // Also dispatch change event on the select element
+      sel.dispatchEvent(new Event('change', { bubbles: true }));
+      // Wait for grid to re-render then confirm switch
+      setTimeout(function() {
+        var updated = sel.querySelector('mds-select-option[selected="true"]');
+        var label = updated ? (updated.getAttribute('label') || '') : '';
+        window.ReactNativeWebView.postMessage(JSON.stringify({ type: 'CARD_SWITCHED', cardLabel: label, index: ${index} }));
+      }, 2000);
+    } catch(e) {
+      window.ReactNativeWebView.postMessage(JSON.stringify({ type: 'CARD_SWITCH_ERROR', message: e.message }));
+    }
+  })();
+  true;
+`;
 
-// Captures offers grid HTML + reads selected card in one injection
+// Captures offers grid HTML + currently selected card label
 const buildCaptureJs = (gridSelector) => `
   (function() {
     try {
       var html = null;
       var MAX = 200000;
 
-      ${ gridSelector ? `
+      ${gridSelector ? `
       var grid = document.querySelector('${gridSelector}');
       if (grid && grid.innerHTML.length > 500) { html = grid.outerHTML; }
-      ` : '' }
+      ` : ''}
 
       if (!html) {
         var selectors = [
@@ -107,17 +144,32 @@ const buildCaptureJs = (gridSelector) => `
   true;
 `;
 
+// "Sapphire Reserve (...0483)" → { cardName: "Sapphire Reserve", cardLast4: "0483" }
+const parseCardLabel = (label) => {
+  if (!label) return { cardName: null, cardLast4: null };
+  const match = label.match(/^(.+?)\s*\(\.\.\.([\w\d]+)\)\s*$/);
+  if (match) return { cardName: match[1].trim(), cardLast4: match[2] };
+  return { cardName: label.trim(), cardLast4: null };
+};
+
 /**
  * @param {boolean}  visible  - controls modal visibility
  * @param {'chase'|'amex'} bank - which bank to open
  * @param {function} onClose  - called when user dismisses
- * @param {function} onSuccess(syncedCount, cardName) - called after successful sync
+ * @param {function} onSuccess(totalSynced, cardResults) - called after ALL cards synced
  */
 export default function SyncWebView({ visible, bank, onClose, onSuccess }) {
   const webViewRef = useRef(null);
-  const [syncing, setSyncing]       = useState(false);
-  const [currentCard, setCurrentCard] = useState(null);
-  const [currentUrl, setCurrentUrl]   = useState('');
+  const [syncing, setSyncing]           = useState(false);
+  const [switching, setSwitching]       = useState(false);
+  const [currentCard, setCurrentCard]   = useState(null);
+  const [currentUrl, setCurrentUrl]     = useState('');
+  // Multi-card state
+  const [cardOptions, setCardOptions]   = useState([]); // [{ label, value, index }]
+  const [cardIndex, setCardIndex]       = useState(0);  // which card we're syncing now
+  const [syncedCards, setSyncedCards]   = useState([]); // [{ cardName, count }]
+  const [allDone, setAllDone]           = useState(false);
+
   const config = BANK_CONFIG[bank] || BANK_CONFIG.chase;
 
   useEffect(() => {
@@ -125,6 +177,11 @@ export default function SyncWebView({ visible, bank, onClose, onSuccess }) {
       setCurrentCard(null);
       setCurrentUrl('');
       setSyncing(false);
+      setSwitching(false);
+      setCardOptions([]);
+      setCardIndex(0);
+      setSyncedCards([]);
+      setAllDone(false);
     }
   }, [visible]);
 
@@ -138,7 +195,10 @@ export default function SyncWebView({ visible, bank, onClose, onSuccess }) {
   };
 
   const handleLoadEnd = () => {
-    webViewRef.current?.injectJavaScript(DETECT_CARD_JS);
+    // Use DETECT_CARDS_JS for Chase (reads full dropdown), simple detect for others
+    if (bank === 'chase') {
+      webViewRef.current?.injectJavaScript(DETECT_CARDS_JS);
+    }
   };
 
   const handleGoToOffers = () => {
@@ -152,18 +212,51 @@ export default function SyncWebView({ visible, bank, onClose, onSuccess }) {
     webViewRef.current?.injectJavaScript(buildCaptureJs(config.gridSelector));
   };
 
+  const advanceToNextCard = useCallback((nextIndex, updatedSyncedCards) => {
+    if (nextIndex >= cardOptions.length) {
+      // All cards done
+      const total = updatedSyncedCards.reduce((sum, c) => sum + c.count, 0);
+      setAllDone(true);
+      onSuccess(total, updatedSyncedCards);
+      return;
+    }
+    setSwitching(true);
+    setCardIndex(nextIndex);
+    webViewRef.current?.injectJavaScript(buildSwitchCardJs(nextIndex));
+  }, [cardOptions, onSuccess]);
+
   const handleMessage = async (event) => {
     try {
       const data = JSON.parse(event.nativeEvent.data);
 
-      if (data.type === 'CARD_DETECTED') {
-        setCurrentCard(data.cardLabel || null);
+      if (data.type === 'CARDS_DETECTED') {
+        if (data.cards && data.cards.length > 0) {
+          setCardOptions(data.cards);
+          setCardIndex(0);
+        }
+        setCurrentCard(data.selectedLabel || null);
         return;
       }
+
+      if (data.type === 'CARD_SWITCHED') {
+        setSwitching(false);
+        setCurrentCard(data.cardLabel || null);
+        // Re-detect all cards to get fresh selected state
+        webViewRef.current?.injectJavaScript(DETECT_CARDS_JS);
+        return;
+      }
+
+      if (data.type === 'CARD_SWITCH_ERROR') {
+        setSwitching(false);
+        Alert.alert('Card Switch Failed', data.message);
+        return;
+      }
+
       if (data.type === 'ERROR') {
         Alert.alert('Capture Error', data.message);
         return;
       }
+
       if (data.type !== 'CAPTURE_HTML') return;
 
       setSyncing(true);
@@ -190,16 +283,45 @@ export default function SyncWebView({ visible, bank, onClose, onSuccess }) {
       const result = await response.json();
       if (!response.ok) throw new Error(result.error || 'Sync failed');
 
-      onSuccess(result.synced ?? 0, fullCardName);
+      const syncedCount = result.synced ?? 0;
+      const updatedSyncedCards = [
+        ...syncedCards,
+        { cardName: fullCardName || 'Unknown Card', count: syncedCount },
+      ];
+      setSyncedCards(updatedSyncedCards);
+
+      const nextIndex = cardIndex + 1;
+
+      if (cardOptions.length > 1 && nextIndex < cardOptions.length) {
+        // More cards to go — advance
+        setSyncing(false);
+        advanceToNextCard(nextIndex, updatedSyncedCards);
+      } else {
+        // Single card or last card
+        setSyncing(false);
+        const total = updatedSyncedCards.reduce((sum, c) => sum + c.count, 0);
+        setAllDone(true);
+        onSuccess(total, updatedSyncedCards);
+      }
     } catch (err) {
-      Alert.alert('Sync Failed', err.message);
-    } finally {
       setSyncing(false);
+      setSwitching(false);
+      Alert.alert('Sync Failed', err.message);
     }
   };
 
   const { cardName } = parseCardLabel(currentCard);
-  const syncBtnLabel = cardName ? `Sync ${cardName}` : 'Sync Offers';
+
+  // Footer button logic
+  const totalCards = cardOptions.length || 1;
+  const progressLabel = cardOptions.length > 1
+    ? ` (${cardIndex + 1} of ${totalCards})`
+    : '';
+  const syncBtnLabel = cardName
+    ? `Sync ${cardName}${progressLabel}`
+    : `Sync Offers${progressLabel}`;
+
+  const isBusy = syncing || switching;
 
   return (
     <Modal
@@ -233,17 +355,31 @@ export default function SyncWebView({ visible, bank, onClose, onSuccess }) {
           />
 
           <View style={s.footer}>
-            {isOnOffersPage ? (
+            {allDone ? (
+              <>
+                <Text style={s.hint}>
+                  ✅ All {syncedCards.length} card{syncedCards.length !== 1 ? 's' : ''} synced!{' '}
+                  {syncedCards.map(c => `${c.cardName}: ${c.count} offers`).join(' · ')}
+                </Text>
+                <TouchableOpacity style={s.doneBtn} onPress={onClose}>
+                  <Text style={s.syncBtnText}>✓ Done — Go Back to App</Text>
+                </TouchableOpacity>
+              </>
+            ) : isOnOffersPage ? (
               <>
                 <Text style={s.hint} numberOfLines={1}>
-                  {currentCard ? `💳 ${currentCard}` : 'Select a card above, then tap Sync.'}
+                  {switching
+                    ? `⏳ Switching to card ${cardIndex + 1} of ${totalCards}...`
+                    : currentCard
+                      ? `💳 ${currentCard}${cardOptions.length > 1 ? ` · Card ${cardIndex + 1} of ${totalCards}` : ''}`
+                      : 'Select a card above, then tap Sync.'}
                 </Text>
                 <TouchableOpacity
-                  style={[s.syncBtn, syncing && s.syncBtnDisabled]}
+                  style={[s.syncBtn, isBusy && s.syncBtnDisabled]}
                   onPress={handleSyncPress}
-                  disabled={syncing}
+                  disabled={isBusy}
                 >
-                  {syncing
+                  {isBusy
                     ? <ActivityIndicator color="white" size="small" />
                     : <Text style={s.syncBtnText}>{syncBtnLabel}</Text>}
                 </TouchableOpacity>
@@ -305,6 +441,9 @@ const s = StyleSheet.create({
   },
   goToOffersBtn: {
     backgroundColor: '#059669', borderRadius: 12, paddingVertical: 14, alignItems: 'center',
+  },
+  doneBtn: {
+    backgroundColor: '#16a34a', borderRadius: 12, paddingVertical: 14, alignItems: 'center',
   },
   syncBtnDisabled: { opacity: 0.6 },
   syncBtnText: { color: 'white', fontSize: 16, fontWeight: '700' },
