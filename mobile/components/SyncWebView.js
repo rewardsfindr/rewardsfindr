@@ -1,7 +1,9 @@
 // ─────────────────────────────────────────────
 // SYNC WEBVIEW MODAL
 // Multi-card flow:
-//   1. On first load, detect all cards (once only).
+//   1. On first load, detect credit cards only (options with an img child).
+//      Debit/checking accounts have no card image and are skipped.
+//      Multiple debit accounts are handled automatically by this filter.
 //   2. User taps Sync — captures card 0.
 //   3. After each sync, auto-switch to next card (3.5s timeout).
 //   4. CARD_SWITCHED verifies label matches expected — retries up to 3x if not.
@@ -43,7 +45,9 @@ const API_BASE_URL = process.env.EXPO_PUBLIC_API_URL || 'http://localhost:3001';
 const SWITCH_TIMEOUT_MS = 3500;
 const MAX_SWITCH_RETRIES = 3;
 
-// Run ONCE on first load to read all cards from dropdown
+// Run ONCE on first load.
+// Only includes options that have an <img> child — credit cards have card art images,
+// debit/checking accounts do not. Handles 1 or many debit accounts automatically.
 const DETECT_CARDS_JS = `
   (function() {
     try {
@@ -52,6 +56,9 @@ const DETECT_CARDS_JS = `
         var opts = sel.querySelectorAll('mds-select-option');
         var cards = [];
         opts.forEach(function(opt, i) {
+          // Skip debit/checking accounts — they have no card image
+          var hasImage = opt.querySelector('img') !== null;
+          if (!hasImage) return;
           var label = opt.getAttribute('label') || '';
           var value = opt.getAttribute('value') || String(i);
           cards.push({ label: label, value: value, index: i });
@@ -71,7 +78,7 @@ const DETECT_CARDS_JS = `
   true;
 `;
 
-// Switch to card at index, wait SWITCH_TIMEOUT_MS, then report selected label
+// Switch to card at DOM index, wait timeoutMs, then report selected label
 const buildSwitchCardJs = (index, timeoutMs) => `
   (function() {
     try {
@@ -147,11 +154,11 @@ export default function SyncWebView({ visible, bank, onClose, onSuccess }) {
   const webViewRef = useRef(null);
 
   // Refs — always current inside async handleMessage
-  const cardOptionsRef    = useRef([]);
-  const cardIndexRef      = useRef(0);
-  const syncedCardsRef    = useRef([]);
-  const cardsDiscovered   = useRef(false);
-  const switchRetriesRef  = useRef(0);
+  const cardOptionsRef     = useRef([]);
+  const cardIndexRef       = useRef(0);
+  const syncedCardsRef     = useRef([]);
+  const cardsDiscovered    = useRef(false);
+  const switchRetriesRef   = useRef(0);
 
   // State — UI only
   const [syncing, setSyncing]         = useState(false);
@@ -166,10 +173,10 @@ export default function SyncWebView({ visible, bank, onClose, onSuccess }) {
 
   useEffect(() => {
     if (!visible) {
-      cardOptionsRef.current  = [];
-      cardIndexRef.current    = 0;
-      syncedCardsRef.current  = [];
-      cardsDiscovered.current = false;
+      cardOptionsRef.current   = [];
+      cardIndexRef.current     = 0;
+      syncedCardsRef.current   = [];
+      cardsDiscovered.current  = false;
       switchRetriesRef.current = 0;
       setCurrentCard(null);
       setCurrentUrl('');
@@ -191,7 +198,6 @@ export default function SyncWebView({ visible, bank, onClose, onSuccess }) {
   };
 
   const handleLoadEnd = () => {
-    // Only detect cards once per session
     if (bank === 'chase' && !cardsDiscovered.current) {
       webViewRef.current?.injectJavaScript(DETECT_CARDS_JS);
     }
@@ -210,7 +216,7 @@ export default function SyncWebView({ visible, bank, onClose, onSuccess }) {
     try {
       const data = JSON.parse(event.nativeEvent.data);
 
-      // ── CARDS DETECTED (first load only) ──
+      // ── CARDS DETECTED (first load only, credit cards only) ──
       if (data.type === 'CARDS_DETECTED') {
         if (!cardsDiscovered.current && data.cards && data.cards.length > 0) {
           cardOptionsRef.current  = data.cards;
@@ -229,22 +235,19 @@ export default function SyncWebView({ visible, bank, onClose, onSuccess }) {
 
         const switchConfirmed = expectedLabel
           ? actualLabel.trim() === expectedLabel.trim()
-          : !!actualLabel; // if we have no expected label, accept whatever came back
+          : !!actualLabel;
 
         if (!switchConfirmed && switchRetriesRef.current < MAX_SWITCH_RETRIES) {
-          // Switch didn't take — retry with longer timeout
           switchRetriesRef.current += 1;
           const retryDelay = SWITCH_TIMEOUT_MS + (switchRetriesRef.current * 1500);
           webViewRef.current?.injectJavaScript(buildSwitchCardJs(expectedIndex, retryDelay));
           return;
         }
 
-        // Switch confirmed (or max retries hit — proceed anyway)
         switchRetriesRef.current = 0;
         setSwitching(false);
         setCurrentCard(actualLabel || expectedLabel || null);
-
-        // Auto-capture the newly switched card — no tap needed
+        // Auto-capture — no tap needed for cards 2+
         webViewRef.current?.injectJavaScript(buildCaptureJs(config.gridSelector));
         return;
       }
@@ -298,7 +301,7 @@ export default function SyncWebView({ visible, bank, onClose, onSuccess }) {
         setCardIndexUi(nextIndex);
         setSwitching(true);
         switchRetriesRef.current = 0;
-        webViewRef.current?.injectJavaScript(buildSwitchCardJs(nextIndex, SWITCH_TIMEOUT_MS));
+        webViewRef.current?.injectJavaScript(buildSwitchCardJs(cardOptionsRef.current[nextIndex].index, SWITCH_TIMEOUT_MS));
       } else {
         const total = syncedCardsRef.current.reduce((sum, c) => sum + c.count, 0);
         setAllDone(true);
@@ -389,19 +392,19 @@ export default function SyncWebView({ visible, bank, onClose, onSuccess }) {
 }
 
 const s = StyleSheet.create({
-  overlay:        { flex: 1, justifyContent: 'flex-end', backgroundColor: 'rgba(0,0,0,0.45)' },
-  sheet:          { height: '87%', backgroundColor: 'white', borderTopLeftRadius: 20, borderTopRightRadius: 20, overflow: 'hidden' },
-  handle:         { width: 40, height: 4, backgroundColor: '#d1d5db', borderRadius: 99, alignSelf: 'center', marginTop: 10, marginBottom: 4 },
-  header:         { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 16, paddingVertical: 12, borderBottomWidth: 1, borderBottomColor: '#e5e7eb' },
-  closeBtn:       { width: 36, height: 36, borderRadius: 18, backgroundColor: '#f3f4f6', alignItems: 'center', justifyContent: 'center' },
-  closeBtnText:   { fontSize: 14, color: '#374151', fontWeight: '600' },
-  headerTitle:    { fontSize: 16, fontWeight: '700', color: '#1f2937' },
-  webview:        { flex: 1 },
-  footer:         { padding: 16, borderTopWidth: 1, borderTopColor: '#e5e7eb', backgroundColor: 'white' },
-  hint:           { fontSize: 12, color: '#6b7280', textAlign: 'center', marginBottom: 10 },
-  syncBtn:        { backgroundColor: '#4f46e5', borderRadius: 12, paddingVertical: 14, alignItems: 'center' },
-  goToOffersBtn:  { backgroundColor: '#059669', borderRadius: 12, paddingVertical: 14, alignItems: 'center' },
-  doneBtn:        { backgroundColor: '#16a34a', borderRadius: 12, paddingVertical: 14, alignItems: 'center' },
-  syncBtnDisabled:{ opacity: 0.6 },
-  syncBtnText:    { color: 'white', fontSize: 16, fontWeight: '700' },
+  overlay:         { flex: 1, justifyContent: 'flex-end', backgroundColor: 'rgba(0,0,0,0.45)' },
+  sheet:           { height: '87%', backgroundColor: 'white', borderTopLeftRadius: 20, borderTopRightRadius: 20, overflow: 'hidden' },
+  handle:          { width: 40, height: 4, backgroundColor: '#d1d5db', borderRadius: 99, alignSelf: 'center', marginTop: 10, marginBottom: 4 },
+  header:          { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 16, paddingVertical: 12, borderBottomWidth: 1, borderBottomColor: '#e5e7eb' },
+  closeBtn:        { width: 36, height: 36, borderRadius: 18, backgroundColor: '#f3f4f6', alignItems: 'center', justifyContent: 'center' },
+  closeBtnText:    { fontSize: 14, color: '#374151', fontWeight: '600' },
+  headerTitle:     { fontSize: 16, fontWeight: '700', color: '#1f2937' },
+  webview:         { flex: 1 },
+  footer:          { padding: 16, borderTopWidth: 1, borderTopColor: '#e5e7eb', backgroundColor: 'white' },
+  hint:            { fontSize: 12, color: '#6b7280', textAlign: 'center', marginBottom: 10 },
+  syncBtn:         { backgroundColor: '#4f46e5', borderRadius: 12, paddingVertical: 14, alignItems: 'center' },
+  goToOffersBtn:   { backgroundColor: '#059669', borderRadius: 12, paddingVertical: 14, alignItems: 'center' },
+  doneBtn:         { backgroundColor: '#16a34a', borderRadius: 12, paddingVertical: 14, alignItems: 'center' },
+  syncBtnDisabled: { opacity: 0.6 },
+  syncBtnText:     { color: 'white', fontSize: 16, fontWeight: '700' },
 });
