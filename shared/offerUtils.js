@@ -93,12 +93,15 @@ export const buildResultsForCategory = (category, allCards = []) => {
 // Deterministic hash — same offer on same card always gets the same ID.
 // cardName is included so the same offer on two different cards
 // (e.g. Sapphire Reserve and Freedom Flex) gets distinct IDs.
+// NOTE: use slice(0, 32) from the START — merchantName varies there.
+// slice(-20) caused collisions because all offers share the same
+// cardName suffix, making the last N base64 chars identical.
 // ─────────────────────────────────────────────
 export const generateOfferId = (merchantName, cashbackAmount, expiryDate, cardName = '') => {
   const raw = `${merchantName.toLowerCase().trim()}_${cashbackAmount}_${cardName.toLowerCase().trim()}_${expiryDate}`;
   const encoded = btoa(unescape(encodeURIComponent(raw)))
     .replace(/[^a-zA-Z0-9]/g, '');
-  return encoded.slice(-20);
+  return encoded.slice(0, 32);
 };
 
 export const generateCardId = (bankName, cardName) => {
