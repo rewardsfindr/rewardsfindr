@@ -1,9 +1,10 @@
 // ─────────────────────────────────────────────
-// SYNC WEBVIEW MODAL (Option B — bottom sheet)
+// SYNC WEBVIEW MODAL
 // Opens as an 85% modal sheet over the home screen.
-// User logs into Chase/Amex inside the WebView, then
-// taps "Sync Offers" → JS captures outerHTML → POST
-// to /api/offers/parse → success toast + close.
+// Loads directly to bank's offers page.
+// After login, auto-redirects back to offers page.
+// Tapping "Sync Offers" extracts only the offers
+// section (≤300KB) and POSTs to /api/offers/parse.
 // ─────────────────────────────────────────────
 import React, { useRef, useState } from 'react';
 import {
@@ -18,22 +19,48 @@ const BANK_CONFIG = {
     url: 'https://www.chase.com/personal/credit-cards/cardmember-offers',
     label: 'Chase Offers',
     color: '#1a3a6b',
+    offersPath: '/cardmember-offers',
+    // URL fragments that indicate we're on a login/auth page — don't redirect from these
+    loginPaths: ['/sign-in', '/logon', '/login', '/sso', '/auth', '/identify', '/challenge'],
   },
   amex: {
     url: 'https://www.americanexpress.com/en-us/benefits/offers/',
     label: 'Amex Offers',
     color: '#007ac1',
+    offersPath: '/benefits/offers',
+    loginPaths: ['/login', '/sign-in', '/identity', '/auth', '/challenge'],
   },
 };
 
 const API_BASE_URL = process.env.EXPO_PUBLIC_API_URL || 'http://localhost:3001';
 
-// Injected into the WebView when user taps "Sync Offers".
-// Captures full page HTML and sends it back to React Native.
+// Injected when user taps "Sync Offers".
+// Tries to find just the offers container to avoid sending
+// the full page HTML (~5-10MB). Falls back to a 300KB
+// truncated slice of the full page if no container found.
 const CAPTURE_JS = `
   (function() {
     try {
-      var html = document.documentElement.outerHTML;
+      var selectors = [
+        '[data-testid*="offer"]',
+        '[class*="offers"]',
+        '[id*="offers"]',
+        '[class*="offer-"]',
+        '[id*="offer-"]',
+        'main',
+        '[role="main"]',
+      ];
+      var container = null;
+      for (var i = 0; i < selectors.length; i++) {
+        var el = document.querySelector(selectors[i]);
+        if (el && el.innerHTML.length > 500) {
+          container = el;
+          break;
+        }
+      }
+      var html = container ? container.outerHTML : document.documentElement.outerHTML;
+      var MAX = 300000; // 300KB hard cap
+      if (html.length > MAX) html = html.substring(0, MAX);
       window.ReactNativeWebView.postMessage(JSON.stringify({ type: 'CAPTURE_HTML', html: html }));
     } catch(e) {
       window.ReactNativeWebView.postMessage(JSON.stringify({ type: 'ERROR', message: e.message }));
@@ -52,6 +79,20 @@ export default function SyncWebView({ visible, bank, onClose, onSuccess }) {
   const webViewRef = useRef(null);
   const [syncing, setSyncing] = useState(false);
   const config = BANK_CONFIG[bank] || BANK_CONFIG.chase;
+
+  // After the user logs in, the bank typically redirects to their main dashboard.
+  // Detect this and redirect straight back to the offers page.
+  const handleNavigationStateChange = (navState) => {
+    if (!navState.url || navState.loading) return;
+    const url = navState.url.toLowerCase();
+    const isOnOffersPage = url.includes(config.offersPath);
+    const isOnLoginPage = config.loginPaths.some(p => url.includes(p));
+    if (!isOnOffersPage && !isOnLoginPage) {
+      webViewRef.current?.injectJavaScript(
+        `window.location.replace('${config.url}'); true;`
+      );
+    }
+  };
 
   const handleSyncPress = () => {
     webViewRef.current?.injectJavaScript(CAPTURE_JS);
@@ -115,13 +156,13 @@ export default function SyncWebView({ visible, bank, onClose, onSuccess }) {
             <View style={{ width: 36 }} />
           </View>
 
-          {/* WebView */}
+          {/* WebView — loads directly to offers page */}
           <WebView
             ref={webViewRef}
             source={{ uri: config.url }}
             onMessage={handleMessage}
+            onNavigationStateChange={handleNavigationStateChange}
             style={s.webview}
-            // Don't persist session between syncs
             incognito={false}
             sharedCookiesEnabled={true}
             thirdPartyCookiesEnabled={true}
@@ -130,7 +171,7 @@ export default function SyncWebView({ visible, bank, onClose, onSuccess }) {
           {/* Footer */}
           <View style={s.footer}>
             <Text style={s.hint}>
-              Log in above, then tap Sync when your offers are visible.
+              Log in above — you'll be taken straight to your offers.
             </Text>
             <TouchableOpacity
               style={[s.syncBtn, syncing && s.syncBtnDisabled]}
