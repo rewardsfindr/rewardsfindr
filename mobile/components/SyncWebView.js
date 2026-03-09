@@ -2,12 +2,13 @@
 // SYNC WEBVIEW MODAL
 // Multi-card flow:
 //   1. On first load, detect credit cards only (keyword filter on label).
-//      Debit/checking accounts use a person's name and are skipped.
 //   2. User taps Sync — captures card 0.
-//   3. After each sync, auto-switch to next card (3.5s for dropdown to register).
-//   4. CARD_SWITCHED verifies label matches expected — retries up to 3x if not.
-//   5. On confirmed switch, waits 2s more for grid to re-render, then auto-captures.
-//   6. After last card, shows Done button.
+//   3. After each sync, auto-switch to next card (3.5s for dropdown).
+//   4. CARD_SWITCHED verifies label — retries up to 3x if not confirmed.
+//   5. On confirmed switch, waits 2s for grid re-render then auto-captures.
+//   6. isCaptureInFlight ref gates all CAPTURE_HTML messages — only one
+//      capture is processed at a time, duplicates are dropped.
+//   7. After last card, shows Done button.
 // ─────────────────────────────────────────────
 import React, { useRef, useState, useEffect } from 'react';
 import {
@@ -41,8 +42,8 @@ const BANK_CONFIG = {
 };
 
 const API_BASE_URL = process.env.EXPO_PUBLIC_API_URL || 'http://localhost:3001';
-const SWITCH_TIMEOUT_MS    = 3500; // time to wait for dropdown to register the switch
-const POST_SWITCH_DELAY_MS = 2000; // extra wait after switch confirmed for grid re-render
+const SWITCH_TIMEOUT_MS    = 3500;
+const POST_SWITCH_DELAY_MS = 2000;
 const MAX_SWITCH_RETRIES   = 3;
 
 const CHASE_CREDIT_CARD_KEYWORDS = [
@@ -51,7 +52,6 @@ const CHASE_CREDIT_CARD_KEYWORDS = [
   'british', 'aeroplan', 'reserve', 'preferred', 'unlimited', 'plus',
 ];
 
-// Run ONCE on first load. Filters to credit cards by brand keyword.
 const DETECT_CARDS_JS = `
   (function() {
     try {
@@ -83,7 +83,6 @@ const DETECT_CARDS_JS = `
   true;
 `;
 
-// Switch to card at DOM index, wait timeoutMs for dropdown to register, then confirm
 const buildSwitchCardJs = (index, timeoutMs) => `
   (function() {
     try {
@@ -116,7 +115,6 @@ const buildSwitchCardJs = (index, timeoutMs) => `
   true;
 `;
 
-// Wait delayMs then capture — gives grid time to re-render after card switch
 const buildDelayedCaptureJs = (gridSelector, delayMs) => `
   (function() {
     setTimeout(function() {
@@ -151,9 +149,6 @@ const buildDelayedCaptureJs = (gridSelector, delayMs) => `
   true;
 `;
 
-// Immediate capture (for manual tap on first card)
-const buildCaptureJs = (gridSelector) => buildDelayedCaptureJs(gridSelector, 0);
-
 const parseCardLabel = (label) => {
   if (!label) return { cardName: null, cardLast4: null };
   const match = label.match(/^(.+?)\s*\(\.\.\.([\w\d]+)\)\s*$/);
@@ -164,11 +159,12 @@ const parseCardLabel = (label) => {
 export default function SyncWebView({ visible, bank, onClose, onSuccess }) {
   const webViewRef = useRef(null);
 
-  const cardOptionsRef     = useRef([]);
-  const cardIndexRef       = useRef(0);
-  const syncedCardsRef     = useRef([]);
-  const cardsDiscovered    = useRef(false);
-  const switchRetriesRef   = useRef(0);
+  const cardOptionsRef      = useRef([]);
+  const cardIndexRef        = useRef(0);
+  const syncedCardsRef      = useRef([]);
+  const cardsDiscovered     = useRef(false);
+  const switchRetriesRef    = useRef(0);
+  const isCaptureInFlight   = useRef(false); // gate: drop duplicate CAPTURE_HTML messages
 
   const [syncing, setSyncing]         = useState(false);
   const [switching, setSwitching]     = useState(false);
@@ -182,11 +178,12 @@ export default function SyncWebView({ visible, bank, onClose, onSuccess }) {
 
   useEffect(() => {
     if (!visible) {
-      cardOptionsRef.current   = [];
-      cardIndexRef.current     = 0;
-      syncedCardsRef.current   = [];
-      cardsDiscovered.current  = false;
-      switchRetriesRef.current = 0;
+      cardOptionsRef.current    = [];
+      cardIndexRef.current      = 0;
+      syncedCardsRef.current    = [];
+      cardsDiscovered.current   = false;
+      switchRetriesRef.current  = 0;
+      isCaptureInFlight.current = false;
       setCurrentCard(null);
       setCurrentUrl('');
       setSyncing(false);
@@ -218,7 +215,9 @@ export default function SyncWebView({ visible, bank, onClose, onSuccess }) {
   };
 
   const handleSyncPress = () => {
-    webViewRef.current?.injectJavaScript(buildCaptureJs(config.gridSelector));
+    if (isCaptureInFlight.current) return;
+    isCaptureInFlight.current = true;
+    webViewRef.current?.injectJavaScript(buildDelayedCaptureJs(config.gridSelector, 0));
   };
 
   const handleMessage = async (event) => {
@@ -239,7 +238,6 @@ export default function SyncWebView({ visible, bank, onClose, onSuccess }) {
         const expectedIndex = data.expectedIndex;
         const expectedLabel = cardOptionsRef.current.find(c => c.index === expectedIndex)?.label || '';
         const actualLabel   = data.cardLabel || '';
-
         const switchConfirmed = expectedLabel
           ? actualLabel.trim() === expectedLabel.trim()
           : !!actualLabel;
@@ -251,26 +249,31 @@ export default function SyncWebView({ visible, bank, onClose, onSuccess }) {
           return;
         }
 
-        switchRetriesRef.current = 0;
+        switchRetriesRef.current  = 0;
+        isCaptureInFlight.current = true; // lock before queuing capture
         setSwitching(false);
         setCurrentCard(actualLabel || expectedLabel || null);
-        // Wait POST_SWITCH_DELAY_MS for grid to re-render before capturing
         webViewRef.current?.injectJavaScript(buildDelayedCaptureJs(config.gridSelector, POST_SWITCH_DELAY_MS));
         return;
       }
 
       if (data.type === 'CARD_SWITCH_ERROR') {
         setSwitching(false);
+        isCaptureInFlight.current = false;
         Alert.alert('Card Switch Failed', data.message);
         return;
       }
 
       if (data.type === 'ERROR') {
+        isCaptureInFlight.current = false;
         Alert.alert('Capture Error', data.message);
         return;
       }
 
       if (data.type !== 'CAPTURE_HTML') return;
+
+      // Drop duplicate captures — only process if we initiated one
+      if (!isCaptureInFlight.current) return;
 
       setSyncing(true);
 
@@ -291,6 +294,9 @@ export default function SyncWebView({ visible, bank, onClose, onSuccess }) {
 
       const result = await response.json();
       if (!response.ok) throw new Error(result.error || 'Sync failed');
+
+      // Release the lock only after API call completes
+      isCaptureInFlight.current = false;
 
       syncedCardsRef.current = [
         ...syncedCardsRef.current,
@@ -314,6 +320,7 @@ export default function SyncWebView({ visible, bank, onClose, onSuccess }) {
         onSuccess(total, syncedCardsRef.current);
       }
     } catch (err) {
+      isCaptureInFlight.current = false;
       setSyncing(false);
       setSwitching(false);
       Alert.alert('Sync Failed', err.message);
