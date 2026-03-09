@@ -6,7 +6,7 @@
 import React from 'react';
 import {
   View, Text, ScrollView, TouchableOpacity,
-  StyleSheet, SafeAreaView,
+  StyleSheet, SafeAreaView, Linking,
 } from 'react-native';
 import { useLocalSearchParams, useRouter, Stack } from 'expo-router';
 
@@ -23,12 +23,21 @@ const formatPurchaseType = (type) => {
   return null;
 };
 
+const CHASE_OFFERS_URL = 'https://secure.chase.com/web/auth/dashboard#/dashboard/merchantOffers/offer-hub';
+
 export default function ResultsScreen() {
   const router = useRouter();
   const { storeName, offers, notFound } = useLocalSearchParams();
 
   const myOffers = offers ? JSON.parse(offers) : [];
   const hasOffers = myOffers.length > 0;
+
+  const handleActivate = (offer) => {
+    const url = offer.offerDeepLink || CHASE_OFFERS_URL;
+    Linking.openURL(url).catch(() =>
+      Linking.openURL(CHASE_OFFERS_URL)
+    );
+  };
 
   return (
     <SafeAreaView style={s.safe}>
@@ -51,7 +60,6 @@ export default function ResultsScreen() {
 
         {!notFound && (
           <>
-            {/* Results header */}
             <View style={s.resultsHeader}>
               <Text style={s.resultsTitle}>Your offers for {storeName}</Text>
             </View>
@@ -79,6 +87,12 @@ export default function ResultsScreen() {
                         <Text style={s.rewardAmount}>
                           {formatCashback(offer.cashbackAmount, offer.cashbackType)}
                         </Text>
+                        {/* Activation status badge */}
+                        <View style={[s.statusBadge, offer.isActivated ? s.statusActive : s.statusInactive]}>
+                          <Text style={s.statusText}>
+                            {offer.isActivated ? '✓ Activated' : '⚡ Not activated'}
+                          </Text>
+                        </View>
                       </View>
                     </View>
 
@@ -100,6 +114,16 @@ export default function ResultsScreen() {
                         </View>
                       )}
                     </View>
+
+                    {/* Activate button — only shown if not activated */}
+                    {!offer.isActivated && offer.bank === 'chase' && (
+                      <TouchableOpacity
+                        style={s.activateBtn}
+                        onPress={() => handleActivate(offer)}
+                      >
+                        <Text style={s.activateBtnText}>⚡ Activate on Chase →</Text>
+                      </TouchableOpacity>
+                    )}
 
                   </View>
                 ))}
@@ -157,10 +181,20 @@ const s = StyleSheet.create({
   rewardBadge:     { alignItems: 'flex-end', marginLeft: 12 },
   rewardAmount:    { fontSize: 18, fontWeight: '800', color: '#059669' },
 
+  statusBadge:     { borderRadius: 999, paddingHorizontal: 8, paddingVertical: 3, marginTop: 4 },
+  statusActive:    { backgroundColor: '#d1fae5' },
+  statusInactive:  { backgroundColor: '#fef3c7' },
+  statusText:      { fontSize: 10, fontWeight: '700', color: '#374151' },
+
   detailsRow:      { flexDirection: 'row', flexWrap: 'wrap', gap: 6 },
   pill:            { backgroundColor: '#f3f4f6', borderRadius: 999,
                      paddingHorizontal: 10, paddingVertical: 4 },
   pillText:        { fontSize: 12, color: '#374151', fontWeight: '500' },
+
+  activateBtn:     { marginTop: 12, backgroundColor: '#fffbeb', borderRadius: 10,
+                     paddingVertical: 10, paddingHorizontal: 14,
+                     borderWidth: 1, borderColor: '#fcd34d', alignItems: 'center' },
+  activateBtnText: { fontSize: 13, fontWeight: '700', color: '#92400e' },
 
   emptyBox:        { backgroundColor: 'white', borderRadius: 16, padding: 20,
                      alignItems: 'center', marginBottom: 16 },

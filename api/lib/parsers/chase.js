@@ -4,11 +4,14 @@
 // Tile:      [data-testid="commerce-tile"]
 // Merchant:  span.r9jbijk  (mds-body-small-heavier)
 // Value:     span.r9jbijj  (mds-body-large-heavier)
-// Activated: aria-label contains "Add Offer" when not activated
+// Activated: aria-label contains "Add Offer" when NOT activated
+// tileId:    id attr e.g. "carousel_0_FIGG:1894293" → used for deep link
 // Expiry + MinSpend: NOT available in grid tile HTML (Chase renders
 //   these in a click-to-open detail modal, outside the captured DOM).
 // ─────────────────────────────────────────────
 import * as cheerio from 'cheerio';
+
+const CHASE_OFFERS_BASE_URL = 'https://secure.chase.com/web/auth/dashboard#/dashboard/merchantOffers/offer-hub';
 
 function parsePurchaseType(text) {
   const lower = text.toLowerCase();
@@ -44,9 +47,16 @@ export function parseChaseOffers(html) {
       if (percentMatch) { cashbackAmount = parseFloat(percentMatch[1]); cashbackType = 'percent'; }
       else if (dollarMatch) { cashbackAmount = parseFloat(dollarMatch[1]); cashbackType = 'fixed'; }
 
-      const ariaLabel = $el.attr('aria-label') || '';
-      const isActivated  = !ariaLabel.toLowerCase().includes('add offer');
+      const ariaLabel  = $el.attr('aria-label') || '';
+      const isActivated = !ariaLabel.toLowerCase().includes('add offer');
       const purchaseType = parsePurchaseType($el.text());
+
+      // Extract tile ID for deep link — format: "carousel_0_FIGG:1894293"
+      // The offer hub URL with ?offerId= opens the detail modal directly.
+      const tileId = $el.attr('id') || '';
+      const offerDeepLink = tileId
+        ? `${CHASE_OFFERS_BASE_URL}?offerId=${encodeURIComponent(tileId)}`
+        : CHASE_OFFERS_BASE_URL;
 
       offers.push({
         merchantName,
@@ -58,6 +68,7 @@ export function parseChaseOffers(html) {
         purchaseType,
         category: 'other',
         isActivated,
+        offerDeepLink,
       });
     } catch (err) {
       console.error('⚠️ Error parsing Chase offer tile:', err);
