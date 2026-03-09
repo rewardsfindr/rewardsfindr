@@ -1,15 +1,12 @@
 // ─────────────────────────────────────────────
 // SYNC WEBVIEW MODAL
-// Opens as an 87% modal sheet over the home screen.
-// Loads directly to bank's offers page.
-// If user not logged in, Chase redirects to login then back to offers.
-// Tracks current URL — shows Sync button only when on offers page.
-// Shows Go to Offers button on all other pages.
-// Multi-card: reads all cards from Chase dropdown on first load only,
-// then cycles through each. After all cards synced, shows Done button.
-//
-// NOTE: cardIndex and cardOptions are tracked as refs (not just state)
-// to avoid stale closure bugs inside handleMessage.
+// Multi-card flow:
+//   1. On first load, detect all cards (once only).
+//   2. User taps Sync — captures card 0.
+//   3. After each sync, auto-switch to next card (3.5s timeout).
+//   4. CARD_SWITCHED verifies label matches expected — retries up to 3x if not.
+//   5. On confirmed switch, auto-captures next card (no tap needed).
+//   6. After last card, shows Done button.
 // ─────────────────────────────────────────────
 import React, { useRef, useState, useEffect } from 'react';
 import {
@@ -43,8 +40,10 @@ const BANK_CONFIG = {
 };
 
 const API_BASE_URL = process.env.EXPO_PUBLIC_API_URL || 'http://localhost:3001';
+const SWITCH_TIMEOUT_MS = 3500;
+const MAX_SWITCH_RETRIES = 3;
 
-// Run ONCE on first load to discover all cards in dropdown
+// Run ONCE on first load to read all cards from dropdown
 const DETECT_CARDS_JS = `
   (function() {
     try {
@@ -66,17 +65,14 @@ const DETECT_CARDS_JS = `
         }));
         return;
       }
-      window.ReactNativeWebView.postMessage(JSON.stringify({
-        type: 'CARDS_DETECTED',
-        cards: [],
-        selectedLabel: null,
-      }));
+      window.ReactNativeWebView.postMessage(JSON.stringify({ type: 'CARDS_DETECTED', cards: [], selectedLabel: null }));
     } catch(e) {}
   })();
   true;
 `;
 
-const buildSwitchCardJs = (index) => `
+// Switch to card at index, wait SWITCH_TIMEOUT_MS, then report selected label
+const buildSwitchCardJs = (index, timeoutMs) => `
   (function() {
     try {
       var sel = document.querySelector('mds-select[id="select-credit-card-account"]');
@@ -95,8 +91,12 @@ const buildSwitchCardJs = (index) => `
       setTimeout(function() {
         var updated = sel.querySelector('mds-select-option[selected="true"]');
         var label = updated ? (updated.getAttribute('label') || '') : '';
-        window.ReactNativeWebView.postMessage(JSON.stringify({ type: 'CARD_SWITCHED', cardLabel: label, index: ${index} }));
-      }, 2000);
+        window.ReactNativeWebView.postMessage(JSON.stringify({
+          type: 'CARD_SWITCHED',
+          cardLabel: label,
+          expectedIndex: ${index},
+        }));
+      }, ${timeoutMs || SWITCH_TIMEOUT_MS});
     } catch(e) {
       window.ReactNativeWebView.postMessage(JSON.stringify({ type: 'CARD_SWITCH_ERROR', message: e.message }));
     }
@@ -114,10 +114,7 @@ const buildCaptureJs = (gridSelector) => `
       if (grid && grid.innerHTML.length > 500) { html = grid.outerHTML; }
       ` : ''}
       if (!html) {
-        var selectors = [
-          '[data-testid*="offer"]', '[class*="offers"]', '[id*="offers"]',
-          'main', '[role="main"]',
-        ];
+        var selectors = ['[data-testid*="offer"]','[class*="offers"]','[id*="offers"]','main','[role="main"]'];
         for (var i = 0; i < selectors.length; i++) {
           var el = document.querySelector(selectors[i]);
           if (el && el.innerHTML.length > 500) { html = el.outerHTML; break; }
@@ -149,13 +146,14 @@ const parseCardLabel = (label) => {
 export default function SyncWebView({ visible, bank, onClose, onSuccess }) {
   const webViewRef = useRef(null);
 
-  // Refs — always current inside async handleMessage closure
+  // Refs — always current inside async handleMessage
   const cardOptionsRef    = useRef([]);
   const cardIndexRef      = useRef(0);
   const syncedCardsRef    = useRef([]);
-  const cardsDiscovered   = useRef(false); // guard: only run DETECT_CARDS_JS once per session
+  const cardsDiscovered   = useRef(false);
+  const switchRetriesRef  = useRef(0);
 
-  // State — drives UI re-renders
+  // State — UI only
   const [syncing, setSyncing]         = useState(false);
   const [switching, setSwitching]     = useState(false);
   const [currentCard, setCurrentCard] = useState(null);
@@ -172,6 +170,7 @@ export default function SyncWebView({ visible, bank, onClose, onSuccess }) {
       cardIndexRef.current    = 0;
       syncedCardsRef.current  = [];
       cardsDiscovered.current = false;
+      switchRetriesRef.current = 0;
       setCurrentCard(null);
       setCurrentUrl('');
       setSyncing(false);
@@ -192,7 +191,7 @@ export default function SyncWebView({ visible, bank, onClose, onSuccess }) {
   };
 
   const handleLoadEnd = () => {
-    // Only detect cards once per session — prevents re-triggering after card switches
+    // Only detect cards once per session
     if (bank === 'chase' && !cardsDiscovered.current) {
       webViewRef.current?.injectJavaScript(DETECT_CARDS_JS);
     }
@@ -211,8 +210,8 @@ export default function SyncWebView({ visible, bank, onClose, onSuccess }) {
     try {
       const data = JSON.parse(event.nativeEvent.data);
 
+      // ── CARDS DETECTED (first load only) ──
       if (data.type === 'CARDS_DETECTED') {
-        // Only store card list on first detection
         if (!cardsDiscovered.current && data.cards && data.cards.length > 0) {
           cardOptionsRef.current  = data.cards;
           cardsDiscovered.current = true;
@@ -222,10 +221,31 @@ export default function SyncWebView({ visible, bank, onClose, onSuccess }) {
         return;
       }
 
+      // ── CARD SWITCHED ──
       if (data.type === 'CARD_SWITCHED') {
+        const expectedIndex = data.expectedIndex;
+        const expectedLabel = cardOptionsRef.current[expectedIndex]?.label || '';
+        const actualLabel   = data.cardLabel || '';
+
+        const switchConfirmed = expectedLabel
+          ? actualLabel.trim() === expectedLabel.trim()
+          : !!actualLabel; // if we have no expected label, accept whatever came back
+
+        if (!switchConfirmed && switchRetriesRef.current < MAX_SWITCH_RETRIES) {
+          // Switch didn't take — retry with longer timeout
+          switchRetriesRef.current += 1;
+          const retryDelay = SWITCH_TIMEOUT_MS + (switchRetriesRef.current * 1500);
+          webViewRef.current?.injectJavaScript(buildSwitchCardJs(expectedIndex, retryDelay));
+          return;
+        }
+
+        // Switch confirmed (or max retries hit — proceed anyway)
+        switchRetriesRef.current = 0;
         setSwitching(false);
-        // Use the label from the switch confirmation directly — no need to re-run DETECT_CARDS_JS
-        setCurrentCard(data.cardLabel || null);
+        setCurrentCard(actualLabel || expectedLabel || null);
+
+        // Auto-capture the newly switched card — no tap needed
+        webViewRef.current?.injectJavaScript(buildCaptureJs(config.gridSelector));
         return;
       }
 
@@ -242,6 +262,7 @@ export default function SyncWebView({ visible, bank, onClose, onSuccess }) {
 
       if (data.type !== 'CAPTURE_HTML') return;
 
+      // ── CAPTURE HTML — send to backend ──
       setSyncing(true);
 
       const user = getAuthInstance().currentUser;
@@ -255,23 +276,19 @@ export default function SyncWebView({ visible, bank, onClose, onSuccess }) {
 
       const response = await fetch(`${API_BASE_URL}/api/offers/parse`, {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${token}`,
-        },
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
         body: JSON.stringify({ html: data.html, bank, cardName: fullCardName }),
       });
 
       const result = await response.json();
       if (!response.ok) throw new Error(result.error || 'Sync failed');
 
-      const syncedCount = result.synced ?? 0;
       syncedCardsRef.current = [
         ...syncedCardsRef.current,
-        { cardName: fullCardName || 'Unknown Card', count: syncedCount },
+        { cardName: fullCardName || 'Unknown Card', count: result.synced ?? 0 },
       ];
 
-      const nextIndex = cardIndexRef.current + 1;
+      const nextIndex  = cardIndexRef.current + 1;
       const totalCards = cardOptionsRef.current.length;
 
       setSyncing(false);
@@ -280,7 +297,8 @@ export default function SyncWebView({ visible, bank, onClose, onSuccess }) {
         cardIndexRef.current = nextIndex;
         setCardIndexUi(nextIndex);
         setSwitching(true);
-        webViewRef.current?.injectJavaScript(buildSwitchCardJs(nextIndex));
+        switchRetriesRef.current = 0;
+        webViewRef.current?.injectJavaScript(buildSwitchCardJs(nextIndex, SWITCH_TIMEOUT_MS));
       } else {
         const total = syncedCardsRef.current.reduce((sum, c) => sum + c.count, 0);
         setAllDone(true);
@@ -294,18 +312,13 @@ export default function SyncWebView({ visible, bank, onClose, onSuccess }) {
   };
 
   const { cardName } = parseCardLabel(currentCard);
-  const totalCards = cardCount || 1;
+  const totalCards    = cardCount || 1;
   const progressLabel = cardCount > 1 ? ` (${cardIndexUi + 1} of ${totalCards})` : '';
-  const syncBtnLabel = cardName ? `Sync ${cardName}${progressLabel}` : `Sync Offers${progressLabel}`;
-  const isBusy = syncing || switching;
+  const syncBtnLabel  = cardName ? `Sync ${cardName}${progressLabel}` : `Sync Offers${progressLabel}`;
+  const isBusy        = syncing || switching;
 
   return (
-    <Modal
-      visible={visible}
-      animationType="slide"
-      transparent={true}
-      onRequestClose={onClose}
-    >
+    <Modal visible={visible} animationType="slide" transparent={true} onRequestClose={onClose}>
       <View style={s.overlay}>
         <SafeAreaView style={s.sheet}>
           <View style={s.handle} />
@@ -343,9 +356,9 @@ export default function SyncWebView({ visible, bank, onClose, onSuccess }) {
               </>
             ) : isOnOffersPage ? (
               <>
-                <Text style={s.hint} numberOfLines={1}>
+                <Text style={s.hint} numberOfLines={2}>
                   {switching
-                    ? `⏳ Switching to card ${cardIndexUi + 1} of ${totalCards}...`
+                    ? `⏳ Switching to card ${cardIndexUi + 1} of ${totalCards}... (auto-syncing after)`
                     : currentCard
                       ? `💳 ${currentCard}${cardCount > 1 ? ` · Card ${cardIndexUi + 1} of ${totalCards}` : ''}`
                       : 'Select a card above, then tap Sync.'}
@@ -362,9 +375,7 @@ export default function SyncWebView({ visible, bank, onClose, onSuccess }) {
               </>
             ) : (
               <>
-                <Text style={s.hint}>
-                  Log in above, then tap the button to go to your offers.
-                </Text>
+                <Text style={s.hint}>Log in above, then tap the button to go to your offers.</Text>
                 <TouchableOpacity style={s.goToOffersBtn} onPress={handleGoToOffers}>
                   <Text style={s.syncBtnText}>Go to Offers Page →</Text>
                 </TouchableOpacity>
@@ -378,42 +389,19 @@ export default function SyncWebView({ visible, bank, onClose, onSuccess }) {
 }
 
 const s = StyleSheet.create({
-  overlay: {
-    flex: 1, justifyContent: 'flex-end', backgroundColor: 'rgba(0, 0, 0, 0.45)',
-  },
-  sheet: {
-    height: '87%', backgroundColor: 'white',
-    borderTopLeftRadius: 20, borderTopRightRadius: 20, overflow: 'hidden',
-  },
-  handle: {
-    width: 40, height: 4, backgroundColor: '#d1d5db',
-    borderRadius: 99, alignSelf: 'center', marginTop: 10, marginBottom: 4,
-  },
-  header: {
-    flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
-    paddingHorizontal: 16, paddingVertical: 12,
-    borderBottomWidth: 1, borderBottomColor: '#e5e7eb',
-  },
-  closeBtn: {
-    width: 36, height: 36, borderRadius: 18,
-    backgroundColor: '#f3f4f6', alignItems: 'center', justifyContent: 'center',
-  },
-  closeBtnText:  { fontSize: 14, color: '#374151', fontWeight: '600' },
-  headerTitle:   { fontSize: 16, fontWeight: '700', color: '#1f2937' },
-  webview:       { flex: 1 },
-  footer: {
-    padding: 16, borderTopWidth: 1, borderTopColor: '#e5e7eb', backgroundColor: 'white',
-  },
-  hint: { fontSize: 12, color: '#6b7280', textAlign: 'center', marginBottom: 10 },
-  syncBtn: {
-    backgroundColor: '#4f46e5', borderRadius: 12, paddingVertical: 14, alignItems: 'center',
-  },
-  goToOffersBtn: {
-    backgroundColor: '#059669', borderRadius: 12, paddingVertical: 14, alignItems: 'center',
-  },
-  doneBtn: {
-    backgroundColor: '#16a34a', borderRadius: 12, paddingVertical: 14, alignItems: 'center',
-  },
-  syncBtnDisabled: { opacity: 0.6 },
-  syncBtnText: { color: 'white', fontSize: 16, fontWeight: '700' },
+  overlay:        { flex: 1, justifyContent: 'flex-end', backgroundColor: 'rgba(0,0,0,0.45)' },
+  sheet:          { height: '87%', backgroundColor: 'white', borderTopLeftRadius: 20, borderTopRightRadius: 20, overflow: 'hidden' },
+  handle:         { width: 40, height: 4, backgroundColor: '#d1d5db', borderRadius: 99, alignSelf: 'center', marginTop: 10, marginBottom: 4 },
+  header:         { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 16, paddingVertical: 12, borderBottomWidth: 1, borderBottomColor: '#e5e7eb' },
+  closeBtn:       { width: 36, height: 36, borderRadius: 18, backgroundColor: '#f3f4f6', alignItems: 'center', justifyContent: 'center' },
+  closeBtnText:   { fontSize: 14, color: '#374151', fontWeight: '600' },
+  headerTitle:    { fontSize: 16, fontWeight: '700', color: '#1f2937' },
+  webview:        { flex: 1 },
+  footer:         { padding: 16, borderTopWidth: 1, borderTopColor: '#e5e7eb', backgroundColor: 'white' },
+  hint:           { fontSize: 12, color: '#6b7280', textAlign: 'center', marginBottom: 10 },
+  syncBtn:        { backgroundColor: '#4f46e5', borderRadius: 12, paddingVertical: 14, alignItems: 'center' },
+  goToOffersBtn:  { backgroundColor: '#059669', borderRadius: 12, paddingVertical: 14, alignItems: 'center' },
+  doneBtn:        { backgroundColor: '#16a34a', borderRadius: 12, paddingVertical: 14, alignItems: 'center' },
+  syncBtnDisabled:{ opacity: 0.6 },
+  syncBtnText:    { color: 'white', fontSize: 16, fontWeight: '700' },
 });
