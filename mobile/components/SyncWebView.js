@@ -17,17 +17,21 @@ import { getAuthInstance } from '../lib/firebaseClient.js';
 const BANK_CONFIG = {
   chase: {
     url: 'https://www.chase.com/personal/credit-cards/cardmember-offers',
+    // Post-login authenticated offers URL (different domain + path after login)
+    offersUrl: 'https://secure.chase.com/web/auth/dashboard#/dashboard/merchantOffers/offer-hub',
     label: 'Chase Offers',
     color: '#1a3a6b',
-    offersPath: '/cardmember-offers',
+    // Matches both pre-login and post-login offers pages
+    offersPaths: ['/cardmember-offers', 'merchantOffers'],
     loginPaths: ['/sign-in', '/logon', '/login', '/sso', '/auth', '/identify', '/challenge'],
     gridSelector: '[data-testid="grid-items-container"]',
   },
   amex: {
     url: 'https://www.americanexpress.com/en-us/benefits/offers/',
+    offersUrl: null,
     label: 'Amex Offers',
     color: '#007ac1',
-    offersPath: '/benefits/offers',
+    offersPaths: ['/benefits/offers'],
     loginPaths: ['/login', '/sign-in', '/identity', '/auth', '/challenge'],
     gridSelector: null, // TODO: inspect Amex DOM
   },
@@ -125,7 +129,9 @@ export default function SyncWebView({ visible, bank, onClose, onSuccess }) {
     }
   }, [visible]);
 
-  const isOnOffersPage = currentUrl.toLowerCase().includes(config.offersPath);
+  const isOnOffersPage = (config.offersPaths || []).some(
+    (p) => currentUrl.toLowerCase().includes(p.toLowerCase())
+  );
 
   const handleNavigationStateChange = (navState) => {
     if (!navState.url) return;
@@ -138,8 +144,10 @@ export default function SyncWebView({ visible, bank, onClose, onSuccess }) {
   };
 
   const handleGoToOffers = () => {
+    // Use authenticated offersUrl if available, otherwise fall back to config.url
+    const target = config.offersUrl || config.url;
     webViewRef.current?.injectJavaScript(
-      `window.location.replace('${config.url}'); true;`
+      `window.location.replace('${target}'); true;`
     );
   };
 
