@@ -1,14 +1,13 @@
 // ─────────────────────────────────────────────
 // SYNC WEBVIEW MODAL
 // Multi-card flow:
-//   1. On first load, detect credit cards only (keyword filter on label).
-//   2. User taps Sync — captures card 0.
-//   3. After each sync, auto-switch to next card (3.5s for dropdown).
+//   1. On first load, detect credit cards only (keyword filter).
+//   2. User taps Sync — captures current card, sends to API.
+//   3. After sync, auto-switches to next card (3.5s timeout).
 //   4. CARD_SWITCHED verifies label — retries up to 3x if not confirmed.
-//   5. On confirmed switch, waits 2s for grid re-render then auto-captures.
-//   6. isCaptureInFlight ref gates all CAPTURE_HTML messages — only one
-//      capture is processed at a time, duplicates are dropped.
-//   7. After last card, shows Done button.
+//   5. On confirmed switch, Sync button reappears for next card.
+//      User taps once per card — no auto-capture to avoid race conditions.
+//   6. After last card done, shows Done button.
 // ─────────────────────────────────────────────
 import React, { useRef, useState, useEffect } from 'react';
 import {
@@ -42,9 +41,8 @@ const BANK_CONFIG = {
 };
 
 const API_BASE_URL = process.env.EXPO_PUBLIC_API_URL || 'http://localhost:3001';
-const SWITCH_TIMEOUT_MS    = 3500;
-const POST_SWITCH_DELAY_MS = 2000;
-const MAX_SWITCH_RETRIES   = 3;
+const SWITCH_TIMEOUT_MS  = 3500;
+const MAX_SWITCH_RETRIES = 3;
 
 const CHASE_CREDIT_CARD_KEYWORDS = [
   'sapphire', 'freedom', 'flex', 'slate', 'ink', 'visa', 'united', 'marriott',
@@ -115,36 +113,34 @@ const buildSwitchCardJs = (index, timeoutMs) => `
   true;
 `;
 
-const buildDelayedCaptureJs = (gridSelector, delayMs) => `
+const buildCaptureJs = (gridSelector) => `
   (function() {
-    setTimeout(function() {
-      try {
-        var html = null;
-        var MAX = 200000;
-        ${gridSelector ? `
-        var grid = document.querySelector('${gridSelector}');
-        if (grid && grid.innerHTML.length > 500) { html = grid.outerHTML; }
-        ` : ''}
-        if (!html) {
-          var selectors = ['[data-testid*="offer"]','[class*="offers"]','[id*="offers"]','main','[role="main"]'];
-          for (var i = 0; i < selectors.length; i++) {
-            var el = document.querySelector(selectors[i]);
-            if (el && el.innerHTML.length > 500) { html = el.outerHTML; break; }
-          }
+    try {
+      var html = null;
+      var MAX = 200000;
+      ${gridSelector ? `
+      var grid = document.querySelector('${gridSelector}');
+      if (grid && grid.innerHTML.length > 500) { html = grid.outerHTML; }
+      ` : ''}
+      if (!html) {
+        var selectors = ['[data-testid*="offer"]','[class*="offers"]','[id*="offers"]','main','[role="main"]'];
+        for (var i = 0; i < selectors.length; i++) {
+          var el = document.querySelector(selectors[i]);
+          if (el && el.innerHTML.length > 500) { html = el.outerHTML; break; }
         }
-        if (!html) html = document.documentElement.outerHTML;
-        if (html.length > MAX) html = html.substring(0, MAX);
-        var cardLabel = '';
-        var cardSel = document.querySelector('mds-select[id="select-credit-card-account"]');
-        if (cardSel) {
-          var cardOpt = cardSel.querySelector('mds-select-option[selected="true"]');
-          if (cardOpt) cardLabel = cardOpt.getAttribute('label') || '';
-        }
-        window.ReactNativeWebView.postMessage(JSON.stringify({ type: 'CAPTURE_HTML', html: html, cardLabel: cardLabel }));
-      } catch(e) {
-        window.ReactNativeWebView.postMessage(JSON.stringify({ type: 'ERROR', message: e.message }));
       }
-    }, ${delayMs || 0});
+      if (!html) html = document.documentElement.outerHTML;
+      if (html.length > MAX) html = html.substring(0, MAX);
+      var cardLabel = '';
+      var cardSel = document.querySelector('mds-select[id="select-credit-card-account"]');
+      if (cardSel) {
+        var cardOpt = cardSel.querySelector('mds-select-option[selected="true"]');
+        if (cardOpt) cardLabel = cardOpt.getAttribute('label') || '';
+      }
+      window.ReactNativeWebView.postMessage(JSON.stringify({ type: 'CAPTURE_HTML', html: html, cardLabel: cardLabel }));
+    } catch(e) {
+      window.ReactNativeWebView.postMessage(JSON.stringify({ type: 'ERROR', message: e.message }));
+    }
   })();
   true;
 `;
@@ -159,15 +155,14 @@ const parseCardLabel = (label) => {
 export default function SyncWebView({ visible, bank, onClose, onSuccess }) {
   const webViewRef = useRef(null);
 
-  const cardOptionsRef      = useRef([]);
-  const cardIndexRef        = useRef(0);
-  const syncedCardsRef      = useRef([]);
-  const cardsDiscovered     = useRef(false);
-  const switchRetriesRef    = useRef(0);
-  const isCaptureInFlight   = useRef(false); // gate: drop duplicate CAPTURE_HTML messages
+  const cardOptionsRef     = useRef([]);
+  const cardIndexRef       = useRef(0);
+  const syncedCardsRef     = useRef([]);
+  const cardsDiscovered    = useRef(false);
+  const switchRetriesRef   = useRef(0);
 
   const [syncing, setSyncing]         = useState(false);
-  const [switching, setSwitching]     = useState(false);
+  const [switching, setSwitching]     = useState(false); // true while waiting for CARD_SWITCHED
   const [currentCard, setCurrentCard] = useState(null);
   const [currentUrl, setCurrentUrl]   = useState('');
   const [cardCount, setCardCount]     = useState(0);
@@ -178,12 +173,11 @@ export default function SyncWebView({ visible, bank, onClose, onSuccess }) {
 
   useEffect(() => {
     if (!visible) {
-      cardOptionsRef.current    = [];
-      cardIndexRef.current      = 0;
-      syncedCardsRef.current    = [];
-      cardsDiscovered.current   = false;
-      switchRetriesRef.current  = 0;
-      isCaptureInFlight.current = false;
+      cardOptionsRef.current   = [];
+      cardIndexRef.current     = 0;
+      syncedCardsRef.current   = [];
+      cardsDiscovered.current  = false;
+      switchRetriesRef.current = 0;
       setCurrentCard(null);
       setCurrentUrl('');
       setSyncing(false);
@@ -215,9 +209,7 @@ export default function SyncWebView({ visible, bank, onClose, onSuccess }) {
   };
 
   const handleSyncPress = () => {
-    if (isCaptureInFlight.current) return;
-    isCaptureInFlight.current = true;
-    webViewRef.current?.injectJavaScript(buildDelayedCaptureJs(config.gridSelector, 0));
+    webViewRef.current?.injectJavaScript(buildCaptureJs(config.gridSelector));
   };
 
   const handleMessage = async (event) => {
@@ -249,31 +241,26 @@ export default function SyncWebView({ visible, bank, onClose, onSuccess }) {
           return;
         }
 
-        switchRetriesRef.current  = 0;
-        isCaptureInFlight.current = true; // lock before queuing capture
+        // Switch confirmed (or max retries) — show Sync button for next card
+        switchRetriesRef.current = 0;
         setSwitching(false);
         setCurrentCard(actualLabel || expectedLabel || null);
-        webViewRef.current?.injectJavaScript(buildDelayedCaptureJs(config.gridSelector, POST_SWITCH_DELAY_MS));
+        // No auto-capture — user taps Sync button when ready
         return;
       }
 
       if (data.type === 'CARD_SWITCH_ERROR') {
         setSwitching(false);
-        isCaptureInFlight.current = false;
         Alert.alert('Card Switch Failed', data.message);
         return;
       }
 
       if (data.type === 'ERROR') {
-        isCaptureInFlight.current = false;
         Alert.alert('Capture Error', data.message);
         return;
       }
 
       if (data.type !== 'CAPTURE_HTML') return;
-
-      // Drop duplicate captures — only process if we initiated one
-      if (!isCaptureInFlight.current) return;
 
       setSyncing(true);
 
@@ -295,9 +282,6 @@ export default function SyncWebView({ visible, bank, onClose, onSuccess }) {
       const result = await response.json();
       if (!response.ok) throw new Error(result.error || 'Sync failed');
 
-      // Release the lock only after API call completes
-      isCaptureInFlight.current = false;
-
       syncedCardsRef.current = [
         ...syncedCardsRef.current,
         { cardName: fullCardName || 'Unknown Card', count: result.synced ?? 0 },
@@ -309,6 +293,7 @@ export default function SyncWebView({ visible, bank, onClose, onSuccess }) {
       setSyncing(false);
 
       if (totalCards > 1 && nextIndex < totalCards) {
+        // Auto-switch to next card, then wait for user to tap Sync
         cardIndexRef.current = nextIndex;
         setCardIndexUi(nextIndex);
         setSwitching(true);
@@ -320,7 +305,6 @@ export default function SyncWebView({ visible, bank, onClose, onSuccess }) {
         onSuccess(total, syncedCardsRef.current);
       }
     } catch (err) {
-      isCaptureInFlight.current = false;
       setSyncing(false);
       setSwitching(false);
       Alert.alert('Sync Failed', err.message);
@@ -371,7 +355,7 @@ export default function SyncWebView({ visible, bank, onClose, onSuccess }) {
               <>
                 <Text style={s.hint} numberOfLines={2}>
                   {switching
-                    ? `⏳ Switching to card ${cardIndexUi + 1} of ${totalCards}... (auto-syncing after)`
+                    ? `⏳ Switching to card ${cardIndexUi + 1} of ${totalCards}...`
                     : currentCard
                       ? `💳 ${currentCard}${cardCount > 1 ? ` · Card ${cardIndexUi + 1} of ${totalCards}` : ''}`
                       : 'Select a card above, then tap Sync.'}
