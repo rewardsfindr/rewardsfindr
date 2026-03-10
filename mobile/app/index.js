@@ -73,13 +73,6 @@ export default function HomeScreen() {
     }
   };
 
-  // Called after all cards synced: totalSynced (int), cardResults ([{ cardName, count }])
-  const handleSyncSuccess = (totalSynced, cardResults) => {
-    // Modal stays open and shows Done button — no alert needed here.
-    // This callback is fired so parent knows sync is complete.
-    // The modal itself handles the Done / Go Back UI.
-  };
-
   const isSearching = searching || localSearching;
 
   return (
@@ -173,12 +166,11 @@ export default function HomeScreen() {
 
       </ScrollView>
 
-      {/* WebView Sync Modal */}
       <SyncWebView
         visible={syncBank !== null}
         bank={syncBank}
         onClose={() => setSyncBank(null)}
-        onSuccess={handleSyncSuccess}
+        onSuccess={() => {}}
       />
     </SafeAreaView>
   );
