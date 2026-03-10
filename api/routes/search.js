@@ -1,6 +1,14 @@
 // ─────────────────────────────────────────────
 // SEARCH ROUTES
-// Returns personalized offers synced by the user (auth required).
+// GET /api/search?q=storename
+//
+// Queries /users/{userId}/offers scoped to the user.
+// Uses merchantNameLower for exact match + startsWith prefix.
+// Filters out expired offers (expiresAt < now).
+//
+// Required Firestore composite index:
+//   Collection: users/{userId}/offers
+//   Fields: merchantNameLower ASC, expiresAt ASC
 // ─────────────────────────────────────────────
 import express from 'express';
 import { db, auth } from '../config/firebase.js';
@@ -11,8 +19,6 @@ const router = express.Router();
 /**
  * GET /api/search?q=storename
  * Authorization: Bearer <firebaseIdToken>  (required)
- *
- * Returns the user's personalized synced offers matching the query.
  */
 router.get('/', async (req, res) => {
   try {
@@ -21,46 +27,39 @@ router.get('/', async (req, res) => {
     if (!query || !query.trim()) {
       return res.status(400).json({
         error: 'Search query is required',
-        example: '/api/search?q=turo',
+        example: '/api/search?q=starbucks',
       });
     }
-
-    console.log(`🔍 Search query: "${query}"`);
 
     const authHeader = req.headers.authorization;
     if (!authHeader?.startsWith('Bearer ')) {
       return res.status(401).json({ error: 'Authorization required' });
     }
 
-    let personalizedOffers = [];
+    const idToken = authHeader.split('Bearer ')[1];
+    const decodedToken = await auth.verifyIdToken(idToken);
+    const userId = decodedToken.uid;
 
-    try {
-      const idToken = authHeader.split('Bearer ')[1];
-      const decodedToken = await auth.verifyIdToken(idToken);
-      const userId = decodedToken.uid;
+    const queryLower = query.toLowerCase().trim();
+    const now = new Date();
 
-      const normalizedQuery = normalizeMerchant(query);
+    // Scoped to this user only — no cross-user reads
+    const userOffersRef = db.collection('users').doc(userId).collection('offers');
 
-      const offersSnapshot = await db.collection('offers')
-        .where('userId', '==', userId)
-        .get();
+    // Firestore prefix search: merchantNameLower >= queryLower AND < queryLower + '\uf8ff'
+    // Also filters out expired offers in the same query
+    const snapshot = await userOffersRef
+      .where('merchantNameLower', '>=', queryLower)
+      .where('merchantNameLower', '<=', queryLower + '\uf8ff')
+      .where('expiresAt', '>', now)
+      .get();
 
-      const allOffers = offersSnapshot.docs.map(doc => doc.data());
+    const personalizedOffers = snapshot.docs.map(doc => doc.data());
 
-      personalizedOffers = allOffers.filter(offer => {
-        if (offer.normalizedMerchant === normalizedQuery) return true;
-        const merchantLower = (offer.merchantName || '').toLowerCase().trim();
-        return merchantLower.startsWith(normalizedQuery);
-      });
-
-      if (personalizedOffers.length > 0) {
-        console.log(`✅ Found ${personalizedOffers.length} offers for "${query}" (user: ${userId})`);
-      } else {
-        console.log(`ℹ️  No offers found for "${query}" (user: ${userId})`);
-      }
-    } catch (err) {
-      console.warn('[Search] Error:', err.message);
-      return res.status(401).json({ error: 'Invalid or expired token' });
+    if (personalizedOffers.length > 0) {
+      console.log(`✅ Found ${personalizedOffers.length} offers for "${query}" (user: ${userId})`);
+    } else {
+      console.log(`ℹ️  No offers found for "${query}" (user: ${userId})`);
     }
 
     if (personalizedOffers.length === 0) {

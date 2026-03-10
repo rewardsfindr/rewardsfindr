@@ -2,6 +2,8 @@
 // OFFERS ROUTES
 // POST /api/offers/sync  — sync pre-parsed offers from Chrome extension
 // POST /api/offers/parse — parse raw HTML from mobile WebView + sync
+//
+// Storage: /users/{userId}/offers/{offerId}  (subcollection per user)
 // ─────────────────────────────────────────────
 import express from 'express';
 import { db, auth } from '../config/firebase.js';
@@ -11,6 +13,9 @@ import { parseChaseOffers } from '../lib/parsers/chase.js';
 import { parseAmexOffers } from '../lib/parsers/amex.js';
 
 const router = express.Router();
+
+// Default offer TTL: 90 days
+const OFFER_TTL_MS = 90 * 24 * 60 * 60 * 1000;
 
 async function verifyToken(req, res) {
   const authHeader = req.headers.authorization;
@@ -29,41 +34,49 @@ async function verifyToken(req, res) {
 }
 
 // ─────────────────────────────────────────────
-// Shared helper: write an offers array to Firestore
+// Write offers to /users/{userId}/offers/{offerId}
 // ─────────────────────────────────────────────
 async function writeOffersToDB(offers, { userId, bank, cardName }) {
   const batch = db.batch();
   let syncedCount = 0;
   let skippedCount = 0;
 
+  const userOffersRef = db.collection('users').doc(userId).collection('offers');
+
   for (const offer of offers) {
     try {
+      const expiryDate = offer.expiryDate
+        || new Date(Date.now() + OFFER_TTL_MS).toISOString();
+
       const offerId = generateOfferId(
         offer.merchantName,
         offer.cashbackAmount,
-        offer.expiryDate || new Date(Date.now() + 90 * 24 * 60 * 60 * 1000).toISOString(),
+        expiryDate,
         cardName
       );
 
       const offerDoc = {
         offerId,
         userId,
-        merchantName: offer.merchantName,
+        merchantName:       offer.merchantName,
+        merchantNameLower:  offer.merchantName.toLowerCase().trim(),
         normalizedMerchant: normalizeMerchant(offer.merchantName),
-        offerDescription: offer.offerDescription || '',
-        cashbackAmount: offer.cashbackAmount || 0,
-        cashbackType: offer.cashbackType || 'percent',
-        minimumSpend: offer.minimumSpend || 0,
-        category: offer.category || 'other',
-        expiryDate: offer.expiryDate || null,
-        isActivated: offer.isActivated ?? false,
-        offerDeepLink: offer.offerDeepLink || null,
+        offerDescription:   offer.offerDescription || '',
+        cashbackAmount:     offer.cashbackAmount || 0,
+        cashbackType:       offer.cashbackType || 'percent',
+        minimumSpend:       offer.minimumSpend || 0,
+        category:           offer.category || 'other',
+        expiryDate,
+        // expiresAt is a Firestore Timestamp for TTL-based cleanup
+        expiresAt:          new Date(expiryDate),
+        isActivated:        offer.isActivated ?? false,
+        offerDeepLink:      offer.offerDeepLink || null,
         bank,
         cardName,
-        syncedAt: FieldValue.serverTimestamp(),
+        syncedAt:           FieldValue.serverTimestamp(),
       };
 
-      batch.set(db.collection('offers').doc(offerId), offerDoc, { merge: true });
+      batch.set(userOffersRef.doc(offerId), offerDoc, { merge: true });
       syncedCount++;
     } catch (error) {
       console.error(`❌ Error processing offer "${offer.merchantName}":`, error);
