@@ -11,13 +11,12 @@ import { getAuthInstance } from '../lib/firebaseClient.js';
 import { useSearch } from '../hooks/useSearch.js';
 import { searchStore } from '../lib/api.js';
 
-import HomeHeader    from '../components/HomeHeader.js';
-import SearchBar     from '../components/SearchBar.js';
+import HomeHeader     from '../components/HomeHeader.js';
+import SearchBar      from '../components/SearchBar.js';
 import ExampleRewards from '../components/ExampleRewards.js';
-import BankGrid      from '../components/BankGrid.js';
-import FAQSection    from '../components/FAQSection.js';
-import SyncWebView   from '../components/SyncWebView.js';
-import { colors }    from '../shared/theme.js';
+import BankGrid       from '../components/BankGrid.js';
+import SyncWebView    from '../components/SyncWebView.js';
+import { colors }     from '../shared/theme.js';
 
 export default function HomeScreen() {
   const router = useRouter();
@@ -90,7 +89,6 @@ export default function HomeScreen() {
         />
         <ExampleRewards />
         <BankGrid syncedBanks={syncedBanks} onSyncPress={setSyncBank} />
-        <FAQSection />
       </ScrollView>
 
       <SyncWebView
@@ -105,5 +103,5 @@ export default function HomeScreen() {
 
 const s = StyleSheet.create({
   safe:   { flex: 1, backgroundColor: colors.bgHeader },
-  scroll: { backgroundColor: colors.bgPage, paddingBottom: 0 },
+  scroll: { backgroundColor: colors.bgPage, paddingBottom: 40 },
 });
