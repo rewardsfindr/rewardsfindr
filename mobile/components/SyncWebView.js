@@ -31,12 +31,10 @@ const BANK_CONFIG = {
   },
   amex: {
     url: 'https://www.americanexpress.com/en-us/benefits/offers/',
-    offersUrl: null,
     label: 'Amex Offers',
     color: '#007ac1',
     offersPaths: ['/benefits/offers'],
     loginPaths: ['/login', '/sign-in', '/identity', '/auth', '/challenge'],
-    gridSelector: null,
   },
 };
 
@@ -224,7 +222,6 @@ export default function SyncWebView({ visible, bank, onClose, onSuccess }) {
     try {
       const data = JSON.parse(event.nativeEvent.data);
 
-      // ── Card detection ──────────────────────────────────────
       if (data.type === 'CARDS_DETECTED') {
         if (!cardsDiscovered.current && data.cards && data.cards.length > 0) {
           cardOptionsRef.current  = data.cards;
@@ -238,7 +235,6 @@ export default function SyncWebView({ visible, bank, onClose, onSuccess }) {
         return;
       }
 
-      // ── Card switched → wait for grid then capture ──────────
       if (data.type === 'CARD_SWITCHED') {
         const expectedIndex = data.expectedIndex;
         const expectedLabel = cardOptionsRef.current.find(c => c.index === expectedIndex)?.label || '';
