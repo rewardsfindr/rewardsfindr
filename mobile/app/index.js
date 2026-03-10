@@ -27,13 +27,26 @@ export default function HomeScreen() {
 
   const user = getAuthInstance().currentUser;
 
-  const handleAvatarPress = async () => {
+  const handleAvatarPress = () => {
     if (!user) return;
-    try {
-      await signOut(getAuthInstance());
-    } catch {
-      Alert.alert('Error', 'Could not sign out. Please try again.');
-    }
+    Alert.alert(
+      'Sign Out',
+      'Are you sure you want to sign out?',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Sign Out',
+          style: 'destructive',
+          onPress: async () => {
+            try {
+              await signOut(getAuthInstance());
+            } catch {
+              Alert.alert('Error', 'Could not sign out. Please try again.');
+            }
+          },
+        },
+      ]
+    );
   };
 
   const navigateToResults = (data, query) => {
@@ -76,7 +89,6 @@ export default function HomeScreen() {
   const isSearching = searching || localSearching;
 
   return (
-    // Plain View — HomeHeader handles its own top inset via useSafeAreaInsets
     <View style={s.safe}>
       <HomeHeader user={user} onAvatarPress={handleAvatarPress} />
       <ScrollView contentContainerStyle={s.scroll} keyboardShouldPersistTaps="handled">
