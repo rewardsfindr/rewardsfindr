@@ -1,20 +1,20 @@
 // ─────────────────────────────────────────────
 // LOGIN SCREEN
-// Google Sign-In via @react-native-google-signin + Firebase credential
-// On success, _layout.js auth listener redirects to home automatically
+// Google Sign-In is wired up.
+// Apple and Email buttons are UI placeholders for future implementation.
+// On Google success, _layout.js auth listener redirects to home.
 // ─────────────────────────────────────────────
 import React, { useState } from 'react';
 import {
   View, Text, TouchableOpacity, ActivityIndicator,
-  StyleSheet, SafeAreaView,
+  StyleSheet, SafeAreaView, Platform,
 } from 'react-native';
 import { Stack } from 'expo-router';
 import { GoogleSignin, statusCodes } from '@react-native-google-signin/google-signin';
 import { GoogleAuthProvider, signInWithCredential } from 'firebase/auth';
 import { getAuthInstance } from '../lib/firebaseClient.js';
+import { colors, radii, shadow } from '../shared/theme.js';
 
-// Android client is auto-resolved from google-services.json via the native plugin.
-// webClientId must be the Web OAuth client (type 3), NOT the Android client.
 GoogleSignin.configure({
   webClientId: process.env.EXPO_PUBLIC_GOOGLE_CLIENT_ID,
   scopes: ['profile', 'email'],
@@ -25,31 +25,19 @@ export default function LoginScreen() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
 
-  const handleSignIn = async () => {
+  const handleGoogleSignIn = async () => {
     setError(null);
     setLoading(true);
     try {
-      // Ensure Google Play Services is available and up to date
       await GoogleSignin.hasPlayServices({ showPlayServicesUpdateDialog: true });
-
-      // Trigger the native Google account picker
       const userInfo = await GoogleSignin.signIn();
-
-      // Support both library v12 (userInfo.data.idToken) and v13+ (userInfo.idToken)
       const idToken = userInfo.data?.idToken ?? userInfo.idToken;
-
-      if (!idToken) {
-        throw new Error('No idToken returned from Google Sign-In');
-      }
-
-      // Exchange Google idToken for a Firebase credential and sign in
+      if (!idToken) throw new Error('No idToken returned from Google Sign-In');
       const auth = getAuthInstance();
       const credential = GoogleAuthProvider.credential(idToken);
       await signInWithCredential(auth, credential);
-      // _layout.js onAuthStateChanged fires and redirects to '/' automatically
     } catch (err) {
       if (err.code === statusCodes.SIGN_IN_CANCELLED) {
-        // User dismissed the picker — not an error, just reset loading
         setLoading(false);
       } else if (err.code === statusCodes.IN_PROGRESS) {
         setError('Sign-in already in progress.');
@@ -64,11 +52,18 @@ export default function LoginScreen() {
     }
   };
 
+  // TODO: wire up Apple Sign-In (expo-apple-authentication)
+  const handleAppleSignIn = () => {};
+
+  // TODO: wire up Email/Password auth
+  const handleEmailSignIn = () => {};
+
   return (
     <SafeAreaView style={s.safe}>
       <Stack.Screen options={{ headerShown: false }} />
       <View style={s.container}>
 
+        {/* Logo */}
         <View style={s.iconWrap}>
           <Text style={s.icon}>💳</Text>
         </View>
@@ -82,21 +77,45 @@ export default function LoginScreen() {
           </View>
         )}
 
+        {/* Google */}
         <TouchableOpacity
-          style={[s.googleBtn, loading && s.disabled]}
-          onPress={handleSignIn}
+          style={[s.authBtn, loading && s.disabled]}
+          onPress={handleGoogleSignIn}
           disabled={loading}
         >
           {loading ? (
-            <ActivityIndicator color="#1f2937" />
+            <ActivityIndicator color={colors.textPrimary} />
           ) : (
-            <Text style={s.googleBtnText}>🔑  Continue with Google</Text>
+            <>
+              <Text style={s.authBtnIcon}>G</Text>
+              <Text style={s.authBtnText}>Continue with Google</Text>
+            </>
           )}
         </TouchableOpacity>
 
-        <Text style={s.note}>
-          Sign in with the same Google account you use in the Chrome extension
-          to see your personalized card rewards.
+        {/* Apple — iOS only, placeholder */}
+        {Platform.OS === 'ios' && (
+          <TouchableOpacity style={[s.authBtn, s.appleBtn]} onPress={handleAppleSignIn}>
+            <Text style={[s.authBtnIcon, s.appleBtnText]}></Text>
+            <Text style={[s.authBtnText, s.appleBtnText]}>Continue with Apple</Text>
+          </TouchableOpacity>
+        )}
+
+        {/* Divider */}
+        <View style={s.divider}>
+          <View style={s.dividerLine} />
+          <Text style={s.dividerText}>or</Text>
+          <View style={s.dividerLine} />
+        </View>
+
+        {/* Email — placeholder */}
+        <TouchableOpacity style={[s.authBtn, s.emailBtn]} onPress={handleEmailSignIn}>
+          <Text style={s.authBtnIcon}>✉️</Text>
+          <Text style={[s.authBtnText, s.emailBtnText]}>Continue with Email</Text>
+        </TouchableOpacity>
+
+        <Text style={s.terms}>
+          By continuing, you agree to our Terms of Service and Privacy Policy.
         </Text>
 
       </View>
@@ -105,20 +124,35 @@ export default function LoginScreen() {
 }
 
 const s = StyleSheet.create({
-  safe:          { flex: 1, backgroundColor: '#eef2ff' },
+  safe:          { flex: 1, backgroundColor: colors.bgPage },
   container:     { flex: 1, alignItems: 'center', justifyContent: 'center', padding: 32 },
-  iconWrap:      { backgroundColor: '#4f46e5', borderRadius: 24, padding: 20, marginBottom: 24 },
+
+  iconWrap:      { backgroundColor: colors.primary, borderRadius: 24, padding: 20, marginBottom: 24 },
   icon:          { fontSize: 44 },
-  title:         { fontSize: 32, fontWeight: '900', color: '#4f46e5', marginBottom: 8 },
-  subtitle:      { fontSize: 16, color: '#6b7280', textAlign: 'center', lineHeight: 26, marginBottom: 36 },
-  errorBox:      { backgroundColor: '#fee2e2', borderRadius: 12, padding: 12,
+  title:         { fontSize: 32, fontWeight: '900', color: colors.primary, marginBottom: 8 },
+  subtitle:      { fontSize: 16, color: colors.textMuted, textAlign: 'center', lineHeight: 26, marginBottom: 36 },
+
+  errorBox:      { backgroundColor: colors.errorBg, borderRadius: radii.md, padding: 12,
                    marginBottom: 16, width: '100%' },
-  errorText:     { color: '#b91c1c', fontSize: 14, textAlign: 'center' },
-  googleBtn:     { alignItems: 'center', justifyContent: 'center', backgroundColor: 'white',
-                   borderRadius: 14, paddingVertical: 16, paddingHorizontal: 32,
-                   width: '100%', marginBottom: 24,
-                   shadowColor: '#000', shadowOpacity: 0.1, shadowRadius: 8, elevation: 4 },
+  errorText:     { color: colors.error, fontSize: 14, textAlign: 'center' },
+
+  authBtn:       { flexDirection: 'row', alignItems: 'center', justifyContent: 'center',
+                   backgroundColor: colors.bgCard, borderRadius: radii.md,
+                   paddingVertical: 15, paddingHorizontal: 24,
+                   width: '100%', marginBottom: 12, ...shadow.sm },
+  appleBtn:      { backgroundColor: '#000' },
+  emailBtn:      { backgroundColor: colors.bgCard, borderWidth: 1, borderColor: colors.border },
   disabled:      { opacity: 0.5 },
-  googleBtnText: { fontSize: 16, fontWeight: '600', color: '#1f2937' },
-  note:          { fontSize: 13, color: '#9ca3af', textAlign: 'center', lineHeight: 22 },
+
+  authBtnIcon:   { fontSize: 18, marginRight: 10, fontWeight: '700' },
+  authBtnText:   { fontSize: 16, fontWeight: '600', color: colors.textPrimary },
+  appleBtnText:  { color: '#fff' },
+  emailBtnText:  { color: colors.textSecondary },
+
+  divider:       { flexDirection: 'row', alignItems: 'center', width: '100%', marginVertical: 4, marginBottom: 12 },
+  dividerLine:   { flex: 1, height: 1, backgroundColor: colors.border },
+  dividerText:   { marginHorizontal: 12, fontSize: 13, color: colors.textMuted },
+
+  terms:         { fontSize: 11, color: colors.textMuted, textAlign: 'center',
+                   lineHeight: 18, marginTop: 20, paddingHorizontal: 8 },
 });

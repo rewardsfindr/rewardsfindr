@@ -16,6 +16,7 @@ import {
 } from 'react-native';
 import { WebView } from 'react-native-webview';
 import { getAuthInstance } from '../lib/firebaseClient.js';
+import { colors, radii } from '../shared/theme.js';
 
 const CHASE_OFFERS_URL = 'https://secure.chase.com/web/auth/dashboard#/dashboard/merchantOffers/offer-hub';
 
@@ -409,17 +410,17 @@ export default function SyncWebView({ visible, bank, onClose, onSuccess }) {
 const s = StyleSheet.create({
   overlay:         { flex: 1, justifyContent: 'flex-end', backgroundColor: 'rgba(0,0,0,0.45)' },
   sheet:           { height: '87%', backgroundColor: 'white', borderTopLeftRadius: 20, borderTopRightRadius: 20, overflow: 'hidden' },
-  handle:          { width: 40, height: 4, backgroundColor: '#d1d5db', borderRadius: 99, alignSelf: 'center', marginTop: 10, marginBottom: 4 },
-  header:          { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 16, paddingVertical: 12, borderBottomWidth: 1, borderBottomColor: '#e5e7eb' },
-  closeBtn:        { width: 36, height: 36, borderRadius: 18, backgroundColor: '#f3f4f6', alignItems: 'center', justifyContent: 'center' },
-  closeBtnText:    { fontSize: 14, color: '#374151', fontWeight: '600' },
-  headerTitle:     { fontSize: 16, fontWeight: '700', color: '#1f2937' },
+  handle:          { width: 40, height: 4, backgroundColor: colors.border, borderRadius: radii.full, alignSelf: 'center', marginTop: 10, marginBottom: 4 },
+  header:          { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 16, paddingVertical: 12, borderBottomWidth: 1, borderBottomColor: colors.border },
+  closeBtn:        { width: 36, height: 36, borderRadius: 18, backgroundColor: colors.disabledBg, alignItems: 'center', justifyContent: 'center' },
+  closeBtnText:    { fontSize: 14, color: colors.textSecondary, fontWeight: '600' },
+  headerTitle:     { fontSize: 16, fontWeight: '700', color: colors.textPrimary },
   webview:         { flex: 1 },
-  footer:          { padding: 16, borderTopWidth: 1, borderTopColor: '#e5e7eb', backgroundColor: 'white' },
-  hint:            { fontSize: 12, color: '#6b7280', textAlign: 'center', marginBottom: 10 },
-  syncBtn:         { backgroundColor: '#4f46e5', borderRadius: 12, paddingVertical: 14, alignItems: 'center' },
-  goToOffersBtn:   { backgroundColor: '#059669', borderRadius: 12, paddingVertical: 14, alignItems: 'center' },
-  doneBtn:         { backgroundColor: '#16a34a', borderRadius: 12, paddingVertical: 14, alignItems: 'center' },
+  footer:          { padding: 16, borderTopWidth: 1, borderTopColor: colors.border, backgroundColor: 'white' },
+  hint:            { fontSize: 12, color: colors.textMuted, textAlign: 'center', marginBottom: 10 },
+  syncBtn:         { backgroundColor: colors.primary, borderRadius: radii.md, paddingVertical: 14, alignItems: 'center' },
+  goToOffersBtn:   { backgroundColor: colors.primaryLight, borderRadius: radii.md, paddingVertical: 14, alignItems: 'center' },
+  doneBtn:         { backgroundColor: colors.primaryLight, borderRadius: radii.md, paddingVertical: 14, alignItems: 'center' },
   syncBtnDisabled: { opacity: 0.6 },
   syncBtnText:     { color: 'white', fontSize: 16, fontWeight: '700' },
 });

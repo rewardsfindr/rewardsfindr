@@ -24,12 +24,13 @@ export const BANKS = {
   CAPITAL_ONE: 'capital_one',
   DISCOVER:    'discover',
   WELLS_FARGO: 'wells_fargo',
+  BILT:        'bilt',
 };
 
 export const CARDS = [
   {
     id: 'amex_blue_cash_preferred',
-    cardName: 'Blue Cash Preferred\u00ae',
+    cardName: 'Blue Cash Preferred®',
     issuer: 'American Express',
     bank: BANKS.AMEX,
     annualFee: 95,
@@ -47,7 +48,7 @@ export const CARDS = [
   },
   {
     id: 'chase_sapphire_preferred',
-    cardName: 'Sapphire Preferred\u00ae',
+    cardName: 'Sapphire Preferred®',
     issuer: 'Chase',
     bank: BANKS.CHASE,
     annualFee: 95,
@@ -65,7 +66,7 @@ export const CARDS = [
   },
   {
     id: 'citi_custom_cash',
-    cardName: 'Custom Cash\u00ae',
+    cardName: 'Custom Cash®',
     issuer: 'Citi',
     bank: BANKS.CITI,
     annualFee: 0,
@@ -83,7 +84,7 @@ export const CARDS = [
   },
   {
     id: 'chase_freedom_flex',
-    cardName: 'Freedom Flex\u00ae',
+    cardName: 'Freedom Flex®',
     issuer: 'Chase',
     bank: BANKS.CHASE,
     annualFee: 0,
@@ -153,12 +154,41 @@ export const STORES = [
 ];
 
 export const POPULAR_STORES = [
-  'Whole Foods',
-  'Target',
-  'Costco',
-  'Starbucks',
-  'Chipotle',
-  'Shell',
-  'CVS',
-  'United Airlines',
+  'Starbucks', 'Amazon', 'Whole Foods', 'Uber', 'Target', 'Costco', "McDonald's", 'Netflix',
+];
+
+export const EXAMPLE_REWARDS = [
+  { reward: '6% Back',   store: 'Whole Foods', cardName: 'Blue Cash Preferred', last4: '6612', bank: 'AMEX' },
+  { reward: '4% Back',   store: 'Chipotle',    cardName: 'Savor Cash Rewards',  last4: '2278', bank: 'CAPITAL ONE' },
+  { reward: '3x Points', store: 'Starbucks',   cardName: 'Sapphire Preferred',  last4: '4821', bank: 'CHASE' },
+];
+
+export const BANK_LIST = [
+  { id: 'chase',       label: 'Chase',           supported: true  },
+  { id: 'amex',        label: 'Amex',            supported: true  },
+  { id: 'capital_one', label: 'Capital One',     supported: false },
+  { id: 'citi',        label: 'Citi',            supported: false },
+  { id: 'discover',    label: 'Discover',        supported: false },
+  { id: 'wells_fargo', label: 'Wells Fargo',     supported: false },
+  { id: 'bofa',        label: 'Bank of America', supported: false },
+  { id: 'bilt',        label: 'Bilt',            supported: false },
+];
+
+export const FAQ_ITEMS = [
+  {
+    q: 'Is RewardsFindr free?',
+    a: 'Yes! Completely free with no ads or hidden fees.',
+  },
+  {
+    q: 'Which banks are supported?',
+    a: 'Currently Chase and American Express. Capital One, Citi, Discover, Wells Fargo, Bank of America, and Bilt are coming soon.',
+  },
+  {
+    q: 'Is my data secure?',
+    a: 'Absolutely. The app only reads offer data from bank websites — never your account numbers, transactions, or passwords.',
+  },
+  {
+    q: 'How does it compare to credit card apps?',
+    a: 'Bank apps show offers for ONE card at a time. RewardsFindr shows ALL your offers across ALL cards when you search for a store.',
+  },
 ];

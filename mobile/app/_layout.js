@@ -2,6 +2,7 @@
 // ROOT LAYOUT
 // Auth gate: redirects to /login if not signed in
 // Listens to Firebase auth state changes and routes accordingly
+// Index screen uses its own HomeHeader — Expo header hidden.
 // ─────────────────────────────────────────────
 import { useEffect, useState } from 'react';
 import { View, ActivityIndicator } from 'react-native';
@@ -9,13 +10,13 @@ import { Stack, useRouter, useSegments } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import { onAuthStateChanged } from 'firebase/auth';
 import { getAuthInstance } from '../lib/firebaseClient.js';
+import { colors } from '../shared/theme.js';
 
 export default function RootLayout() {
-  const [user, setUser] = useState(undefined); // undefined = still loading
+  const [user, setUser] = useState(undefined);
   const router = useRouter();
   const segments = useSegments();
 
-  // Listen to Firebase auth state
   useEffect(() => {
     const auth = getAuthInstance();
     const unsubscribe = onAuthStateChanged(auth, (firebaseUser) => {
@@ -24,12 +25,9 @@ export default function RootLayout() {
     return unsubscribe;
   }, []);
 
-  // Redirect based on auth state
   useEffect(() => {
-    if (user === undefined) return; // Still loading, wait
-
+    if (user === undefined) return;
     const onLoginScreen = segments[0] === 'login';
-
     if (!user && !onLoginScreen) {
       router.replace('/login');
     } else if (user && onLoginScreen) {
@@ -37,11 +35,10 @@ export default function RootLayout() {
     }
   }, [user, segments]);
 
-  // Show spinner while Firebase checks persisted auth
   if (user === undefined) {
     return (
-      <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: '#eef2ff' }}>
-        <ActivityIndicator size="large" color="#4f46e5" />
+      <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: colors.bgPage }}>
+        <ActivityIndicator size="large" color={colors.primary} />
       </View>
     );
   }
@@ -51,12 +48,17 @@ export default function RootLayout() {
       <StatusBar style="light" />
       <Stack
         screenOptions={{
-          headerStyle: { backgroundColor: '#4f46e5' },
-          headerTintColor: '#fff',
+          headerStyle: { backgroundColor: colors.bgHeader },
+          headerTintColor: colors.textOnDark,
           headerTitleStyle: { fontWeight: 'bold' },
-          contentStyle: { backgroundColor: '#eef2ff' },
+          contentStyle: { backgroundColor: colors.bgPage },
         }}
-      />
+      >
+        {/* Home screen uses its own custom header */}
+        <Stack.Screen name="index" options={{ headerShown: false }} />
+        <Stack.Screen name="results" options={{ title: 'Results' }} />
+        <Stack.Screen name="login" options={{ headerShown: false }} />
+      </Stack>
     </>
   );
 }
