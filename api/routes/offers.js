@@ -2,15 +2,28 @@
 // OFFERS ROUTES
 // POST /api/offers/sync  — sync pre-parsed offers from Chrome extension
 // POST /api/offers/parse — parse raw HTML from mobile WebView + sync
+//
+// Storage: /users/{userId}/offers/{offerId}  (subcollection per user)
+// Cleanup: expired offers are purged on every sync (no Firestore TTL needed)
 // ─────────────────────────────────────────────
 import express from 'express';
 import { db, auth } from '../config/firebase.js';
-import { FieldValue } from 'firebase-admin/firestore';
+import { FieldValue, Timestamp } from 'firebase-admin/firestore';
 import { generateOfferId, normalizeMerchant } from '../../shared/offerUtils.js';
 import { parseChaseOffers } from '../lib/parsers/chase.js';
 import { parseAmexOffers } from '../lib/parsers/amex.js';
 
 const router = express.Router();
+
+const OFFER_TTL_MS = 90 * 24 * 60 * 60 * 1000;
+
+// Safely convert an ISO date string to a Firestore Timestamp.
+// Falls back to now + 90 days if the value is missing or unparseable.
+function toSafeTimestamp(value) {
+  const ms = value ? new Date(value).getTime() : NaN;
+  const safeMs = Number.isFinite(ms) ? ms : Date.now() + OFFER_TTL_MS;
+  return Timestamp.fromMillis(safeMs);
+}
 
 async function verifyToken(req, res) {
   const authHeader = req.headers.authorization;
@@ -29,41 +42,72 @@ async function verifyToken(req, res) {
 }
 
 // ─────────────────────────────────────────────
-// Shared helper: write an offers array to Firestore
+// Delete expired offers for a user+bank on sync.
+// Runs before writing new offers — free-tier safe,
+// only reads/deletes within the user's own subcollection.
+// ─────────────────────────────────────────────
+async function purgeExpiredOffers(userOffersRef, bank) {
+  const now = Timestamp.now();
+  const expired = await userOffersRef
+    .where('bank', '==', bank)
+    .where('expiresAt', '<', now)
+    .get();
+
+  if (expired.empty) return 0;
+
+  const batch = db.batch();
+  expired.docs.forEach(doc => batch.delete(doc.ref));
+  await batch.commit();
+  console.log(`🗑️  Purged ${expired.size} expired ${bank} offers`);
+  return expired.size;
+}
+
+// ─────────────────────────────────────────────
+// Write offers to /users/{userId}/offers/{offerId}
 // ─────────────────────────────────────────────
 async function writeOffersToDB(offers, { userId, bank, cardName }) {
+  const userOffersRef = db.collection('users').doc(userId).collection('offers');
+
+  // Purge stale offers for this bank before writing fresh ones
+  await purgeExpiredOffers(userOffersRef, bank);
+
   const batch = db.batch();
   let syncedCount = 0;
   let skippedCount = 0;
 
   for (const offer of offers) {
     try {
+      const expiryDate = offer.expiryDate
+        || new Date(Date.now() + OFFER_TTL_MS).toISOString();
+
       const offerId = generateOfferId(
         offer.merchantName,
         offer.cashbackAmount,
-        offer.expiryDate || new Date(Date.now() + 90 * 24 * 60 * 60 * 1000).toISOString(),
+        expiryDate,
         cardName
       );
 
       const offerDoc = {
         offerId,
         userId,
-        merchantName: offer.merchantName,
+        merchantName:       offer.merchantName,
+        merchantNameLower:  offer.merchantName.toLowerCase().trim(),
         normalizedMerchant: normalizeMerchant(offer.merchantName),
-        offerDescription: offer.offerDescription || '',
-        cashbackAmount: offer.cashbackAmount || 0,
-        cashbackType: offer.cashbackType || 'percent',
-        minimumSpend: offer.minimumSpend || 0,
-        category: offer.category || 'other',
-        expiryDate: offer.expiryDate || null,
-        isActivated: offer.isActivated ?? false,
-        offerDeepLink: offer.offerDeepLink || null,
+        offerDescription:   offer.offerDescription || '',
+        cashbackAmount:     offer.cashbackAmount || 0,
+        cashbackType:       offer.cashbackType || 'percent',
+        minimumSpend:       offer.minimumSpend || 0,
+        category:           offer.category || 'other',
+        expiryDate,
+        expiresAt:          toSafeTimestamp(offer.expiryDate),
+        isActivated:        offer.isActivated ?? false,
+        offerDeepLink:      offer.offerDeepLink || null,
         bank,
         cardName,
-        syncedAt: FieldValue.serverTimestamp(),
+        syncedAt:           FieldValue.serverTimestamp(),
       };
 
-      batch.set(db.collection('offers').doc(offerId), offerDoc, { merge: true });
+      batch.set(userOffersRef.doc(offerId), offerDoc, { merge: true });
       syncedCount++;
     } catch (error) {
       console.error(`❌ Error processing offer "${offer.merchantName}":`, error);
