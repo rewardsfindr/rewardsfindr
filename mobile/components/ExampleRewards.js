@@ -10,7 +10,7 @@ import { EXAMPLE_REWARDS } from '../shared/constants.js';
 
 const BANK_COLORS = {
   AMEX:          '#007ac1',
-  'Capital One': '#c0392b',
+  'CAPITAL ONE': '#c0392b',
   CHASE:         '#1a3a6b',
 };
 

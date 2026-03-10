@@ -158,9 +158,9 @@ export const POPULAR_STORES = [
 ];
 
 export const EXAMPLE_REWARDS = [
-  { reward: '6% Back',    store: 'Whole Foods', cardName: 'Blue Cash Preferred', last4: '6612', bank: 'AMEX' },
-  { reward: '4% Back',    store: 'Chipotle',    cardName: 'Savor Cash Rewards',  last4: '2278', bank: 'Capital One' },
-  { reward: '3x Points',  store: 'Starbucks',   cardName: 'Sapphire Preferred',  last4: '4821', bank: 'CHASE' },
+  { reward: '6% Back',   store: 'Whole Foods', cardName: 'Blue Cash Preferred', last4: '6612', bank: 'AMEX' },
+  { reward: '4% Back',   store: 'Chipotle',    cardName: 'Savor Cash Rewards',  last4: '2278', bank: 'CAPITAL ONE' },
+  { reward: '3x Points', store: 'Starbucks',   cardName: 'Sapphire Preferred',  last4: '4821', bank: 'CHASE' },
 ];
 
 export const BANK_LIST = [
