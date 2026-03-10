@@ -162,14 +162,15 @@ export const EXAMPLE_REWARDS = [
   { reward: '3x Points', store: 'Starbucks', cardName: 'Sapphire Preferred',  last4: '4821', bank: 'CHASE' },
 ];
 
+// logoUrl: Clearbit Logo API — free, no API key needed
 export const BANK_LIST = [
-  { id: 'chase',       label: 'Chase',          color: '#1a3a6b', emoji: '🔷', supported: true },
-  { id: 'amex',        label: 'Amex',           color: '#007ac1', emoji: '🟡', supported: true },
-  { id: 'capital_one', label: 'Capital One',    color: '#c0392b', emoji: '🔴', supported: false },
-  { id: 'citi',        label: 'Citi',           color: '#1a6bb5', emoji: '🔵', supported: false },
-  { id: 'discover',    label: 'Discover',       color: '#e67e22', emoji: '🟠', supported: false },
-  { id: 'wells_fargo', label: 'Wells Fargo',    color: '#c0392b', emoji: '🏦', supported: false },
-  { id: 'bofa',        label: 'Bank of America',color: '#c0392b', emoji: '🏛️', supported: false },
+  { id: 'chase',       label: 'Chase',           logoUrl: 'https://logo.clearbit.com/chase.com',            supported: true },
+  { id: 'amex',        label: 'Amex',            logoUrl: 'https://logo.clearbit.com/americanexpress.com',  supported: true },
+  { id: 'capital_one', label: 'Capital One',     logoUrl: 'https://logo.clearbit.com/capitalone.com',       supported: false },
+  { id: 'citi',        label: 'Citi',            logoUrl: 'https://logo.clearbit.com/citi.com',             supported: false },
+  { id: 'discover',    label: 'Discover',        logoUrl: 'https://logo.clearbit.com/discover.com',         supported: false },
+  { id: 'wells_fargo', label: 'Wells Fargo',     logoUrl: 'https://logo.clearbit.com/wellsfargo.com',       supported: false },
+  { id: 'bofa',        label: 'Bank of America', logoUrl: 'https://logo.clearbit.com/bankofamerica.com',    supported: false },
 ];
 
 export const FAQ_ITEMS = [

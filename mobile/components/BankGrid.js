@@ -1,13 +1,32 @@
 // ─────────────────────────────────────────────
 // BANK GRID
 // Shows all supported and coming-soon banks.
-// Tapping a supported bank opens the sync modal.
-// Coming-soon banks show a disabled state.
+// Logos fetched from Clearbit Logo API (free, no key).
+// Falls back to initials if logo fails to load.
 // ─────────────────────────────────────────────
-import React from 'react';
-import { View, Text, TouchableOpacity, StyleSheet } from 'react-native';
+import React, { useState } from 'react';
+import { View, Text, Image, TouchableOpacity, StyleSheet } from 'react-native';
 import { colors, radii, shadow } from '../shared/theme.js';
 import { BANK_LIST } from '../shared/constants.js';
+
+function BankLogo({ logoUrl, label }) {
+  const [errored, setErrored] = useState(false);
+  if (errored) {
+    return (
+      <View style={s.logoFallback}>
+        <Text style={s.logoFallbackText}>{label.slice(0, 2).toUpperCase()}</Text>
+      </View>
+    );
+  }
+  return (
+    <Image
+      source={{ uri: logoUrl }}
+      style={s.logo}
+      resizeMode="contain"
+      onError={() => setErrored(true)}
+    />
+  );
+}
 
 export default function BankGrid({ syncedBanks = {}, onSyncPress }) {
   return (
@@ -15,7 +34,7 @@ export default function BankGrid({ syncedBanks = {}, onSyncPress }) {
       <Text style={s.label}>SYNC YOUR BANKS</Text>
       <View style={s.grid}>
         {BANK_LIST.map((bank) => {
-          const synced = syncedBanks[bank.id];
+          const synced   = syncedBanks[bank.id];
           const disabled = !bank.supported;
           return (
             <TouchableOpacity
@@ -25,11 +44,15 @@ export default function BankGrid({ syncedBanks = {}, onSyncPress }) {
               disabled={disabled}
               activeOpacity={disabled ? 1 : 0.7}
             >
-              <View style={[s.iconWrap, { backgroundColor: disabled ? colors.disabledBg : bank.color }]}>
-                <Text style={s.emoji}>{bank.emoji}</Text>
-                {synced && <View style={s.checkDot}><Text style={s.checkText}>✓</Text></View>}
+              <View style={s.iconWrap}>
+                <BankLogo logoUrl={bank.logoUrl} label={bank.label} />
+                {synced && (
+                  <View style={s.checkDot}>
+                    <Text style={s.checkText}>✓</Text>
+                  </View>
+                )}
               </View>
-              <Text style={[s.bankName, disabled && s.bankNameDisabled]}>
+              <Text style={[s.bankName, disabled && s.bankNameDisabled]} numberOfLines={2}>
                 {bank.label}
               </Text>
               {synced
@@ -53,10 +76,15 @@ const s = StyleSheet.create({
   cell:            { width: '22%', alignItems: 'center', backgroundColor: colors.bgCard,
                      borderRadius: radii.lg, paddingVertical: 12, paddingHorizontal: 4,
                      ...shadow.sm },
-  cellDisabled:    { opacity: 0.55 },
-  iconWrap:        { width: 48, height: 48, borderRadius: radii.md,
-                     alignItems: 'center', justifyContent: 'center', marginBottom: 6 },
-  emoji:           { fontSize: 22 },
+  cellDisabled:    { opacity: 0.45 },
+  iconWrap:        { width: 48, height: 48, borderRadius: radii.md, backgroundColor: '#f9f9f9',
+                     alignItems: 'center', justifyContent: 'center',
+                     marginBottom: 6, overflow: 'hidden' },
+  logo:            { width: 40, height: 40 },
+  logoFallback:    { width: 40, height: 40, borderRadius: radii.md,
+                     backgroundColor: colors.disabledBg,
+                     alignItems: 'center', justifyContent: 'center' },
+  logoFallbackText:{ fontSize: 13, fontWeight: '800', color: colors.textSecondary },
   checkDot:        { position: 'absolute', bottom: -2, right: -2,
                      width: 16, height: 16, borderRadius: 8,
                      backgroundColor: colors.primaryLight,
