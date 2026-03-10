@@ -9,9 +9,9 @@ import { colors, radii, shadow } from '../shared/theme.js';
 import { EXAMPLE_REWARDS } from '../shared/constants.js';
 
 const BANK_COLORS = {
-  AMEX:  '#007ac1',
-  'C-1': '#c0392b',
-  CHASE: '#1a3a6b',
+  AMEX:          '#007ac1',
+  'Capital One': '#c0392b',
+  CHASE:         '#1a3a6b',
 };
 
 export default function ExampleRewards() {
