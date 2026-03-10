@@ -1,34 +1,13 @@
 // ─────────────────────────────────────────────
 // BANK GRID
 // Shows all supported and coming-soon banks.
-// Logos via Google Favicon API (reliable in Expo Go).
-// Falls back to coloured initials if logo fails.
+// Uses local BankLogoIcon — no remote URLs.
 // ─────────────────────────────────────────────
-import React, { useState } from 'react';
-import { View, Text, Image, TouchableOpacity, StyleSheet } from 'react-native';
+import React from 'react';
+import { View, Text, TouchableOpacity, StyleSheet } from 'react-native';
 import { colors, radii, shadow } from '../shared/theme.js';
 import { BANK_LIST } from '../shared/constants.js';
-
-function BankLogo({ bank }) {
-  const [errored, setErrored] = useState(false);
-
-  if (errored) {
-    return (
-      <View style={[s.logoFallback, { backgroundColor: bank.fallbackColor }]}>
-        <Text style={s.logoFallbackText}>{bank.label.slice(0, 2).toUpperCase()}</Text>
-      </View>
-    );
-  }
-
-  return (
-    <Image
-      source={{ uri: bank.logoUrl }}
-      style={s.logo}
-      resizeMode="contain"
-      onError={() => setErrored(true)}
-    />
-  );
-}
+import BankLogoIcon from './BankLogoIcon.js';
 
 export default function BankGrid({ syncedBanks = {}, onSyncPress }) {
   return (
@@ -47,7 +26,7 @@ export default function BankGrid({ syncedBanks = {}, onSyncPress }) {
               activeOpacity={disabled ? 1 : 0.7}
             >
               <View style={s.iconWrap}>
-                <BankLogo bank={bank} />
+                <BankLogoIcon bankId={bank.id} size={44} />
                 {synced && (
                   <View style={s.checkDot}>
                     <Text style={s.checkText}>✓</Text>
@@ -79,13 +58,7 @@ const s = StyleSheet.create({
                      borderRadius: radii.lg, paddingVertical: 12, paddingHorizontal: 4,
                      ...shadow.sm },
   cellDisabled:    { opacity: 0.45 },
-  iconWrap:        { width: 48, height: 48, borderRadius: radii.md, backgroundColor: '#f9f9f9',
-                     alignItems: 'center', justifyContent: 'center',
-                     marginBottom: 6, overflow: 'hidden' },
-  logo:            { width: 44, height: 44 },
-  logoFallback:    { width: 44, height: 44, borderRadius: radii.md,
-                     alignItems: 'center', justifyContent: 'center' },
-  logoFallbackText:{ fontSize: 14, fontWeight: '800', color: '#fff' },
+  iconWrap:        { marginBottom: 6, position: 'relative' },
   checkDot:        { position: 'absolute', bottom: -2, right: -2,
                      width: 16, height: 16, borderRadius: 8,
                      backgroundColor: colors.primaryLight,
