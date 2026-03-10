@@ -9,6 +9,7 @@ import {
   StyleSheet, SafeAreaView, Linking,
 } from 'react-native';
 import { useLocalSearchParams, useRouter, Stack } from 'expo-router';
+import { colors, radii, shadow } from '../shared/theme.js';
 
 const formatCashback = (amount, type) => {
   if (!amount) return 'Offer available';
@@ -76,7 +77,6 @@ export default function ResultsScreen() {
                 {myOffers.map((offer, idx) => (
                   <View key={`${offer.offerId || idx}`} style={s.offerCard}>
 
-                    {/* Top row: merchant + cashback */}
                     <View style={s.offerCardTop}>
                       <View style={s.offerCardInfo}>
                         <Text style={s.merchantName}>{offer.merchantName}</Text>
@@ -87,7 +87,6 @@ export default function ResultsScreen() {
                         <Text style={s.rewardAmount}>
                           {formatCashback(offer.cashbackAmount, offer.cashbackType)}
                         </Text>
-                        {/* Activation status badge */}
                         <View style={[s.statusBadge, offer.isActivated ? s.statusActive : s.statusInactive]}>
                           <Text style={s.statusText}>
                             {offer.isActivated ? '✓ Activated' : '⚡ Not activated'}
@@ -96,7 +95,6 @@ export default function ResultsScreen() {
                       </View>
                     </View>
 
-                    {/* Details row */}
                     <View style={s.detailsRow}>
                       {offer.minimumSpend > 0 && (
                         <View style={s.pill}>
@@ -115,7 +113,6 @@ export default function ResultsScreen() {
                       )}
                     </View>
 
-                    {/* Activate button — only shown if not activated */}
                     {!offer.isActivated && offer.bank === 'chase' && (
                       <TouchableOpacity
                         style={s.activateBtn}
@@ -150,58 +147,56 @@ export default function ResultsScreen() {
 }
 
 const s = StyleSheet.create({
-  safe:            { flex: 1, backgroundColor: '#eef2ff' },
+  safe:            { flex: 1, backgroundColor: colors.bgPage },
   scroll:          { padding: 16, paddingBottom: 40 },
 
-  notFoundBox:     { backgroundColor: 'white', borderRadius: 20, padding: 24,
-                     alignItems: 'center', marginBottom: 16,
-                     shadowColor: '#000', shadowOpacity: 0.06, shadowRadius: 10, elevation: 3 },
+  notFoundBox:     { backgroundColor: colors.bgCard, borderRadius: radii.xl, padding: 24,
+                     alignItems: 'center', marginBottom: 16, ...shadow.sm },
   notFoundIcon:    { fontSize: 40, marginBottom: 8 },
-  notFoundTitle:   { fontSize: 18, fontWeight: '700', color: '#1f2937', marginBottom: 4 },
-  notFoundSub:     { fontSize: 14, color: '#6b7280', textAlign: 'center' },
+  notFoundTitle:   { fontSize: 18, fontWeight: '700', color: colors.textPrimary, marginBottom: 4 },
+  notFoundSub:     { fontSize: 14, color: colors.textMuted, textAlign: 'center' },
 
-  resultsHeader:   { backgroundColor: '#4f46e5', borderRadius: 20, padding: 20, marginBottom: 16 },
-  resultsTitle:    { fontSize: 20, fontWeight: '800', color: 'white' },
+  resultsHeader:   { backgroundColor: colors.bgHeader, borderRadius: radii.xl, padding: 20, marginBottom: 16 },
+  resultsTitle:    { fontSize: 20, fontWeight: '800', color: colors.textOnDark },
 
   section:         { marginBottom: 16 },
   sectionHeader:   { flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 10 },
-  sectionTitle:    { fontSize: 15, fontWeight: '700', color: '#1f2937', marginBottom: 10 },
-  sectionBadge:    { backgroundColor: '#d1fae5', borderRadius: 999, paddingHorizontal: 10, paddingVertical: 3 },
-  sectionBadgeText:{ fontSize: 11, color: '#065f46', fontWeight: '600' },
+  sectionTitle:    { fontSize: 15, fontWeight: '700', color: colors.textPrimary, marginBottom: 10 },
+  sectionBadge:    { backgroundColor: colors.successBg, borderRadius: radii.full, paddingHorizontal: 10, paddingVertical: 3 },
+  sectionBadgeText:{ fontSize: 11, color: colors.successText, fontWeight: '600' },
 
-  offerCard:       { backgroundColor: 'white', borderRadius: 16, padding: 16,
-                     marginBottom: 10, borderWidth: 2, borderColor: '#6ee7b7',
-                     shadowColor: '#000', shadowOpacity: 0.05, shadowRadius: 8, elevation: 2 },
+  offerCard:       { backgroundColor: colors.bgCard, borderRadius: radii.lg, padding: 16,
+                     marginBottom: 10, borderWidth: 2, borderColor: colors.primaryLight,
+                     ...shadow.sm },
   offerCardTop:    { flexDirection: 'row', justifyContent: 'space-between',
                      alignItems: 'flex-start', marginBottom: 10 },
   offerCardInfo:   { flex: 1 },
-  merchantName:    { fontSize: 16, fontWeight: '800', color: '#1f2937' },
-  cardName:        { fontSize: 13, fontWeight: '600', color: '#4f46e5', marginTop: 2 },
-  bankName:        { fontSize: 11, color: '#9ca3af', marginTop: 1 },
+  merchantName:    { fontSize: 16, fontWeight: '800', color: colors.textPrimary },
+  cardName:        { fontSize: 13, fontWeight: '600', color: colors.primaryLight, marginTop: 2 },
+  bankName:        { fontSize: 11, color: colors.textMuted, marginTop: 1 },
   rewardBadge:     { alignItems: 'flex-end', marginLeft: 12 },
-  rewardAmount:    { fontSize: 18, fontWeight: '800', color: '#059669' },
+  rewardAmount:    { fontSize: 18, fontWeight: '800', color: colors.accent },
 
-  statusBadge:     { borderRadius: 999, paddingHorizontal: 8, paddingVertical: 3, marginTop: 4 },
-  statusActive:    { backgroundColor: '#d1fae5' },
+  statusBadge:     { borderRadius: radii.full, paddingHorizontal: 8, paddingVertical: 3, marginTop: 4 },
+  statusActive:    { backgroundColor: colors.successBg },
   statusInactive:  { backgroundColor: '#fef3c7' },
-  statusText:      { fontSize: 10, fontWeight: '700', color: '#374151' },
+  statusText:      { fontSize: 10, fontWeight: '700', color: colors.textSecondary },
 
   detailsRow:      { flexDirection: 'row', flexWrap: 'wrap', gap: 6 },
-  pill:            { backgroundColor: '#f3f4f6', borderRadius: 999,
+  pill:            { backgroundColor: colors.disabledBg, borderRadius: radii.full,
                      paddingHorizontal: 10, paddingVertical: 4 },
-  pillText:        { fontSize: 12, color: '#374151', fontWeight: '500' },
+  pillText:        { fontSize: 12, color: colors.textSecondary, fontWeight: '500' },
 
-  activateBtn:     { marginTop: 12, backgroundColor: '#fffbeb', borderRadius: 10,
+  activateBtn:     { marginTop: 12, backgroundColor: '#fffbeb', borderRadius: radii.sm,
                      paddingVertical: 10, paddingHorizontal: 14,
                      borderWidth: 1, borderColor: '#fcd34d', alignItems: 'center' },
   activateBtnText: { fontSize: 13, fontWeight: '700', color: '#92400e' },
 
-  emptyBox:        { backgroundColor: 'white', borderRadius: 16, padding: 20,
+  emptyBox:        { backgroundColor: colors.bgCard, borderRadius: radii.lg, padding: 20,
                      alignItems: 'center', marginBottom: 16 },
-  emptyText:       { fontSize: 14, color: '#6b7280', textAlign: 'center', lineHeight: 22 },
+  emptyText:       { fontSize: 14, color: colors.textMuted, textAlign: 'center', lineHeight: 22 },
 
-  backBtn:         { backgroundColor: 'white', borderRadius: 14, padding: 14,
-                     alignItems: 'center', marginTop: 8,
-                     shadowColor: '#000', shadowOpacity: 0.06, shadowRadius: 8, elevation: 2 },
-  backBtnText:     { color: '#4f46e5', fontWeight: '600', fontSize: 15 },
+  backBtn:         { backgroundColor: colors.bgCard, borderRadius: radii.md, padding: 14,
+                     alignItems: 'center', marginTop: 8, ...shadow.sm },
+  backBtnText:     { color: colors.primaryLight, fontWeight: '600', fontSize: 15 },
 });
