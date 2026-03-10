@@ -7,15 +7,22 @@
 // ─────────────────────────────────────────────
 import express from 'express';
 import { db, auth } from '../config/firebase.js';
-import { FieldValue } from 'firebase-admin/firestore';
+import { FieldValue, Timestamp } from 'firebase-admin/firestore';
 import { generateOfferId, normalizeMerchant } from '../../shared/offerUtils.js';
 import { parseChaseOffers } from '../lib/parsers/chase.js';
 import { parseAmexOffers } from '../lib/parsers/amex.js';
 
 const router = express.Router();
 
-// Default offer TTL: 90 days
 const OFFER_TTL_MS = 90 * 24 * 60 * 60 * 1000;
+
+// Safely convert an ISO date string or ms number to a Firestore Timestamp.
+// Falls back to now + 90 days if the value is missing or unparseable.
+function toSafeTimestamp(value) {
+  const ms = value ? new Date(value).getTime() : NaN;
+  const safeMs = Number.isFinite(ms) ? ms : Date.now() + OFFER_TTL_MS;
+  return Timestamp.fromMillis(safeMs);
+}
 
 async function verifyToken(req, res) {
   const authHeader = req.headers.authorization;
@@ -67,8 +74,7 @@ async function writeOffersToDB(offers, { userId, bank, cardName }) {
         minimumSpend:       offer.minimumSpend || 0,
         category:           offer.category || 'other',
         expiryDate,
-        // expiresAt is a Firestore Timestamp for TTL-based cleanup
-        expiresAt:          new Date(expiryDate),
+        expiresAt:          toSafeTimestamp(offer.expiryDate),
         isActivated:        offer.isActivated ?? false,
         offerDeepLink:      offer.offerDeepLink || null,
         bank,
