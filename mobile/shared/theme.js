@@ -1,26 +1,27 @@
 // ─────────────────────────────────────────────
 // THEME — design tokens for the app
 // All colors, radii, and shadows live here.
+// Brand palette based on US dollar bill green.
 // ─────────────────────────────────────────────
 
 export const colors = {
   // Backgrounds
-  bgPage:        '#e8ede4',
+  bgPage:        '#f0f7ee',  // very light dollar-green tint
   bgCard:        '#ffffff',
-  bgHeader:      '#2d4a2d',
-  bgFooter:      '#2d4a2d',
+  bgHeader:      '#1a3a1a',  // deep dollar bill dark green
+  bgFooter:      '#1a3a1a',
 
-  // Brand
-  primary:       '#2d4a2d',
-  primaryLight:  '#4a7c4a',
-  accent:        '#5a8a5a',
+  // Brand — dollar bill green palette
+  primary:       '#1a3a1a',  // dark header green
+  primaryLight:  '#85bb65',  // dollar bill green (main accent)
+  accent:        '#6aaa45',  // slightly deeper accent
 
   // Text
   textPrimary:   '#1a1a1a',
   textSecondary: '#4b5563',
   textMuted:     '#6b7280',
   textOnDark:    '#ffffff',
-  textOnDarkSub: '#a8c5a8',
+  textOnDarkSub: '#b8d4a8',
 
   // Banks
   chase:         '#1a3a6b',
@@ -36,7 +37,7 @@ export const colors = {
 
   // Borders
   border:        '#e5e7eb',
-  borderFocus:   '#2d4a2d',
+  borderFocus:   '#85bb65',
 };
 
 export const radii = {
