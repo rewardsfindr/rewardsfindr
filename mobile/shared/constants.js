@@ -30,7 +30,7 @@ export const BANKS = {
 export const CARDS = [
   {
     id: 'amex_blue_cash_preferred',
-    cardName: 'Blue Cash Preferred\u00ae',
+    cardName: 'Blue Cash Preferred®',
     issuer: 'American Express',
     bank: BANKS.AMEX,
     annualFee: 95,
@@ -48,7 +48,7 @@ export const CARDS = [
   },
   {
     id: 'chase_sapphire_preferred',
-    cardName: 'Sapphire Preferred\u00ae',
+    cardName: 'Sapphire Preferred®',
     issuer: 'Chase',
     bank: BANKS.CHASE,
     annualFee: 95,
@@ -66,7 +66,7 @@ export const CARDS = [
   },
   {
     id: 'citi_custom_cash',
-    cardName: 'Custom Cash\u00ae',
+    cardName: 'Custom Cash®',
     issuer: 'Citi',
     bank: BANKS.CITI,
     annualFee: 0,
@@ -84,7 +84,7 @@ export const CARDS = [
   },
   {
     id: 'chase_freedom_flex',
-    cardName: 'Freedom Flex\u00ae',
+    cardName: 'Freedom Flex®',
     issuer: 'Chase',
     bank: BANKS.CHASE,
     annualFee: 0,
@@ -158,9 +158,9 @@ export const POPULAR_STORES = [
 ];
 
 export const EXAMPLE_REWARDS = [
-  { reward: '6% Back', store: 'Whole Foods', cardName: 'Blue Cash Preferred', last4: '6612', bank: 'AMEX' },
-  { reward: '4% Back', store: 'Chipotle',    cardName: 'Savor Cash Rewards',  last4: '2278', bank: 'C-1' },
-  { reward: '3x Points', store: 'Starbucks', cardName: 'Sapphire Preferred',  last4: '4821', bank: 'CHASE' },
+  { reward: '6% Back',    store: 'Whole Foods', cardName: 'Blue Cash Preferred', last4: '6612', bank: 'AMEX' },
+  { reward: '4% Back',    store: 'Chipotle',    cardName: 'Savor Cash Rewards',  last4: '2278', bank: 'Capital One' },
+  { reward: '3x Points',  store: 'Starbucks',   cardName: 'Sapphire Preferred',  last4: '4821', bank: 'CHASE' },
 ];
 
 export const BANK_LIST = [
