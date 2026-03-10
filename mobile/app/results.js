@@ -9,6 +9,7 @@ import {
   StyleSheet, SafeAreaView, Linking,
 } from 'react-native';
 import { useLocalSearchParams, useRouter, Stack } from 'expo-router';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { colors, radii, shadow } from '../shared/theme.js';
 
 const CHASE_OFFERS_URL = 'https://secure.chase.com/web/auth/dashboard#/dashboard/merchantOffers/offer-hub';
@@ -52,23 +53,24 @@ const bankLabel = (bank) => {
   return map[bank] || bank.toUpperCase();
 };
 
-// Max reward across all offers, used to compute progress bar width
 const maxReward = (offers) =>
   Math.max(...offers.map(o => parseFloat(o.cashbackAmount) || 0), 1);
 
 export default function ResultsScreen() {
   const router = useRouter();
+  const insets = useSafeAreaInsets();
   const { storeName, offers, notFound } = useLocalSearchParams();
 
   const myOffers = offers ? JSON.parse(offers) : [];
-  // Sort descending by cashbackAmount
   const sorted = [...myOffers].sort(
     (a, b) => (parseFloat(b.cashbackAmount) || 0) - (parseFloat(a.cashbackAmount) || 0)
   );
   const best = sorted[0];
-  const rest = sorted.slice(1);
   const hasOffers = sorted.length > 0;
   const maxPct = maxReward(sorted);
+
+  // Use the merchant name from offers if available, fallback to search term
+  const displayName = (hasOffers && best?.merchantName) ? best.merchantName : (storeName || notFound);
 
   const handleActivate = (offer) => {
     const url = offer.offerDeepLink || CHASE_OFFERS_URL;
@@ -78,17 +80,21 @@ export default function ResultsScreen() {
   return (
     <SafeAreaView style={s.safe}>
       <Stack.Screen options={{ headerShown: false }} />
-      <ScrollView contentContainerStyle={s.scroll} showsVerticalScrollIndicator={false}>
-
-        {/* Back button + header */}
+      <ScrollView
+        contentContainerStyle={[s.scroll, { paddingTop: insets.top + 12 }]}
+        showsVerticalScrollIndicator={false}
+      >
+        {/* Back button */}
         <TouchableOpacity style={s.backRow} onPress={() => router.back()}>
           <Text style={s.backArrow}>←</Text>
           <Text style={s.backLabel}>Back</Text>
         </TouchableOpacity>
 
-        <Text style={s.storeTitle}>{notFound || storeName}</Text>
+        <Text style={s.storeTitle}>{displayName}</Text>
         <Text style={s.storeSub}>
-          {notFound ? 'No offers found — try syncing your cards' : 'Best cards ranked by rewards'}
+          {notFound
+            ? 'No offers found — try syncing your cards'
+            : 'Best cards ranked by rewards'}
         </Text>
 
         {!hasOffers && (
@@ -101,7 +107,7 @@ export default function ResultsScreen() {
 
         {hasOffers && (
           <>
-            {/* ── HERO: Best Choice ── */}
+            {/* Hero: Best Choice */}
             <TouchableOpacity
               style={s.heroCard}
               onPress={() => handleActivate(best)}
@@ -129,7 +135,7 @@ export default function ResultsScreen() {
               </View>
             </TouchableOpacity>
 
-            {/* ── ALL YOUR CARDS ── */}
+            {/* All Your Cards */}
             <Text style={s.allCardsLabel}>ALL YOUR CARDS</Text>
 
             {sorted.map((offer, idx) => {
@@ -167,7 +173,6 @@ export default function ResultsScreen() {
                       <Text style={s.rankRewardLabel}>{formatRewardLabel(offer.cashbackAmount, offer.cashbackType)}</Text>
                     </View>
                   </View>
-                  {/* Progress bar */}
                   <View style={s.barTrack}>
                     <View style={[s.barFill, { width: barWidth }]} />
                   </View>
@@ -186,10 +191,10 @@ const s = StyleSheet.create({
   safe:             { flex: 1, backgroundColor: colors.bgPage },
   scroll:           { padding: 16, paddingBottom: 48 },
 
-  // Back + header
   backRow:          { flexDirection: 'row', alignItems: 'center', marginBottom: 16 },
   backArrow:        { fontSize: 18, color: colors.textPrimary, marginRight: 6 },
   backLabel:        { fontSize: 15, color: colors.textPrimary, fontWeight: '600' },
+
   storeTitle:       { fontSize: 28, fontWeight: '900', color: colors.textPrimary, marginBottom: 2 },
   storeSub:         { fontSize: 13, color: colors.textMuted, marginBottom: 20 },
 
@@ -197,7 +202,6 @@ const s = StyleSheet.create({
                       alignItems: 'center', ...shadow.sm },
   emptyText:        { fontSize: 14, color: colors.textMuted, textAlign: 'center', lineHeight: 22 },
 
-  // Hero card
   heroCard:         { backgroundColor: colors.bgHeader, borderRadius: radii.xl,
                       padding: 20, marginBottom: 24, ...shadow.md },
   heroTop:          { flexDirection: 'row', justifyContent: 'space-between',
@@ -217,13 +221,11 @@ const s = StyleSheet.create({
                       alignItems: 'center', justifyContent: 'center' },
   heroActivateBtnText: { fontSize: 16, fontWeight: '900', color: colors.bgHeader },
 
-  // Bank pills
   bankPill:         { borderRadius: radii.sm, paddingHorizontal: 8, paddingVertical: 4 },
   bankPillText:     { fontSize: 10, fontWeight: '800', color: '#fff' },
   bankPillSm:       { borderRadius: 4, paddingHorizontal: 6, paddingVertical: 3 },
   bankPillSmText:   { fontSize: 9, fontWeight: '800', color: '#fff' },
 
-  // All cards section
   allCardsLabel:    { fontSize: 11, fontWeight: '800', color: colors.textMuted,
                       letterSpacing: 1, marginBottom: 12 },
   rankCard:         { backgroundColor: colors.bgCard, borderRadius: radii.lg,
@@ -244,7 +246,6 @@ const s = StyleSheet.create({
   rankRewardPct:    { fontSize: 22, fontWeight: '900', color: colors.textPrimary, lineHeight: 26 },
   rankRewardLabel:  { fontSize: 11, color: colors.textMuted },
 
-  // Progress bar
   barTrack:         { height: 4, backgroundColor: colors.border, borderRadius: radii.full, overflow: 'hidden' },
   barFill:          { height: 4, backgroundColor: colors.primaryLight, borderRadius: radii.full },
 });
