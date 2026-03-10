@@ -4,7 +4,7 @@
 // All UI split into focused components.
 // ─────────────────────────────────────────────
 import React, { useState } from 'react';
-import { ScrollView, Alert, StyleSheet, SafeAreaView } from 'react-native';
+import { ScrollView, Alert, StyleSheet, View } from 'react-native';
 import { useRouter } from 'expo-router';
 import { signOut } from 'firebase/auth';
 import { getAuthInstance } from '../lib/firebaseClient.js';
@@ -76,7 +76,8 @@ export default function HomeScreen() {
   const isSearching = searching || localSearching;
 
   return (
-    <SafeAreaView style={s.safe}>
+    // Plain View — HomeHeader handles its own top inset via useSafeAreaInsets
+    <View style={s.safe}>
       <HomeHeader user={user} onAvatarPress={handleAvatarPress} />
       <ScrollView contentContainerStyle={s.scroll} keyboardShouldPersistTaps="handled">
         <SearchBar
@@ -97,7 +98,7 @@ export default function HomeScreen() {
         onClose={() => setSyncBank(null)}
         onSuccess={(total, cardResults) => handleSyncSuccess(total, cardResults, syncBank)}
       />
-    </SafeAreaView>
+    </View>
   );
 }
 

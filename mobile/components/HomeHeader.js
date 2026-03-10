@@ -1,10 +1,12 @@
 // ─────────────────────────────────────────────
 // HOME HEADER
 // Dark green bar with logo + profile avatar.
+// Uses useSafeAreaInsets to sit below the status bar.
 // Avatar shows user initials if signed in.
 // ─────────────────────────────────────────────
 import React from 'react';
 import { View, Text, TouchableOpacity, StyleSheet } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { colors } from '../shared/theme.js';
 
 const getInitials = (user) => {
@@ -16,10 +18,11 @@ const getInitials = (user) => {
 };
 
 export default function HomeHeader({ user, onAvatarPress }) {
+  const insets = useSafeAreaInsets();
   const initials = getInitials(user);
 
   return (
-    <View style={s.header}>
+    <View style={[s.header, { paddingTop: insets.top + 10 }]}>
       <View style={s.logoRow}>
         <Text style={s.logoIcon}>💳</Text>
         <Text style={s.logoText}>RewardsFindr</Text>
@@ -35,7 +38,7 @@ export default function HomeHeader({ user, onAvatarPress }) {
 
 const s = StyleSheet.create({
   header:     { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
-                backgroundColor: colors.bgHeader, paddingHorizontal: 16, paddingVertical: 14 },
+                backgroundColor: colors.bgHeader, paddingHorizontal: 16, paddingBottom: 14 },
   logoRow:    { flexDirection: 'row', alignItems: 'center', gap: 8 },
   logoIcon:   { fontSize: 22 },
   logoText:   { fontSize: 20, fontWeight: '800', color: colors.textOnDark },
