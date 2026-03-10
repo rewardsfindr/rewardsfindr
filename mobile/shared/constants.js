@@ -24,6 +24,7 @@ export const BANKS = {
   CAPITAL_ONE: 'capital_one',
   DISCOVER:    'discover',
   WELLS_FARGO: 'wells_fargo',
+  BILT:        'bilt',
 };
 
 export const CARDS = [
@@ -162,44 +163,15 @@ export const EXAMPLE_REWARDS = [
   { reward: '3x Points', store: 'Starbucks', cardName: 'Sapphire Preferred',  last4: '4821', bank: 'CHASE' },
 ];
 
-// logoUrl: high-res logos via Wikipedia/official sources
-// fallbackColor: shown if logo fails to load
 export const BANK_LIST = [
-  {
-    id: 'chase', label: 'Chase', supported: true,
-    fallbackColor: '#1a3a6b',
-    logoUrl: 'https://upload.wikimedia.org/wikipedia/commons/thumb/b/b8/Chase_logo_2007.svg/440px-Chase_logo_2007.svg.png',
-  },
-  {
-    id: 'amex', label: 'Amex', supported: true,
-    fallbackColor: '#007ac1',
-    logoUrl: 'https://upload.wikimedia.org/wikipedia/commons/thumb/3/30/American_Express_logo.svg/440px-American_Express_logo.svg.png',
-  },
-  {
-    id: 'capital_one', label: 'Capital One', supported: false,
-    fallbackColor: '#c0392b',
-    logoUrl: 'https://upload.wikimedia.org/wikipedia/commons/thumb/9/98/Capital_One_logo.svg/440px-Capital_One_logo.svg.png',
-  },
-  {
-    id: 'citi', label: 'Citi', supported: false,
-    fallbackColor: '#1a6bb5',
-    logoUrl: 'https://upload.wikimedia.org/wikipedia/commons/thumb/1/1b/Citi.svg/440px-Citi.svg.png',
-  },
-  {
-    id: 'discover', label: 'Discover', supported: false,
-    fallbackColor: '#e67e22',
-    logoUrl: 'https://upload.wikimedia.org/wikipedia/commons/thumb/b/b5/Discover_Card_logo.svg/440px-Discover_Card_logo.svg.png',
-  },
-  {
-    id: 'wells_fargo', label: 'Wells Fargo', supported: false,
-    fallbackColor: '#c0392b',
-    logoUrl: 'https://upload.wikimedia.org/wikipedia/commons/thumb/b/b3/Wells_Fargo_Bank.svg/440px-Wells_Fargo_Bank.svg.png',
-  },
-  {
-    id: 'bofa', label: 'Bank of America', supported: false,
-    fallbackColor: '#c0392b',
-    logoUrl: 'https://upload.wikimedia.org/wikipedia/commons/thumb/a/af/Bank_of_America_logo.svg/440px-Bank_of_America_logo.svg.png',
-  },
+  { id: 'chase',       label: 'Chase',           supported: true  },
+  { id: 'amex',        label: 'Amex',            supported: true  },
+  { id: 'capital_one', label: 'Capital One',     supported: false },
+  { id: 'citi',        label: 'Citi',            supported: false },
+  { id: 'discover',    label: 'Discover',        supported: false },
+  { id: 'wells_fargo', label: 'Wells Fargo',     supported: false },
+  { id: 'bofa',        label: 'Bank of America', supported: false },
+  { id: 'bilt',        label: 'Bilt',            supported: false },
 ];
 
 export const FAQ_ITEMS = [
@@ -209,14 +181,14 @@ export const FAQ_ITEMS = [
   },
   {
     q: 'Which banks are supported?',
-    a: 'Currently Chase and American Express. Capital One, Citi, Discover, Wells Fargo, and Bank of America are coming soon.',
+    a: 'Currently Chase and American Express. Capital One, Citi, Discover, Wells Fargo, Bank of America, and Bilt are coming soon.',
   },
   {
     q: 'Is my data secure?',
-    a: 'Absolutely. The app only reads offer data from bank websites — never your account numbers, transactions, or passwords. All data is stored securely in your private Firebase account.',
+    a: 'Absolutely. The app only reads offer data from bank websites — never your account numbers, transactions, or passwords.',
   },
   {
     q: 'How does it compare to credit card apps?',
-    a: 'Bank apps show offers for ONE card at a time. RewardsFindr shows ALL your offers across ALL cards when you search for a store, so you always pick the best one.',
+    a: 'Bank apps show offers for ONE card at a time. RewardsFindr shows ALL your offers across ALL cards when you search for a store.',
   },
 ];
