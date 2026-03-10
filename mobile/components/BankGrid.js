@@ -1,26 +1,28 @@
 // ─────────────────────────────────────────────
 // BANK GRID
 // Shows all supported and coming-soon banks.
-// Logos fetched from Clearbit Logo API (free, no key).
-// Falls back to initials if logo fails to load.
+// Logos via Google Favicon API (reliable in Expo Go).
+// Falls back to coloured initials if logo fails.
 // ─────────────────────────────────────────────
 import React, { useState } from 'react';
 import { View, Text, Image, TouchableOpacity, StyleSheet } from 'react-native';
 import { colors, radii, shadow } from '../shared/theme.js';
 import { BANK_LIST } from '../shared/constants.js';
 
-function BankLogo({ logoUrl, label }) {
+function BankLogo({ bank }) {
   const [errored, setErrored] = useState(false);
+
   if (errored) {
     return (
-      <View style={s.logoFallback}>
-        <Text style={s.logoFallbackText}>{label.slice(0, 2).toUpperCase()}</Text>
+      <View style={[s.logoFallback, { backgroundColor: bank.fallbackColor }]}>
+        <Text style={s.logoFallbackText}>{bank.label.slice(0, 2).toUpperCase()}</Text>
       </View>
     );
   }
+
   return (
     <Image
-      source={{ uri: logoUrl }}
+      source={{ uri: bank.logoUrl }}
       style={s.logo}
       resizeMode="contain"
       onError={() => setErrored(true)}
@@ -45,7 +47,7 @@ export default function BankGrid({ syncedBanks = {}, onSyncPress }) {
               activeOpacity={disabled ? 1 : 0.7}
             >
               <View style={s.iconWrap}>
-                <BankLogo logoUrl={bank.logoUrl} label={bank.label} />
+                <BankLogo bank={bank} />
                 {synced && (
                   <View style={s.checkDot}>
                     <Text style={s.checkText}>✓</Text>
@@ -80,11 +82,10 @@ const s = StyleSheet.create({
   iconWrap:        { width: 48, height: 48, borderRadius: radii.md, backgroundColor: '#f9f9f9',
                      alignItems: 'center', justifyContent: 'center',
                      marginBottom: 6, overflow: 'hidden' },
-  logo:            { width: 40, height: 40 },
-  logoFallback:    { width: 40, height: 40, borderRadius: radii.md,
-                     backgroundColor: colors.disabledBg,
+  logo:            { width: 44, height: 44 },
+  logoFallback:    { width: 44, height: 44, borderRadius: radii.md,
                      alignItems: 'center', justifyContent: 'center' },
-  logoFallbackText:{ fontSize: 13, fontWeight: '800', color: colors.textSecondary },
+  logoFallbackText:{ fontSize: 14, fontWeight: '800', color: '#fff' },
   checkDot:        { position: 'absolute', bottom: -2, right: -2,
                      width: 16, height: 16, borderRadius: 8,
                      backgroundColor: colors.primaryLight,
