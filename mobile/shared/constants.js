@@ -153,12 +153,40 @@ export const STORES = [
 ];
 
 export const POPULAR_STORES = [
-  'Whole Foods',
-  'Target',
-  'Costco',
-  'Starbucks',
-  'Chipotle',
-  'Shell',
-  'CVS',
-  'United Airlines',
+  'Starbucks', 'Amazon', 'Whole Foods', 'Uber', 'Target', 'Costco', "McDonald's", 'Netflix',
+];
+
+export const EXAMPLE_REWARDS = [
+  { reward: '6% Back', store: 'Whole Foods', cardName: 'Blue Cash Preferred', last4: '6612', bank: 'AMEX' },
+  { reward: '4% Back', store: 'Chipotle',    cardName: 'Savor Cash Rewards',  last4: '2278', bank: 'C-1' },
+  { reward: '3x Points', store: 'Starbucks', cardName: 'Sapphire Preferred',  last4: '4821', bank: 'CHASE' },
+];
+
+export const BANK_LIST = [
+  { id: 'chase',       label: 'Chase',          color: '#1a3a6b', emoji: '🔷', supported: true },
+  { id: 'amex',        label: 'Amex',           color: '#007ac1', emoji: '🟡', supported: true },
+  { id: 'capital_one', label: 'Capital One',    color: '#c0392b', emoji: '🔴', supported: false },
+  { id: 'citi',        label: 'Citi',           color: '#1a6bb5', emoji: '🔵', supported: false },
+  { id: 'discover',    label: 'Discover',       color: '#e67e22', emoji: '🟠', supported: false },
+  { id: 'wells_fargo', label: 'Wells Fargo',    color: '#c0392b', emoji: '🏦', supported: false },
+  { id: 'bofa',        label: 'Bank of America',color: '#c0392b', emoji: '🏛️', supported: false },
+];
+
+export const FAQ_ITEMS = [
+  {
+    q: 'Is RewardsFindr free?',
+    a: 'Yes! Completely free with no ads or hidden fees.',
+  },
+  {
+    q: 'Which banks are supported?',
+    a: 'Currently Chase and American Express. Capital One, Citi, Discover, Wells Fargo, and Bank of America are coming soon.',
+  },
+  {
+    q: 'Is my data secure?',
+    a: 'Absolutely. The app only reads offer data from bank websites — never your account numbers, transactions, or passwords. All data is stored securely in your private Firebase account.',
+  },
+  {
+    q: 'How does it compare to credit card apps?',
+    a: 'Bank apps show offers for ONE card at a time. RewardsFindr shows ALL your offers across ALL cards when you search for a store, so you always pick the best one.',
+  },
 ];
