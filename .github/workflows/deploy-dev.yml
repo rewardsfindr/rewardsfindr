@@ -1,0 +1,35 @@
+name: Deploy to Cloud Run (Dev)
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - 'api/**'
+
+jobs:
+  deploy:
+    name: Deploy API to Dev
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Authenticate to Google Cloud
+        uses: google-github-actions/auth@v2
+        with:
+          credentials_json: ${{ secrets.GCP_SA_KEY_DEV }}
+
+      - name: Deploy to Cloud Run
+        uses: google-github-actions/deploy-cloudrun@v2
+        with:
+          service: rewardsfindr-api
+          region: us-central1
+          source: ./api
+          secrets: |
+            FIREBASE_PROJECT_ID=FIREBASE_PROJECT_ID:latest
+            FIREBASE_CLIENT_EMAIL=FIREBASE_CLIENT_EMAIL:latest
+            FIREBASE_PRIVATE_KEY=FIREBASE_PRIVATE_KEY:latest
+            NODE_ENV=NODE_ENV:latest
+            ALLOWED_ORIGINS=ALLOWED_ORIGINS:latest
