@@ -19,7 +19,6 @@ import BankGrid       from '../components/BankGrid.js';
 import SyncWebView    from '../components/SyncWebView.js';
 import { colors }     from '../shared/theme.js';
 
-// Keyed by userId so sync state persists across sign-out/sign-in for the same user
 const getSyncKey = (uid) => `rewardsfindr_synced_banks_${uid}`;
 
 export default function HomeScreen() {
@@ -31,7 +30,6 @@ export default function HomeScreen() {
 
   const user = getAuthInstance().currentUser;
 
-  // Load persisted sync state on mount (keyed by userId)
   useEffect(() => {
     if (!user?.uid) return;
     AsyncStorage.getItem(getSyncKey(user.uid))
@@ -39,7 +37,6 @@ export default function HomeScreen() {
       .catch(() => {});
   }, [user?.uid]);
 
-  // Persist sync state whenever it changes
   useEffect(() => {
     if (!user?.uid || Object.keys(syncedBanks).length === 0) return;
     AsyncStorage.setItem(getSyncKey(user.uid), JSON.stringify(syncedBanks)).catch(() => {});
@@ -58,7 +55,6 @@ export default function HomeScreen() {
           onPress: async () => {
             try {
               await signOut(getAuthInstance());
-              // Only clear in-memory state — AsyncStorage entry kept so it restores on next sign-in
               setSyncedBanks({});
             } catch {
               Alert.alert('Error', 'Could not sign out. Please try again.');
@@ -121,14 +117,21 @@ export default function HomeScreen() {
           error={error}
         />
         <ExampleRewards />
-        <BankGrid syncedBanks={syncedBanks} onSyncPress={setSyncBank} />
+        <BankGrid
+          syncedBanks={syncedBanks}
+          syncingBank={syncBank}
+          onSyncPress={setSyncBank}
+        />
       </ScrollView>
 
       <SyncWebView
         visible={syncBank !== null}
         bank={syncBank}
         onClose={() => setSyncBank(null)}
-        onSuccess={(total, cardResults) => handleSyncSuccess(total, cardResults, syncBank)}
+        onSuccess={(total, cardResults) => {
+          handleSyncSuccess(total, cardResults, syncBank);
+          setSyncBank(null);
+        }}
       />
     </View>
   );

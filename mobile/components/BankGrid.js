@@ -1,22 +1,23 @@
 // ─────────────────────────────────────────────
 // BANK GRID
 // Shows all supported and coming-soon banks.
-// Uses local BankLogoIcon — no remote URLs.
+// syncingBank: bankId currently being synced (disables that button)
 // ─────────────────────────────────────────────
 import React from 'react';
-import { View, Text, TouchableOpacity, StyleSheet } from 'react-native';
+import { View, Text, TouchableOpacity, ActivityIndicator, StyleSheet } from 'react-native';
 import { colors, radii, shadow } from '../shared/theme.js';
 import { BANK_LIST } from '../shared/constants.js';
 import BankLogoIcon from './BankLogoIcon.js';
 
-export default function BankGrid({ syncedBanks = {}, onSyncPress }) {
+export default function BankGrid({ syncedBanks = {}, syncingBank = null, onSyncPress }) {
   return (
     <View style={s.wrap}>
       <Text style={s.label}>SYNC YOUR BANKS</Text>
       <View style={s.grid}>
         {BANK_LIST.map((bank) => {
           const synced   = syncedBanks[bank.id];
-          const disabled = !bank.supported;
+          const syncing  = syncingBank === bank.id;
+          const disabled = !bank.supported || syncing;
           return (
             <TouchableOpacity
               key={bank.id}
@@ -27,7 +28,7 @@ export default function BankGrid({ syncedBanks = {}, onSyncPress }) {
             >
               <View style={s.iconWrap}>
                 <BankLogoIcon bankId={bank.id} size={44} />
-                {synced && (
+                {synced && !syncing && (
                   <View style={s.checkDot}>
                     <Text style={s.checkText}>✓</Text>
                   </View>
@@ -36,11 +37,13 @@ export default function BankGrid({ syncedBanks = {}, onSyncPress }) {
               <Text style={[s.bankName, disabled && s.bankNameDisabled]} numberOfLines={2}>
                 {bank.label}
               </Text>
-              {synced
-                ? <Text style={s.syncedLabel}>{synced} card{synced !== 1 ? 's' : ''}</Text>
-                : disabled
-                  ? <Text style={s.comingSoon}>Coming Soon</Text>
-                  : <Text style={s.addLabel}>+ Add</Text>}
+              {syncing
+                ? <ActivityIndicator size="small" color={colors.primaryLight} style={s.spinner} />
+                : synced
+                  ? <Text style={s.syncedLabel}>{synced} card{synced !== 1 ? 's' : ''}</Text>
+                  : !bank.supported
+                    ? <Text style={s.comingSoon}>Coming Soon</Text>
+                    : <Text style={s.addLabel}>+ Add</Text>}
             </TouchableOpacity>
           );
         })}
@@ -70,4 +73,5 @@ const s = StyleSheet.create({
   syncedLabel:     { fontSize: 10, color: colors.primaryLight, fontWeight: '600' },
   addLabel:        { fontSize: 10, color: colors.textMuted },
   comingSoon:      { fontSize: 9, color: colors.disabled, fontStyle: 'italic' },
+  spinner:         { marginTop: 2 },
 });
