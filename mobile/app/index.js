@@ -3,10 +3,11 @@
 // Layout + navigation logic. No inline styles.
 // All UI split into focused components.
 // ─────────────────────────────────────────────
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { ScrollView, Alert, StyleSheet, View } from 'react-native';
 import { useRouter } from 'expo-router';
 import { signOut } from 'firebase/auth';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { getAuthInstance } from '../lib/firebaseClient.js';
 import { useSearch } from '../hooks/useSearch.js';
 import { searchStore } from '../lib/api.js';
@@ -18,6 +19,9 @@ import BankGrid       from '../components/BankGrid.js';
 import SyncWebView    from '../components/SyncWebView.js';
 import { colors }     from '../shared/theme.js';
 
+// Keyed by userId so sync state persists across sign-out/sign-in for the same user
+const getSyncKey = (uid) => `rewardsfindr_synced_banks_${uid}`;
+
 export default function HomeScreen() {
   const router = useRouter();
   const { searchTerm, setSearchTerm, searching, error, clearSearch } = useSearch();
@@ -26,6 +30,20 @@ export default function HomeScreen() {
   const [syncedBanks, setSyncedBanks] = useState({});
 
   const user = getAuthInstance().currentUser;
+
+  // Load persisted sync state on mount (keyed by userId)
+  useEffect(() => {
+    if (!user?.uid) return;
+    AsyncStorage.getItem(getSyncKey(user.uid))
+      .then(val => { if (val) setSyncedBanks(JSON.parse(val)); })
+      .catch(() => {});
+  }, [user?.uid]);
+
+  // Persist sync state whenever it changes
+  useEffect(() => {
+    if (!user?.uid || Object.keys(syncedBanks).length === 0) return;
+    AsyncStorage.setItem(getSyncKey(user.uid), JSON.stringify(syncedBanks)).catch(() => {});
+  }, [syncedBanks]);
 
   const handleAvatarPress = () => {
     if (!user) return;
@@ -40,6 +58,8 @@ export default function HomeScreen() {
           onPress: async () => {
             try {
               await signOut(getAuthInstance());
+              // Only clear in-memory state — AsyncStorage entry kept so it restores on next sign-in
+              setSyncedBanks({});
             } catch {
               Alert.alert('Error', 'Could not sign out. Please try again.');
             }
