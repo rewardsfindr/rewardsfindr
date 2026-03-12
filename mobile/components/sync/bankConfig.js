@@ -29,14 +29,15 @@ export const BANK_CONFIG = {
   amex: {
     // Entry URL — redirects to login if not authenticated
     url: 'https://www.americanexpress.com/en-us/benefits/offers/',
-    // After login, Amex lands on global.americanexpress.com/offers
+    // After login Amex lands on global.americanexpress.com
     offersUrl: 'https://global.americanexpress.com/offers/eligible',
     label: 'Amex Offers',
     color: '#007ac1',
-    // Actual offers pages on global.americanexpress.com
-    offersPaths: ['/offers/enrolled', '/offers/eligible', '/offers'],
+    // IMPORTANT: must only match global.americanexpress.com/offers* NOT
+    // americanexpress.com/en-us/benefits/offers (marketing page)
+    offersPaths: ['global.americanexpress.com/offers'],
     loginPaths: ['/account/login', '/login', '/sign-in', '/identity', '/auth', '/challenge'],
-    // Amex renders all offer rows inside [data-testid="listViewContainer"]
+    // Real offer rows are direct DIV children of this container
     gridSelector: '[data-testid="listViewContainer"]',
     captureMaxBytes: 500000,
     useAmexCardSwitcher: true,
