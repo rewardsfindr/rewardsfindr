@@ -1,13 +1,10 @@
 // ─────────────────────────────────────────────────────────────────
 // SYNC WEBVIEW MODAL
-// Multi-card flow (1 tap):
-//   1. Detect credit cards on first load; start at active card position.
-//   2. User taps Sync once — arms captureArmed, captures card 1.
-//   3. After API call, auto-switches to next card.
-//   4. CARD_SWITCHED confirms label (retries up to 3x).
-//   5. On confirmed switch, arms captureArmed, waits POST_SWITCH_DELAY_MS
-//      for grid re-render, then auto-captures.
-//   6. CAPTURE_HTML only processed when captureArmed=true.
+// Footer states:
+//   1. Not on offers page  → "Go to Offers Page" button (fallback only)
+//   2. On offers page, idle → "Sync Offers" button
+//   3. Sync in progress    → no button, status text + spinner only
+//   4. All done            → auto-close, no button shown
 // ─────────────────────────────────────────────────────────────────
 import React, { useRef, useState, useEffect } from 'react';
 import {
@@ -166,11 +163,11 @@ export default function SyncWebView({ visible, bank, onClose, onSuccess }) {
 
   const [syncing, setSyncing]         = useState(false);
   const [switching, setSwitching]     = useState(false);
+  const [syncStarted, setSyncStarted] = useState(false); // true once user taps Sync
   const [currentCard, setCurrentCard] = useState(null);
   const [currentUrl, setCurrentUrl]   = useState('');
   const [cardCount, setCardCount]     = useState(0);
   const [cardIndexUi, setCardIndexUi] = useState(0);
-  const [allDone, setAllDone]         = useState(false);
 
   const config = BANK_CONFIG[bank] || BANK_CONFIG.chase;
 
@@ -188,9 +185,9 @@ export default function SyncWebView({ visible, bank, onClose, onSuccess }) {
       setCurrentUrl('');
       setSyncing(false);
       setSwitching(false);
+      setSyncStarted(false);
       setCardCount(0);
       setCardIndexUi(0);
-      setAllDone(false);
     }
   }, [visible]);
 
@@ -215,6 +212,7 @@ export default function SyncWebView({ visible, bank, onClose, onSuccess }) {
   };
 
   const handleSyncPress = () => {
+    setSyncStarted(true);
     captureArmed.current = true;
     webViewRef.current?.injectJavaScript(buildCaptureJs(config.gridSelector));
   };
@@ -319,9 +317,10 @@ export default function SyncWebView({ visible, bank, onClose, onSuccess }) {
         const domIndex = cardOptionsRef.current[nextPos].index;
         webViewRef.current?.injectJavaScript(buildSwitchCardJs(domIndex, SWITCH_TIMEOUT_MS));
       } else {
+        // All done — auto-close
         const total = syncedCardsRef.current.reduce((sum, c) => sum + c.count, 0);
-        setAllDone(true);
         onSuccess(total, syncedCardsRef.current);
+        onClose();
       }
     } catch (err) {
       captureArmed.current = false;
@@ -334,17 +333,19 @@ export default function SyncWebView({ visible, bank, onClose, onSuccess }) {
 
   const { cardName } = parseCardLabel(currentCard);
   const totalCards    = cardCount || 1;
-  const progressLabel = cardCount > 1 ? ` (${cardIndexUi + 1} of ${totalCards})` : '';
-  const syncBtnLabel  = cardName ? `Sync ${cardName}${progressLabel}` : `Sync Offers${progressLabel}`;
   const isBusy        = syncing || switching || autoCapturing.current;
 
-  const hintText = switching
+  // Status text shown while sync is running
+  const statusText = switching
     ? `⏳ Switching to card ${cardIndexUi + 1} of ${totalCards}...`
     : syncing
-      ? `🔄 Syncing ${currentCard || 'card'}...`
-      : currentCard
-        ? `💳 ${currentCard}${cardCount > 1 ? ` · Card ${cardIndexUi + 1} of ${totalCards}` : ''}`
-        : 'Tap Sync to start.';
+      ? `🔄 Syncing ${cardName || 'card'} (${cardIndexUi + 1} of ${totalCards})...`
+      : `⚡ Processing...`;
+
+  // Label for the Sync button (before sync starts)
+  const syncBtnLabel = cardName
+    ? `Sync Offers`
+    : `Sync Offers`;
 
   return (
     <Modal visible={visible} animationType="slide" transparent={true} onRequestClose={onClose}>
@@ -370,31 +371,21 @@ export default function SyncWebView({ visible, bank, onClose, onSuccess }) {
             thirdPartyCookiesEnabled={true}
           />
           <View style={s.footer}>
-            {allDone ? (
-              <>
-                <Text style={s.hint}>
-                  ✅ All {syncedCardsRef.current.length} card{syncedCardsRef.current.length !== 1 ? 's' : ''} synced!
-                </Text>
-                <TouchableOpacity style={s.doneBtn} onPress={onClose}>
-                  <Text style={s.syncBtnText}>✓ Done — Go Back to App</Text>
-                </TouchableOpacity>
-              </>
+            {syncStarted ? (
+              // Sync in progress — no button, just status
+              <View style={s.statusRow}>
+                <ActivityIndicator size="small" color={colors.primary} style={s.spinner} />
+                <Text style={s.statusText}>{statusText}</Text>
+              </View>
             ) : isOnOffersPage ? (
-              <>
-                <Text style={s.hint} numberOfLines={2}>{hintText}</Text>
-                <TouchableOpacity
-                  style={[s.syncBtn, isBusy && s.syncBtnDisabled]}
-                  onPress={handleSyncPress}
-                  disabled={isBusy}
-                >
-                  {isBusy
-                    ? <ActivityIndicator color="white" size="small" />
-                    : <Text style={s.syncBtnText}>{syncBtnLabel}</Text>}
-                </TouchableOpacity>
-              </>
+              // On offers page, ready to sync
+              <TouchableOpacity style={s.syncBtn} onPress={handleSyncPress}>
+                <Text style={s.syncBtnText}>{syncBtnLabel}</Text>
+              </TouchableOpacity>
             ) : (
+              // Not on offers page — fallback
               <>
-                <Text style={s.hint}>Log in above, then tap the button to go to your offers.</Text>
+                <Text style={s.hint}>Log in above, then tap to go to your offers.</Text>
                 <TouchableOpacity style={s.goToOffersBtn} onPress={handleGoToOffers}>
                   <Text style={s.syncBtnText}>Go to Offers Page →</Text>
                 </TouchableOpacity>
@@ -408,19 +399,20 @@ export default function SyncWebView({ visible, bank, onClose, onSuccess }) {
 }
 
 const s = StyleSheet.create({
-  overlay:         { flex: 1, justifyContent: 'flex-end', backgroundColor: 'rgba(0,0,0,0.45)' },
-  sheet:           { height: '87%', backgroundColor: 'white', borderTopLeftRadius: 20, borderTopRightRadius: 20, overflow: 'hidden' },
-  handle:          { width: 40, height: 4, backgroundColor: colors.border, borderRadius: radii.full, alignSelf: 'center', marginTop: 10, marginBottom: 4 },
-  header:          { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 16, paddingVertical: 12, borderBottomWidth: 1, borderBottomColor: colors.border },
-  closeBtn:        { width: 36, height: 36, borderRadius: 18, backgroundColor: colors.disabledBg, alignItems: 'center', justifyContent: 'center' },
-  closeBtnText:    { fontSize: 14, color: colors.textSecondary, fontWeight: '600' },
-  headerTitle:     { fontSize: 16, fontWeight: '700', color: colors.textPrimary },
-  webview:         { flex: 1 },
-  footer:          { padding: 16, borderTopWidth: 1, borderTopColor: colors.border, backgroundColor: 'white' },
-  hint:            { fontSize: 12, color: colors.textMuted, textAlign: 'center', marginBottom: 10 },
-  syncBtn:         { backgroundColor: colors.primary, borderRadius: radii.md, paddingVertical: 14, alignItems: 'center' },
-  goToOffersBtn:   { backgroundColor: colors.primaryLight, borderRadius: radii.md, paddingVertical: 14, alignItems: 'center' },
-  doneBtn:         { backgroundColor: colors.primaryLight, borderRadius: radii.md, paddingVertical: 14, alignItems: 'center' },
-  syncBtnDisabled: { opacity: 0.6 },
-  syncBtnText:     { color: 'white', fontSize: 16, fontWeight: '700' },
+  overlay:      { flex: 1, justifyContent: 'flex-end', backgroundColor: 'rgba(0,0,0,0.45)' },
+  sheet:        { height: '87%', backgroundColor: 'white', borderTopLeftRadius: 20, borderTopRightRadius: 20, overflow: 'hidden' },
+  handle:       { width: 40, height: 4, backgroundColor: colors.border, borderRadius: radii.full, alignSelf: 'center', marginTop: 10, marginBottom: 4 },
+  header:       { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 16, paddingVertical: 12, borderBottomWidth: 1, borderBottomColor: colors.border },
+  closeBtn:     { width: 36, height: 36, borderRadius: 18, backgroundColor: colors.disabledBg, alignItems: 'center', justifyContent: 'center' },
+  closeBtnText: { fontSize: 14, color: colors.textSecondary, fontWeight: '600' },
+  headerTitle:  { fontSize: 16, fontWeight: '700', color: colors.textPrimary },
+  webview:      { flex: 1 },
+  footer:       { padding: 16, borderTopWidth: 1, borderTopColor: colors.border, backgroundColor: 'white' },
+  hint:         { fontSize: 12, color: colors.textMuted, textAlign: 'center', marginBottom: 10 },
+  syncBtn:      { backgroundColor: colors.primary, borderRadius: radii.md, paddingVertical: 14, alignItems: 'center' },
+  goToOffersBtn:{ backgroundColor: colors.primaryLight, borderRadius: radii.md, paddingVertical: 14, alignItems: 'center' },
+  syncBtnText:  { color: 'white', fontSize: 16, fontWeight: '700' },
+  statusRow:    { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', paddingVertical: 10 },
+  spinner:      { marginRight: 10 },
+  statusText:   { fontSize: 14, fontWeight: '600', color: colors.textPrimary },
 });
