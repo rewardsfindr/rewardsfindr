@@ -99,7 +99,10 @@ export default function HomeScreen() {
   };
 
   const handleSyncSuccess = (totalSynced, cardResults, bank) => {
-    setSyncedBanks(prev => ({ ...prev, [bank]: cardResults.length }));
+    setSyncedBanks(prev => ({
+      ...prev,
+      [bank]: { cards: cardResults.length, lastSyncedAt: Date.now() },
+    }));
   };
 
   const isSearching = searching || localSearching;

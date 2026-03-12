@@ -2,6 +2,11 @@
 // BANK GRID
 // Shows all supported and coming-soon banks.
 // syncingBank: bankId currently being synced (disables that button)
+//
+// Staleness logic (based on lastSyncedAt):
+//   < 7 days  → green  ✓  (fresh)
+//   7–14 days → yellow !  (stale)
+//   > 14 days → red    ✗  (expired)
 // ─────────────────────────────────────────────
 import React from 'react';
 import { View, Text, TouchableOpacity, ActivityIndicator, StyleSheet } from 'react-native';
@@ -9,15 +14,44 @@ import { colors, radii, shadow } from '../shared/theme.js';
 import { BANK_LIST } from '../shared/constants.js';
 import BankLogoIcon from './BankLogoIcon.js';
 
+const SEVEN_DAYS  = 7  * 24 * 60 * 60 * 1000;
+const FOURTEEN_DAYS = 14 * 24 * 60 * 60 * 1000;
+
+function getSyncStatus(syncData) {
+  if (!syncData) return null;
+  // Support legacy shape (plain number) and new shape ({ cards, lastSyncedAt })
+  if (typeof syncData === 'number') return 'fresh';
+  const age = Date.now() - syncData.lastSyncedAt;
+  if (age < SEVEN_DAYS)    return 'fresh';
+  if (age < FOURTEEN_DAYS) return 'stale';
+  return 'expired';
+}
+
+const BADGE = {
+  fresh:   { symbol: '✓', bg: '#22c55e', fg: '#fff' },
+  stale:   { symbol: '!', bg: '#eab308', fg: '#fff' },
+  expired: { symbol: '✗', bg: '#ef4444', fg: '#fff' },
+};
+
+function getCardCount(syncData) {
+  if (!syncData) return 0;
+  if (typeof syncData === 'number') return syncData;
+  return syncData.cards ?? 0;
+}
+
 export default function BankGrid({ syncedBanks = {}, syncingBank = null, onSyncPress }) {
   return (
     <View style={s.wrap}>
       <Text style={s.label}>SYNC YOUR BANKS</Text>
       <View style={s.grid}>
         {BANK_LIST.map((bank) => {
-          const synced   = syncedBanks[bank.id];
+          const syncData = syncedBanks[bank.id];
+          const status   = getSyncStatus(syncData);
           const syncing  = syncingBank === bank.id;
           const disabled = !bank.supported || syncing;
+          const cardCount = getCardCount(syncData);
+          const badge = status ? BADGE[status] : null;
+
           return (
             <TouchableOpacity
               key={bank.id}
@@ -28,9 +62,9 @@ export default function BankGrid({ syncedBanks = {}, syncingBank = null, onSyncP
             >
               <View style={s.iconWrap}>
                 <BankLogoIcon bankId={bank.id} size={44} />
-                {synced && !syncing && (
-                  <View style={s.checkDot}>
-                    <Text style={s.checkText}>✓</Text>
+                {badge && !syncing && (
+                  <View style={[s.badgeDot, { backgroundColor: badge.bg }]}>
+                    <Text style={[s.badgeText, { color: badge.fg }]}>{badge.symbol}</Text>
                   </View>
                 )}
               </View>
@@ -39,8 +73,10 @@ export default function BankGrid({ syncedBanks = {}, syncingBank = null, onSyncP
               </Text>
               {syncing
                 ? <ActivityIndicator size="small" color={colors.primaryLight} style={s.spinner} />
-                : synced
-                  ? <Text style={s.syncedLabel}>{synced} card{synced !== 1 ? 's' : ''}</Text>
+                : cardCount > 0
+                  ? <Text style={[s.syncedLabel, status === 'stale' && s.staleLabel, status === 'expired' && s.expiredLabel]}>
+                      {cardCount} card{cardCount !== 1 ? 's' : ''}
+                    </Text>
                   : !bank.supported
                     ? <Text style={s.comingSoon}>Coming Soon</Text>
                     : <Text style={s.addLabel}>+ Add</Text>}
@@ -62,15 +98,16 @@ const s = StyleSheet.create({
                      ...shadow.sm },
   cellDisabled:    { opacity: 0.45 },
   iconWrap:        { marginBottom: 6, position: 'relative' },
-  checkDot:        { position: 'absolute', bottom: -2, right: -2,
+  badgeDot:        { position: 'absolute', bottom: -2, right: -2,
                      width: 16, height: 16, borderRadius: 8,
-                     backgroundColor: colors.primaryLight,
                      alignItems: 'center', justifyContent: 'center' },
-  checkText:       { fontSize: 9, color: '#fff', fontWeight: '800' },
+  badgeText:       { fontSize: 9, fontWeight: '800' },
   bankName:        { fontSize: 11, fontWeight: '600', color: colors.textPrimary,
                      textAlign: 'center', marginBottom: 2 },
   bankNameDisabled:{ color: colors.disabled },
-  syncedLabel:     { fontSize: 10, color: colors.primaryLight, fontWeight: '600' },
+  syncedLabel:     { fontSize: 10, color: '#22c55e', fontWeight: '600' },
+  staleLabel:      { color: '#eab308' },
+  expiredLabel:    { color: '#ef4444' },
   addLabel:        { fontSize: 10, color: colors.textMuted },
   comingSoon:      { fontSize: 9, color: colors.disabled, fontStyle: 'italic' },
   spinner:         { marginTop: 2 },
