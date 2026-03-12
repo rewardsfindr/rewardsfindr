@@ -19,7 +19,8 @@ import BankGrid       from '../components/BankGrid.js';
 import SyncWebView    from '../components/SyncWebView.js';
 import { colors }     from '../shared/theme.js';
 
-const SYNC_STORAGE_KEY = 'rewardsfindr_synced_banks';
+// Keyed by userId so sync state persists across sign-out/sign-in for the same user
+const getSyncKey = (uid) => `rewardsfindr_synced_banks_${uid}`;
 
 export default function HomeScreen() {
   const router = useRouter();
@@ -30,18 +31,18 @@ export default function HomeScreen() {
 
   const user = getAuthInstance().currentUser;
 
-  // Load persisted sync state on mount
+  // Load persisted sync state on mount (keyed by userId)
   useEffect(() => {
-    AsyncStorage.getItem(SYNC_STORAGE_KEY)
+    if (!user?.uid) return;
+    AsyncStorage.getItem(getSyncKey(user.uid))
       .then(val => { if (val) setSyncedBanks(JSON.parse(val)); })
       .catch(() => {});
-  }, []);
+  }, [user?.uid]);
 
   // Persist sync state whenever it changes
   useEffect(() => {
-    if (Object.keys(syncedBanks).length > 0) {
-      AsyncStorage.setItem(SYNC_STORAGE_KEY, JSON.stringify(syncedBanks)).catch(() => {});
-    }
+    if (!user?.uid || Object.keys(syncedBanks).length === 0) return;
+    AsyncStorage.setItem(getSyncKey(user.uid), JSON.stringify(syncedBanks)).catch(() => {});
   }, [syncedBanks]);
 
   const handleAvatarPress = () => {
@@ -57,8 +58,7 @@ export default function HomeScreen() {
           onPress: async () => {
             try {
               await signOut(getAuthInstance());
-              // Clear sync state on sign out
-              await AsyncStorage.removeItem(SYNC_STORAGE_KEY);
+              // Only clear in-memory state — AsyncStorage entry kept so it restores on next sign-in
               setSyncedBanks({});
             } catch {
               Alert.alert('Error', 'Could not sign out. Please try again.');
