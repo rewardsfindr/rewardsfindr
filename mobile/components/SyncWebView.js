@@ -9,6 +9,13 @@
 //   2. Page loaded, not on offers page → "Go to Offers Page"
 //   3. Sync in progress  → spinner + status
 //
+// onOffersPage source of truth per bank:
+//   Chase → CARDS_DETECTED message (SPA)
+//   Amex  → handleLoadEnd URL check
+//          navState fires AFTER loadEnd on Amex and would reset
+//          onOffersPage back to false — so we skip the reset for Amex only
+//   Other → handleNavigationStateChange URL check
+//
 // Adding a new bank:
 //   1. Add entry to sync/bankConfig.js
 //   2. Create sync/<bank>Sync.js with detect + switch JS
@@ -23,10 +30,10 @@ import { WebView } from 'react-native-webview';
 import { getAuthInstance } from '../lib/firebaseClient.js';
 import { colors, radii } from '../shared/theme.js';
 
-import { BANK_CONFIG }             from './sync/bankConfig.js';
-import { DETECT_CARDS_JS, buildSwitchCardJs } from './sync/chaseSync.js';
+import { BANK_CONFIG }                                    from './sync/bankConfig.js';
+import { DETECT_CARDS_JS, buildSwitchCardJs }             from './sync/chaseSync.js';
 import { AMEX_OPEN_AND_DETECT_JS, buildAmexSwitchCardJs } from './sync/amexSync.js';
-import { buildCaptureJs, parseCardLabel } from './sync/captureJs.js';
+import { buildCaptureJs, parseCardLabel }                 from './sync/captureJs.js';
 
 const API_BASE_URL         = process.env.EXPO_PUBLIC_API_URL || 'http://localhost:3001';
 const SWITCH_TIMEOUT_MS    = 3500;
@@ -83,10 +90,18 @@ export default function SyncWebView({ visible, bank, onClose, onSuccess }) {
     if (!navState.url) return;
     setCurrentUrl(navState.url);
     setPageLoaded(false);
+
+    // Amex: handleLoadEnd is the source of truth for onOffersPage.
+    // navState fires AFTER loadEnd on Amex — resetting here would clobber
+    // the value already set correctly by handleLoadEnd.
+    if (config.useAmexCardSwitcher) return;
+
+    // Chase: CARDS_DETECTED message is source of truth — reset is fine here
+    // because CARDS_DETECTED will fire again and restore onOffersPage=true.
+    // Other banks: URL-based detection handled here.
     setOnOffersPage(false);
-    // URL-based detection for non-SPA banks (neither Chase nor Amex flag)
-    if (!config.useCardsDetectedAsOffersSignal && !config.useAmexCardSwitcher) {
-      const url = navState.url.toLowerCase();
+    if (!config.useCardsDetectedAsOffersSignal) {
+      const url      = navState.url.toLowerCase();
       const onLogin  = (config.loginPaths  || []).some(p => url.includes(p.toLowerCase()));
       const onOffers = !onLogin && (config.offersPaths || []).some(p => url.includes(p.toLowerCase()));
       setOnOffersPage(onOffers);
