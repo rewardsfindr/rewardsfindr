@@ -140,6 +140,7 @@ export default function ResultsScreen() {
 
             {sorted.map((offer, idx) => {
               const barWidth = `${Math.round(((parseFloat(offer.cashbackAmount) || 0) / maxPct) * 100)}%`;
+              const isActivated = offer.isActivated === true;
               return (
                 <TouchableOpacity
                   key={offer.offerId || idx}
@@ -157,11 +158,16 @@ export default function ResultsScreen() {
                             <Text style={s.topBadgeText}>TOP</Text>
                           </View>
                         )}
+                        {isActivated && (
+                          <View style={s.activatedBadge}>
+                            <Text style={s.activatedBadgeText}>✓ ACTIVATED</Text>
+                          </View>
+                        )}
                       </View>
                       <Text style={s.rankDesc}>{formatDesc(offer)}</Text>
                       <View style={s.rankMeta}>
                         <View style={[s.bankPillSm, { backgroundColor: BANK_COLORS[offer.bank] || colors.primary }]}>
-                          <Text style={s.bankPillSmText}>{bankLabel(offer.bank).slice(0, 4)}</Text>
+                          <Text style={s.bankPillSmText}>{bankLabel(offer.bank)}</Text>
                         </View>
                         {offer.cardLast4 && (
                           <Text style={s.rankLast4}>•• {offer.cardLast4}</Text>
@@ -174,7 +180,7 @@ export default function ResultsScreen() {
                     </View>
                   </View>
                   <View style={s.barTrack}>
-                    <View style={[s.barFill, { width: barWidth }]} />
+                    <View style={[s.barFill, { width: barWidth, backgroundColor: isActivated ? '#2ecc71' : colors.primaryLight }]} />
                   </View>
                 </TouchableOpacity>
               );
@@ -234,11 +240,14 @@ const s = StyleSheet.create({
   rankNum:          { fontSize: 16, fontWeight: '900', color: colors.textMuted,
                       width: 24, marginTop: 2 },
   rankInfo:         { flex: 1, marginRight: 8 },
-  rankNameRow:      { flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 2 },
+  rankNameRow:      { flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 2, flexWrap: 'wrap' },
   rankCardName:     { fontSize: 16, fontWeight: '800', color: colors.textPrimary },
   topBadge:         { backgroundColor: colors.primaryLight, borderRadius: radii.sm,
                       paddingHorizontal: 7, paddingVertical: 2 },
   topBadgeText:     { fontSize: 10, fontWeight: '900', color: '#fff' },
+  activatedBadge:   { backgroundColor: '#2ecc71', borderRadius: radii.sm,
+                      paddingHorizontal: 7, paddingVertical: 2 },
+  activatedBadgeText: { fontSize: 10, fontWeight: '900', color: '#fff' },
   rankDesc:         { fontSize: 12, color: colors.textMuted, marginBottom: 6, lineHeight: 16 },
   rankMeta:         { flexDirection: 'row', alignItems: 'center', gap: 8 },
   rankLast4:        { fontSize: 12, color: colors.textMuted },
