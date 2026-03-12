@@ -1,4 +1,4 @@
-# RewardsFindr — Dev Context (Mar 2, 2026)
+# RewardsFindr — Dev Context (Mar 12, 2026)
 
 ## Project Overview
 - **App name:** RewardsFindr
@@ -10,7 +10,7 @@
 
 ---
 
-## Repository Structure (Updated Mar 2, 2026)
+## Repository Structure
 
 **Main Monorepo:** https://github.com/rewardsfindr/rewardsfindr
 - API, Mobile App, Shared utilities
@@ -18,14 +18,10 @@
 **Separate Repos:**
 - **Web Landing Page:** https://github.com/rewardsfindr/rewardsfindr-web
   - React landing page deployed on Vercel → rewardsfindr.com
-  - Split out on Mar 2, 2026 to separate concerns
+  - Split out on Mar 2, 2026
 - **Chrome Extension:** https://github.com/rewardsfindr/rewardsfindr-chrome-extension
   - Manifest V3, scrapes Chase & Amex offers
   - Split out on Mar 2, 2026
-
-**Coming Soon (Planned Splits):**
-- `rewardsfindr-mobile` - Standalone mobile app repo
-- `rewardsfindr-api` - Standalone backend API repo
 
 ---
 
@@ -75,31 +71,30 @@ D:\RewardsFindr\rewardsfindr\
 
 ---
 
-## Current Architecture (Mar 2, 2026)
+## Current Architecture (Mar 12, 2026)
 
 ```
 ┌──────────────────┐     ┌──────────────────┐     ┌──────────────────┐
 │  Chrome Extension│     │   Mobile App     │     │  Landing Page    │
 │  (Separate Repo) │     │  (Expo + EAS)    │     │  (React/Vercel)  │
-└────────┬─────────┘     └────────┬─────────┘     └──────────────────┘
+└───────┬─────────┘     └───────┬─────────┘     └──────────────────┘
          │                        │                   (separate repo)
          │   REST / HTTPS calls   │
-         └────────┬───────────────┘
+         └───────┬───────────────┘
                   │
-         ┌────────┴──────────────────────────────────┐
+         ┌───────┴───────────────────────┐
          │           Backend API (Node.js)             │
          │   POST /sync-offers   GET /best-card        │
          │   POST /auth/verify   GET /user/offers      │
-         └──────────────┬────────────────────────────┘
+         │   POST /api/offers/parse (HTML → Firestore)  │
+         └──────────────┬────────────────┘
                        │
-               ┌───────┴────────┐
+               ┌───────┴───────┐
                │    Firebase    │
                │  Firestore DB  │
                │  + Auth (JWT)  │
                └─────────────────┘
 ```
-
-**Key Decision:** Backend API layer added to avoid direct Firestore access from clients (security, rate limiting, server-side validation).
 
 ---
 
@@ -109,9 +104,12 @@ D:\RewardsFindr\rewardsfindr\
 rewardsfindr/
 ├── mobile/                 ← React Native + Expo app
 │   ├── app/
+│   ├── components/
+│   │   ├── SyncWebView.js     ← WebView modal for bank offer sync
+│   │   └── OffersSyncStatus.js
 │   ├── lib/
 │   │   ├── firebaseClient.js  ← Firebase JS SDK init
-│   │   └── apiClient.js        ← HTTP client for API calls
+│   │   └── apiClient.js       ← HTTP client for API calls
 │   ├── shared/
 │   ├── .env.example
 │   ├── .env.development     ← gitignored, local only
@@ -119,12 +117,12 @@ rewardsfindr/
 ├── api/                    ← Node.js Express backend
 │   ├── index.js
 │   ├── config/
-│   │   └── firebase.js      ← Firebase Admin SDK
+│   │   └── firebase.js        ← Firebase Admin SDK
 │   ├── middleware/
-│   │   └── auth.js          ← Token verification
+│   │   └── auth.js            ← Token verification
 │   ├── routes/
 │   │   ├── auth.js
-│   │   └── offers.js
+│   │   └── offers.js          ← includes /parse endpoint
 │   ├── .env.example
 │   └── .env                 ← gitignored, local only
 ├── shared/                  ← Top-level shared utilities
@@ -132,10 +130,6 @@ rewardsfindr/
 ├── .github/workflows/       ← CI/CD (tests)
 └── DEV_CONTEXT.md           ← This file
 ```
-
-**Note:**
-- `/extension` removed Mar 2, 2026 — moved to `rewardsfindr-chrome-extension` repo
-- `/src`, `/public`, `package.json` removed Mar 2, 2026 — moved to `rewardsfindr-web` repo
 
 ---
 
@@ -175,8 +169,8 @@ ALLOWED_ORIGINS
 - `POST /api/auth/verify` — Exchange Google OAuth token for Firebase custom token
 
 ### Offers (Protected)
-- `POST /api/offers/sync` — Accept scraped offers from extension
-- `GET /api/offers/:userId` — Get user's synced offers
+- `POST /api/offers/parse` — Accept raw HTML from mobile WebView, parse offers, store in Firestore
+- `GET /api/offers/:userId` — Get user’s synced offers
 
 ---
 
@@ -191,91 +185,85 @@ ALLOWED_ORIGINS
   /users/{uid}/offers/{offerId}
        ├── merchant: string        ← e.g. "Target"
        ├── bank: string            ← e.g. "chase"
-       ├── cardId: string          ← e.g. "chase_freedom_flex"
+       ├── cardName: string        ← e.g. "Sapphire Reserve (...0483)"
        ├── amount: number          ← e.g. 5 (% or $ off)
        ├── expiry: string          ← ISO date
        ├── activatedAt: timestamp
-       └── source: string          ← "extension" | "manual"
+       └── source: string          ← "mobile" | "extension"
 ```
 
 ---
 
-## Test Coverage
+## Mobile App — Offer Sync Flow (Current)
 
-### Shared Utilities — Tests ✅
-- `src/shared/` — Constants and utilities (used by mobile)
-- Tested via monorepo test scripts
+The mobile app uses an **in-app WebView** (not a Chrome extension) to sync bank offers:
 
-### API (`/api`) — **0 tests** ⚠️
-**Status:** No tests yet. Planned after MVP wiring complete.
-**TODO:** Add Jest + supertest for endpoint testing.
+1. User opens the app and signs in with Google (Firebase Auth)
+2. User taps a bank card (e.g. Chase) on the home/offers screen
+3. `SyncWebView` modal opens, loading the bank's offers URL directly
+4. **No credentials are stored** — user logs into the bank inside the WebView each time
+5. Footer shows contextual buttons:
+   - **Nothing** while navigating/loading
+   - **"Go to Offers Page →"** after login page loads (fallback redirect)
+   - **"Sync Offers"** once card dropdown detected on offers page
+   - **Spinner + status** during sync
+6. On "Sync Offers" tap: JS injected to capture HTML → POSTed to `/api/offers/parse` → stored in Firestore
+7. For multiple cards: auto-switches via dropdown JS injection, captures each card’s offers
 
-### Mobile (`/mobile`) — **0 tests** ⚠️
-**Status:** No tests yet. Planned after MVP wiring complete.
-**TODO:** Add React Native Testing Library for component tests.
-
----
-
-## Recent Changes (Mar 2, 2026)
-
-### Extension Repo Split
-**Date:** March 2, 2026
-
-**What Changed:**
-- Split Chrome extension into separate `rewardsfindr-chrome-extension` repo
-- Removed `/extension` folder from monorepo
-- Updated DEV_CONTEXT.md to reflect new repo structure
-
-**Reason:** Separation of concerns — extension has its own release cycle and Chrome Web Store deployment independent of mobile/API.
-
-### Web Repo Split
-**Date:** March 2, 2026
-
-**What Changed:**
-- Split landing page into separate `rewardsfindr-web` repo
-- Cleaned monorepo: removed `/src`, `/public`, `package.json`, `vercel.json`, babel/jest configs
-- Kept `/src/shared` (used by mobile)
-- Updated README to reflect monorepo structure
-
-**Reason:** Separation of concerns: marketing site vs. app infrastructure
-
-**PRs:**
-- PR #30: Remove web config files (package.json, babel, jest, vercel)
-- PR #31: Remove all web source files (src/, public/ folders)
-- PR #33: Update README and disable Vercel builds
+### SyncWebView — Key Implementation Details
+- **Chase is a SPA** — `onNavigationStateChange` does NOT fire for hash/route changes
+- **Offers page detection for Chase:** `CARDS_DETECTED` message (card dropdown present = on offers page). This fires *before* `onLoadEnd`, so `onOffersPage` is NOT gated on `pageLoaded`
+- **Login page detection:** URL `loginPaths` match (prevents false positive from Chase login URL which contains `merchantOffers` in the hash fragment)
+- **`pageLoaded`** only gates the fallback "Go to Offers Page" button (not the Sync button)
+- **`onOffersPage`** resets on every navigation change
 
 ---
 
-## Recent PRs (Feb 28 - Mar 2, 2026)
+## Recent PRs (Mar 2 – Mar 12, 2026)
 
 | PR | Title | Status | Notes |
 |---|---|---|---|
-| #14 | feat: add Node.js API backend with Firebase integration | ✅ Merged | Express server, Firebase Admin, auth + offers endpoints |
-| #15 | fix: load dotenv before Firebase config imports | ✅ Merged | Fixed env var loading order |
-| #16 | feat: add Firebase and API client for mobile app | ✅ Merged | Firebase JS SDK, apiClient.js, env config |
-| #30 | chore: remove web files - phase 1 | ✅ Merged | Removed root config files |
-| #31 | chore: complete web files cleanup | ✅ Merged | Removed all src/ and public/ web files |
-| #33 | chore: update README and disable Vercel builds | ✅ Merged | Updated docs, added .vercelignore |
+| #30 | chore: remove web config files | ✅ Merged | |
+| #31 | chore: complete web files cleanup | ✅ Merged | |
+| #33 | chore: update README and disable Vercel builds | ✅ Merged | |
+| #40–#50 | Various mobile + API features | ✅ Merged | Google Sign-In, offer sync API, SyncWebView multi-card |
+| #51 | fix: SyncWebView footer button logic | ⏳ Open | Fix sync button showing on login page; fix Chase SPA detection |
+
+### PR #51 — SyncWebView Footer Fix (In Review)
+**Branch:** `fix/disable-bank-button-during-sync`
+
+**Problems fixed:**
+1. "Sync Offers" button appeared on Chase login page (Chase login URL contains `merchantOffers` in hash fragment)
+2. Button not appearing after login (Chase SPA — `onNavigationStateChange` doesn’t fire for hash changes)
+3. Button appeared before page finished loading (SPA fires `CARDS_DETECTED` before `onLoadEnd`)
+
+**Solution:**
+- Added `loginPaths` exclusion to prevent false positive on login page
+- Replaced URL-based detection with `CARDS_DETECTED` signal for Chase (`useCardsDetectedAsOffersSignal: true`)
+- `onOffersPage` state drives button visibility; not gated on `pageLoaded` for Chase
+- `pageLoaded` only gates the fallback "Go to Offers Page" button
 
 ---
 
 ## Next Steps (Priority Order)
 
-### Immediate (In Progress)
-1. ✅ **Node.js API backend** — Merged (PR #14, #15)
-2. ✅ **Mobile Firebase + API client** — Merged (PR #16)
-3. ✅ **Repo split: web** — Web moved to separate repo (PR #30, #31, #33)
-4. ✅ **Repo split: extension** — Extension moved to `rewardsfindr-chrome-extension`
-5. ⬜ **Mobile Google Sign-In UI** — Add auth screen with Firebase Google auth
-6. ⬜ **Extension auth flow** — Wire chrome.identity + Firebase custom tokens
-7. ⬜ **Extension offer sync** — POST to `/api/offers/sync` after scraping
+### Immediate
+1. ✅ Node.js API backend — Merged
+2. ✅ Mobile Firebase + API client — Merged
+3. ✅ Repo splits (web + extension) — Done
+4. ✅ Mobile Google Sign-In — Done
+5. ✅ SyncWebView — multi-card Chase offer sync via in-app WebView — Done
+6. ⏳ **Merge PR #51** — SyncWebView footer button fixes
+7. ☐ **Offers display screen** — Show synced offers in the app (list/filter by merchant)
+8. ☐ **Best card recommendation** — `GET /best-card?merchant=Target` endpoint + UI
+9. ☐ **Amex offer sync** — Wire up Amex bank in SyncWebView (config already present)
 
 ### Post-MVP
-8. ⬜ **Add tests** — API endpoint tests (Jest + supertest)
-9. ⬜ **Deploy API** — Railway or Render with prod Firebase project
-10. ⬜ **EAS production builds** — Android/iOS app store builds
-11. ⬜ **Capital One scraper** — Add third bank to extension
-12. ⬜ **Consider further splits** — Move mobile/api to separate repos if needed
+10. ☐ Add tests — API (Jest + supertest), Mobile (React Native Testing Library)
+11. ☐ Deploy API — Railway or Render with prod Firebase project
+12. ☐ EAS production builds — Android/iOS app store builds
+13. ☐ Capital One scraper
+14. ☐ Consider further repo splits (mobile/api) if needed
 
 ---
 
