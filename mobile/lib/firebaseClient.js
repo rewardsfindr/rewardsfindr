@@ -1,51 +1,49 @@
 // ─────────────────────────────────────────────
 // FIREBASE CLIENT (Mobile)
 // Firebase JS SDK initialization for React Native/Expo
-// Uses EXPO_PUBLIC_ env vars injected at build time
+// Uses AsyncStorage for auth persistence across sessions
 // ─────────────────────────────────────────────
 import { initializeApp, getApps } from 'firebase/app';
-import { getAuth } from 'firebase/auth';
+import { initializeAuth, getReactNativePersistence, getAuth } from 'firebase/auth';
 import { getFirestore } from 'firebase/firestore';
+import ReactNativeAsyncStorage from '@react-native-async-storage/async-storage';
 
-// Firebase config from environment variables
 const firebaseConfig = {
-  apiKey: process.env.EXPO_PUBLIC_FIREBASE_API_KEY,
-  authDomain: process.env.EXPO_PUBLIC_FIREBASE_AUTH_DOMAIN,
-  projectId: process.env.EXPO_PUBLIC_FIREBASE_PROJECT_ID,
-  storageBucket: process.env.EXPO_PUBLIC_FIREBASE_STORAGE_BUCKET,
+  apiKey:            process.env.EXPO_PUBLIC_FIREBASE_API_KEY,
+  authDomain:        process.env.EXPO_PUBLIC_FIREBASE_AUTH_DOMAIN,
+  projectId:         process.env.EXPO_PUBLIC_FIREBASE_PROJECT_ID,
+  storageBucket:     process.env.EXPO_PUBLIC_FIREBASE_STORAGE_BUCKET,
   messagingSenderId: process.env.EXPO_PUBLIC_FIREBASE_MESSAGING_SENDER_ID,
-  appId: process.env.EXPO_PUBLIC_FIREBASE_APP_ID,
+  appId:             process.env.EXPO_PUBLIC_FIREBASE_APP_ID,
 };
 
-// Lazy initialization - only initialize when actually needed
 let app;
 let authInstance;
 let dbInstance;
 
 function initializeFirebase() {
-  if (app) return; // Already initialized
-  
-  // Validate required config
+  if (app) return;
+
   if (!firebaseConfig.apiKey || !firebaseConfig.projectId) {
     console.error('❌ Missing Firebase configuration. Check your .env file.');
     throw new Error('Firebase configuration incomplete');
   }
 
-  // Check if already initialized
-  const apps = getApps();
-  if (apps.length > 0) {
-    app = apps[0];
+  const existingApps = getApps();
+  if (existingApps.length > 0) {
+    app = existingApps[0];
+    authInstance = getAuth(app);
   } else {
     app = initializeApp(firebaseConfig);
+    authInstance = initializeAuth(app, {
+      persistence: getReactNativePersistence(ReactNativeAsyncStorage),
+    });
   }
-  
-  authInstance = getAuth(app);
+
   dbInstance = getFirestore(app);
-  
   console.log('✅ Firebase initialized for project:', firebaseConfig.projectId);
 }
 
-// Export getters that initialize on first access
 export const getAuthInstance = () => {
   if (!authInstance) initializeFirebase();
   return authInstance;
@@ -56,15 +54,11 @@ export const getDbInstance = () => {
   return dbInstance;
 };
 
-// Legacy exports for backward compatibility
+// Proxy exports for backward compatibility
 export const auth = new Proxy({}, {
-  get(target, prop) {
-    return getAuthInstance()[prop];
-  }
+  get(target, prop) { return getAuthInstance()[prop]; }
 });
 
 export const db = new Proxy({}, {
-  get(target, prop) {
-    return getDbInstance()[prop];
-  }
+  get(target, prop) { return getDbInstance()[prop]; }
 });
