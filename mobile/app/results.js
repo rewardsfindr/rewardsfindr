@@ -13,6 +13,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { colors, radii, shadow } from '../shared/theme.js';
 
 const CHASE_OFFERS_URL = 'https://secure.chase.com/web/auth/dashboard#/dashboard/merchantOffers/offer-hub';
+const CHASE_APP_URL   = 'chase://offers';
 
 const BANK_COLORS = {
   chase:       '#1a3a6b',
@@ -56,6 +57,22 @@ const bankLabel = (bank) => {
 const maxReward = (offers) =>
   Math.max(...offers.map(o => parseFloat(o.cashbackAmount) || 0), 1);
 
+// Opens Chase app if installed, falls back to browser
+const openChaseOffer = (offer) => {
+  const deepLink = offer.offerDeepLink || null;
+  if (deepLink) {
+    Linking.openURL(deepLink).catch(() =>
+      Linking.openURL(CHASE_APP_URL).catch(() =>
+        Linking.openURL(CHASE_OFFERS_URL)
+      )
+    );
+  } else {
+    Linking.openURL(CHASE_APP_URL).catch(() =>
+      Linking.openURL(CHASE_OFFERS_URL)
+    );
+  }
+};
+
 export default function ResultsScreen() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
@@ -67,15 +84,8 @@ export default function ResultsScreen() {
   );
   const best = sorted[0];
   const hasOffers = sorted.length > 0;
-  const maxPct = maxReward(sorted);
 
-  // Use the merchant name from offers if available, fallback to search term
   const displayName = (hasOffers && best?.merchantName) ? best.merchantName : (storeName || notFound);
-
-  const handleActivate = (offer) => {
-    const url = offer.offerDeepLink || CHASE_OFFERS_URL;
-    Linking.openURL(url).catch(() => Linking.openURL(CHASE_OFFERS_URL));
-  };
 
   return (
     <SafeAreaView style={s.safe}>
@@ -108,11 +118,7 @@ export default function ResultsScreen() {
         {hasOffers && (
           <>
             {/* Hero: Best Choice */}
-            <TouchableOpacity
-              style={s.heroCard}
-              onPress={() => handleActivate(best)}
-              activeOpacity={0.88}
-            >
+            <View style={s.heroCard}>
               <View style={s.heroTop}>
                 <View style={s.heroLeft}>
                   <Text style={s.bestChoiceLabel}>BEST CHOICE</Text>
@@ -129,24 +135,27 @@ export default function ResultsScreen() {
                   <Text style={s.bankPillText}>{bankLabel(best.bank)}</Text>
                 </View>
                 {best.cardLast4 && <Text style={s.heroLast4}>•• {best.cardLast4}</Text>}
-                <TouchableOpacity style={s.heroActivateBtn} onPress={() => handleActivate(best)}>
-                  <Text style={s.heroActivateBtnText}>$</Text>
-                </TouchableOpacity>
+                {best.isActivated === true ? (
+                  <View style={s.heroActivatedBadge}>
+                    <Text style={s.heroActivatedText}>✓ ACTIVATED</Text>
+                  </View>
+                ) : (
+                  <TouchableOpacity style={s.heroActivateBtn} onPress={() => openChaseOffer(best)}>
+                    <Text style={s.heroActivateBtnText}>⚡ Activate</Text>
+                  </TouchableOpacity>
+                )}
               </View>
-            </TouchableOpacity>
+            </View>
 
             {/* All Your Cards */}
             <Text style={s.allCardsLabel}>ALL YOUR CARDS</Text>
 
             {sorted.map((offer, idx) => {
-              const barWidth = `${Math.round(((parseFloat(offer.cashbackAmount) || 0) / maxPct) * 100)}%`;
               const isActivated = offer.isActivated === true;
               return (
-                <TouchableOpacity
+                <View
                   key={offer.offerId || idx}
                   style={s.rankCard}
-                  onPress={() => handleActivate(offer)}
-                  activeOpacity={0.85}
                 >
                   <View style={s.rankRow}>
                     <Text style={s.rankNum}>{idx + 1}</Text>
@@ -173,16 +182,22 @@ export default function ResultsScreen() {
                           <Text style={s.rankLast4}>•• {offer.cardLast4}</Text>
                         )}
                       </View>
+                      {!isActivated && (
+                        <TouchableOpacity
+                          style={s.activateBtn}
+                          onPress={() => openChaseOffer(offer)}
+                          activeOpacity={0.8}
+                        >
+                          <Text style={s.activateBtnText}>⚡ Tap to Activate on Chase</Text>
+                        </TouchableOpacity>
+                      )}
                     </View>
                     <View style={s.rankReward}>
                       <Text style={s.rankRewardPct}>{formatReward(offer.cashbackAmount, offer.cashbackType)}</Text>
                       <Text style={s.rankRewardLabel}>{formatRewardLabel(offer.cashbackAmount, offer.cashbackType)}</Text>
                     </View>
                   </View>
-                  <View style={s.barTrack}>
-                    <View style={[s.barFill, { width: barWidth, backgroundColor: isActivated ? '#2ecc71' : colors.primaryLight }]} />
-                  </View>
-                </TouchableOpacity>
+                </View>
               );
             })}
           </>
@@ -222,10 +237,12 @@ const s = StyleSheet.create({
   heroRewardLabel:  { fontSize: 12, color: colors.textOnDarkSub, fontWeight: '600' },
   heroBottom:       { flexDirection: 'row', alignItems: 'center', gap: 10 },
   heroLast4:        { fontSize: 13, color: colors.textOnDarkSub, flex: 1 },
-  heroActivateBtn:  { width: 32, height: 32, borderRadius: 16,
-                      backgroundColor: colors.primaryLight,
-                      alignItems: 'center', justifyContent: 'center' },
-  heroActivateBtnText: { fontSize: 16, fontWeight: '900', color: colors.bgHeader },
+  heroActivateBtn:  { borderRadius: radii.sm, backgroundColor: colors.primaryLight,
+                      paddingHorizontal: 12, paddingVertical: 6 },
+  heroActivateBtnText: { fontSize: 12, fontWeight: '800', color: colors.bgHeader },
+  heroActivatedBadge:  { borderRadius: radii.sm, backgroundColor: '#2ecc71',
+                         paddingHorizontal: 10, paddingVertical: 6 },
+  heroActivatedText:   { fontSize: 12, fontWeight: '800', color: '#fff' },
 
   bankPill:         { borderRadius: radii.sm, paddingHorizontal: 8, paddingVertical: 4 },
   bankPillText:     { fontSize: 10, fontWeight: '800', color: '#fff' },
@@ -236,7 +253,7 @@ const s = StyleSheet.create({
                       letterSpacing: 1, marginBottom: 12 },
   rankCard:         { backgroundColor: colors.bgCard, borderRadius: radii.lg,
                       padding: 16, marginBottom: 10, ...shadow.sm },
-  rankRow:          { flexDirection: 'row', alignItems: 'flex-start', marginBottom: 10 },
+  rankRow:          { flexDirection: 'row', alignItems: 'flex-start' },
   rankNum:          { fontSize: 16, fontWeight: '900', color: colors.textMuted,
                       width: 24, marginTop: 2 },
   rankInfo:         { flex: 1, marginRight: 8 },
@@ -249,12 +266,13 @@ const s = StyleSheet.create({
                       paddingHorizontal: 7, paddingVertical: 2 },
   activatedBadgeText: { fontSize: 10, fontWeight: '900', color: '#fff' },
   rankDesc:         { fontSize: 12, color: colors.textMuted, marginBottom: 6, lineHeight: 16 },
-  rankMeta:         { flexDirection: 'row', alignItems: 'center', gap: 8 },
+  rankMeta:         { flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 8 },
   rankLast4:        { fontSize: 12, color: colors.textMuted },
   rankReward:       { alignItems: 'flex-end', minWidth: 48 },
   rankRewardPct:    { fontSize: 22, fontWeight: '900', color: colors.textPrimary, lineHeight: 26 },
   rankRewardLabel:  { fontSize: 11, color: colors.textMuted },
 
-  barTrack:         { height: 4, backgroundColor: colors.border, borderRadius: radii.full, overflow: 'hidden' },
-  barFill:          { height: 4, backgroundColor: colors.primaryLight, borderRadius: radii.full },
+  activateBtn:      { backgroundColor: '#f0a500', borderRadius: radii.sm,
+                      paddingHorizontal: 10, paddingVertical: 6, alignSelf: 'flex-start' },
+  activateBtnText:  { fontSize: 11, fontWeight: '800', color: '#fff' },
 });
