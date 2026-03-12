@@ -155,10 +155,25 @@ router.post('/parse', async (req, res) => {
       return res.status(400).json({ error: "bank must be 'chase' or 'amex'" });
     }
 
+    // DEBUG: log incoming HTML stats
+    console.log(`📥 [parse] bank=${bank} cardName=${cardName} html.length=${html.length}`);
+    console.log(`📥 [parse] html snippet (first 300 chars):`, html.substring(0, 300));
+
+    // DEBUG: check if key Amex selectors are present in the HTML
+    if (bank === 'amex') {
+      console.log(`🔍 [parse:amex] listViewRow count:`, (html.match(/listViewRow/g) || []).length);
+      console.log(`🔍 [parse:amex] merchantOfferListAddButton count:`, (html.match(/merchantOfferListAddButton/g) || []).length);
+      console.log(`🔍 [parse:amex] merchantOfferSuccessIcon count:`, (html.match(/merchantOfferSuccessIcon/g) || []).length);
+      console.log(`🔍 [parse:amex] listViewContainer present:`, html.includes('listViewContainer'));
+    }
+
     const parseFn = bank === 'chase' ? parseChaseOffers : parseAmexOffers;
     const offers = parseFn(html);
 
-    console.log(`🔍 Parsed ${offers.length} offers from ${bank} HTML for user ${userId}`);
+    console.log(`🔍 [parse] parsed ${offers.length} offers from ${bank} HTML for user ${userId}`);
+    if (offers.length > 0) {
+      console.log(`🔍 [parse] first offer sample:`, JSON.stringify(offers[0]));
+    }
 
     if (offers.length === 0) {
       return res.json({ success: true, offers: [], synced: 0, bank, message: 'No offers found in provided HTML.' });
@@ -167,7 +182,7 @@ router.post('/parse', async (req, res) => {
     const resolvedCardName = cardName || (bank === 'chase' ? 'Chase Card' : 'Amex Card');
     const { syncedCount, skippedCount } = await writeOffersToDB(offers, { userId, bank, cardName: resolvedCardName });
 
-    console.log(`✅ Parse+sync complete: ${syncedCount} synced, ${skippedCount} skipped (${bank} — ${resolvedCardName})`);
+    console.log(`✅ [parse] Parse+sync complete: ${syncedCount} synced, ${skippedCount} skipped (${bank} — ${resolvedCardName})`);
 
     res.json({ success: true, offers, synced: syncedCount, skipped: skippedCount, bank, cardName: resolvedCardName });
   } catch (error) {
