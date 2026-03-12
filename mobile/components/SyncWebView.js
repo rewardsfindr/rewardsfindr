@@ -1,17 +1,5 @@
 // ─────────────────────────────────────────────────────────────────
 // SYNC WEBVIEW MODAL
-// Footer states:
-//   0. Page not loaded yet → nothing shown (empty footer)
-//   1. Loaded, not on offers page → "Go to Offers Page" button
-//   2. Loaded, on offers page, idle → "Sync Offers" button
-//   3. Sync in progress → no button, status text + spinner only
-//   4. All done → auto-close
-//
-// isOnOffersPage logic:
-//   Chase: CARDS_DETECTED message is the reliable signal (SPA — URL hash
-//          never changes via onNavigationStateChange). Falls back to URL match.
-//   Others: URL offersPaths match AND NOT loginPaths match.
-// pageLoaded resets on every navigation so buttons never appear mid-load.
 // ─────────────────────────────────────────────────────────────────
 import React, { useRef, useState, useEffect } from 'react';
 import {
@@ -33,7 +21,7 @@ const BANK_CONFIG = {
     offersPaths: ['/cardmember-offers', 'merchantOffers'],
     loginPaths: ['/sign-in', '/logon', '/login', '/sso', '/identify', '/challenge'],
     gridSelector: '[data-testid="grid-items-container"]',
-    useCardsDetectedAsOffersSignal: true, // Chase is SPA, URL hash unreliable
+    useCardsDetectedAsOffersSignal: true,
   },
   amex: {
     url: 'https://www.americanexpress.com/en-us/benefits/offers/',
@@ -81,7 +69,9 @@ const DETECT_CARDS_JS = `
         return;
       }
       window.ReactNativeWebView.postMessage(JSON.stringify({ type: 'CARDS_DETECTED', cards: [], selectedLabel: null }));
-    } catch(e) {}
+    } catch(e) {
+      window.ReactNativeWebView.postMessage(JSON.stringify({ type: 'CARDS_DETECTED', cards: [], selectedLabel: null, error: e.message }));
+    }
   })();
   true;
 `;
@@ -173,11 +163,12 @@ export default function SyncWebView({ visible, bank, onClose, onSuccess }) {
   const [switching, setSwitching]       = useState(false);
   const [syncStarted, setSyncStarted]   = useState(false);
   const [pageLoaded, setPageLoaded]     = useState(false);
-  const [onOffersPage, setOnOffersPage] = useState(false); // reliable offers page signal
+  const [onOffersPage, setOnOffersPage] = useState(false);
   const [currentCard, setCurrentCard]   = useState(null);
   const [currentUrl, setCurrentUrl]     = useState('');
   const [cardCount, setCardCount]       = useState(0);
   const [cardIndexUi, setCardIndexUi]   = useState(0);
+  const [debugMsg, setDebugMsg]         = useState('init'); // DEBUG — remove before release
 
   const config = BANK_CONFIG[bank] || BANK_CONFIG.chase;
 
@@ -200,6 +191,7 @@ export default function SyncWebView({ visible, bank, onClose, onSuccess }) {
       setOnOffersPage(false);
       setCardCount(0);
       setCardIndexUi(0);
+      setDebugMsg('init');
     }
   }, [visible]);
 
@@ -207,7 +199,7 @@ export default function SyncWebView({ visible, bank, onClose, onSuccess }) {
     if (!navState.url) return;
     setCurrentUrl(navState.url);
     setPageLoaded(false);
-    // For non-Chase banks, check URL immediately on navigation
+    setDebugMsg('navigating… ' + navState.url.slice(0, 60));
     if (!config.useCardsDetectedAsOffersSignal) {
       const url = navState.url.toLowerCase();
       const onLogin  = (config.loginPaths  || []).some((p) => url.includes(p.toLowerCase()));
@@ -218,8 +210,8 @@ export default function SyncWebView({ visible, bank, onClose, onSuccess }) {
 
   const handleLoadEnd = () => {
     setPageLoaded(true);
+    setDebugMsg('loadEnd — injecting DETECT_CARDS_JS');
     if (bank === 'chase') {
-      // Always re-run card detection on load — this is the offers page signal for Chase
       webViewRef.current?.injectJavaScript(DETECT_CARDS_JS);
     }
   };
@@ -241,6 +233,7 @@ export default function SyncWebView({ visible, bank, onClose, onSuccess }) {
 
       if (data.type === 'CARDS_DETECTED') {
         const hasCards = data.cards && data.cards.length > 0;
+        setDebugMsg(`CARDS_DETECTED: ${data.cards?.length ?? 0} cards, err=${data.error || 'none'}`);
         if (!cardsDiscovered.current && hasCards) {
           cardOptionsRef.current  = data.cards;
           cardsDiscovered.current = true;
@@ -250,7 +243,6 @@ export default function SyncWebView({ visible, bank, onClose, onSuccess }) {
           setCardIndexUi(cardIndexRef.current);
         }
         setCurrentCard(data.selectedLabel || null);
-        // For Chase: cards present = on offers page; no cards = login/other page
         if (config.useCardsDetectedAsOffersSignal) {
           setOnOffersPage(hasCards);
         }
@@ -412,6 +404,13 @@ export default function SyncWebView({ visible, bank, onClose, onSuccess }) {
             sharedCookiesEnabled={true}
             thirdPartyCookiesEnabled={true}
           />
+          {/* DEBUG OVERLAY — remove before release */}
+          <View style={s.debugBar}>
+            <Text style={s.debugText}
+              numberOfLines={2}>
+              loaded={String(pageLoaded)} offers={String(onOffersPage)} cards={cardCount}{"\n"}{debugMsg}
+            </Text>
+          </View>
           <View style={s.footer}>
             {renderFooter()}
           </View>
@@ -430,6 +429,8 @@ const s = StyleSheet.create({
   closeBtnText: { fontSize: 14, color: colors.textSecondary, fontWeight: '600' },
   headerTitle:  { fontSize: 16, fontWeight: '700', color: colors.textPrimary },
   webview:      { flex: 1 },
+  debugBar:     { backgroundColor: '#000', paddingHorizontal: 8, paddingVertical: 4 },
+  debugText:    { color: '#0f0', fontSize: 10, fontFamily: 'monospace' },
   footer:       { minHeight: 56, padding: 16, borderTopWidth: 1, borderTopColor: colors.border, backgroundColor: 'white' },
   hint:         { fontSize: 12, color: colors.textMuted, textAlign: 'center', marginBottom: 10 },
   syncBtn:      { backgroundColor: colors.primary, borderRadius: radii.md, paddingVertical: 14, alignItems: 'center' },
