@@ -4,11 +4,11 @@
 // Reads card label from whichever bank is active.
 // ─────────────────────────────────────────────
 
-export const buildCaptureJs = (gridSelector) => `
+export const buildCaptureJs = (gridSelector, maxBytes = 200000) => `
   (function() {
     try {
       var html = null;
-      var MAX = 200000;
+      var MAX = ${maxBytes || 200000};
       ${gridSelector ? `
       var grid = document.querySelector('${gridSelector}');
       if (grid && grid.innerHTML.length > 500) { html = grid.outerHTML; }

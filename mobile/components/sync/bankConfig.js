@@ -23,19 +23,22 @@ export const BANK_CONFIG = {
     offersPaths: ['/cardmember-offers', 'merchantOffers'],
     loginPaths: ['/sign-in', '/logon', '/login', '/sso', '/identify', '/challenge'],
     gridSelector: '[data-testid="grid-items-container"]',
+    captureMaxBytes: 200000,
     useCardsDetectedAsOffersSignal: true,
   },
   amex: {
     // Entry URL — redirects to login if not authenticated
     url: 'https://www.americanexpress.com/en-us/benefits/offers/',
-    // After login, Amex lands on global.americanexpress.com/offers/enrolled
-    offersUrl: 'https://global.americanexpress.com/offers',
+    // After login, Amex lands on global.americanexpress.com/offers
+    offersUrl: 'https://global.americanexpress.com/offers/eligible',
     label: 'Amex Offers',
     color: '#007ac1',
     // Actual offers pages on global.americanexpress.com
-    offersPaths: ['/offers/enrolled', '/offers'],
+    offersPaths: ['/offers/enrolled', '/offers/eligible', '/offers'],
     loginPaths: ['/account/login', '/login', '/sign-in', '/identity', '/auth', '/challenge'],
-    gridSelector: null,
+    // Amex renders all offer rows inside [data-testid="listViewContainer"]
+    gridSelector: '[data-testid="listViewContainer"]',
+    captureMaxBytes: 500000,
     useAmexCardSwitcher: true,
   },
 };
