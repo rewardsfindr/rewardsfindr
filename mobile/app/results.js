@@ -140,7 +140,7 @@ export default function ResultsScreen() {
 
             {sorted.map((offer, idx) => {
               const barWidth = `${Math.round(((parseFloat(offer.cashbackAmount) || 0) / maxPct) * 100)}%`;
-              const isActivated = offer.activated === true;
+              const isActivated = offer.isActivated === true;
               return (
                 <TouchableOpacity
                   key={offer.offerId || idx}
