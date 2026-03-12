@@ -2,12 +2,20 @@
 // AMEX OFFERS PARSER
 // Parses raw HTML from the Amex Offers & Benefits page.
 // Selectors target americanexpress.com/en-us/benefits/offers/
-// and may need tuning as Amex updates their frontend.
+// DOM analysis: Mar 2026
 // ─────────────────────────────────────────────
 import * as cheerio from 'cheerio';
 
 /**
  * Parse raw Amex offers page HTML into a normalized offer array.
+ * Only includes real merchant offers (ignores bank/promo tiles).
+ *
+ * HOW TO DISTINGUISH MERCHANT OFFERS FROM BANK PROMOS:
+ *   - Merchant (not yet activated): has [data-testid="merchantOfferListAddButton"]
+ *   - Merchant (already activated): has [data-testid="merchantOfferSuccessIcon"]
+ *   - Bank/promo tiles (e.g. Amex Savings, Loans, CreditSecure): have neither.
+ *     They use [data-testid="cardOfferLearnLink"] instead.
+ *
  * @param {string} html - Raw outerHTML captured from the Amex offers page
  * @returns {Array} offers - Array of normalized offer objects
  */
@@ -15,93 +23,84 @@ export function parseAmexOffers(html) {
   const $ = cheerio.load(html);
   const offers = [];
 
-  // Amex renders offer cards in a grid. Try multiple selector strategies.
-  const cardSelector = [
-    '[data-module-name="offer-module"]',
-    '[class*="OfferCard"]',
-    '[class*="offer-card"]',
-    '.offer-card',
-    '[data-testid="offer-card"]',
-  ].join(', ');
-
-  $(cardSelector).each((i, el) => {
+  // All offer rows (merchant + bank promos) share this class pattern
+  $('[class*="listViewRow"]').each((i, el) => {
     try {
       const $el = $(el);
 
+      // ── Filter: skip bank/promo offers ─────────────
+      // Merchant offers always have either the add button OR the success icon.
+      // Bank promos (Savings, Loans, CreditSecure, card referrals) have neither.
+      const isAddable   = $el.find('[data-testid="merchantOfferListAddButton"]').length > 0;
+      const isActivated = $el.find('[data-testid="merchantOfferSuccessIcon"]').length > 0;
+      if (!isAddable && !isActivated) return;
+
       // ── Merchant Name ──────────────────────────────
-      const merchantName = $el
-        .find(
-          '[class*="merchant"], [class*="Merchant"], [class*="brand"], [class*="Brand"], .offer-merchant-name'
-        )
-        .first()
-        .text()
-        .trim();
+      // The merchant name lives in the first <h3> inside the row
+      const merchantName = $el.find('h3').first().text().trim();
+      if (!merchantName) return;
 
-      if (!merchantName) return; // skip cards without a merchant
+      // ── Offer Description ──────────────────────────
+      // Second [data-testid="overflowTextContainer"] holds the deal text
+      const descContainers = $el.find('[data-testid="overflowTextContainer"]');
+      const offerDescription = descContainers.eq(1).text().trim();
 
-      // ── Offer Value ────────────────────────────────
-      const valueText = $el
-        .find(
-          '[class*="offer-value"], [class*="OfferValue"], [class*="cashback"], [class*="Cashback"], .offer-title, [class*="headline"]'
-        )
-        .first()
-        .text()
-        .trim();
-
+      // ── Cashback Parsing ───────────────────────────
+      // Amex descriptions follow patterns like:
+      //   "Spend $50 or more, earn $10 back"
+      //   "Earn 6 Membership Rewards points per eligible dollar spent"
+      //   "Earn 10 back on purchases"
       let cashbackAmount = 0;
-      let cashbackType = 'fixed'; // Amex is usually fixed $ amounts
+      let cashbackType = 'fixed';
+      const descLower = offerDescription.toLowerCase();
 
-      const percentMatch = valueText.match(/(\d+(?:\.\d+)?)\s*%/);
-      const dollarMatch = valueText.match(/\$(\d+(?:\.\d+)?)/);
+      // Points offers (e.g. "Earn 6 Membership Rewards points")
+      const pointsMatch = offerDescription.match(/[Ee]arn\s+(\d+(?:\.\d+)?)\s+[Mm]embership\s+[Rr]ewards/);
+      // Percent back offers (e.g. "Earn 10% back")
+      const percentMatch = offerDescription.match(/(\d+(?:\.\d+)?)%/);
+      // Fixed dollar back offers (e.g. "earn $25 back", "earn 10 back")
+      const dollarBackMatch = offerDescription.match(/earn\s+\$?(\d+(?:\.\d+)?)\s+back/i);
 
-      if (percentMatch) {
+      if (pointsMatch) {
+        cashbackAmount = parseFloat(pointsMatch[1]);
+        cashbackType = 'points';
+      } else if (percentMatch) {
         cashbackAmount = parseFloat(percentMatch[1]);
         cashbackType = 'percent';
-      } else if (dollarMatch) {
-        cashbackAmount = parseFloat(dollarMatch[1]);
+      } else if (dollarBackMatch) {
+        cashbackAmount = parseFloat(dollarBackMatch[1]);
         cashbackType = 'fixed';
       }
 
-      // ── Description / Terms ────────────────────────
-      const offerDescription = $el
-        .find(
-          '[class*="terms"], [class*="Terms"], [class*="description"], [class*="Description"], [class*="subtitle"]'
-        )
-        .first()
-        .text()
-        .trim();
-
       // ── Minimum Spend ──────────────────────────────
+      // e.g. "Spend $50 or more" or "Spend 125 or more"
       let minimumSpend = 0;
-      const combinedText = (valueText + ' ' + offerDescription).toLowerCase();
-      const minSpendMatch = combinedText.match(/(?:spend|purchase|shop)\s+\$?(\d+)/);
+      const minSpendMatch = descLower.match(/spend\s+\$?(\d+)/);
       if (minSpendMatch) minimumSpend = parseFloat(minSpendMatch[1]);
 
       // ── Expiry Date ────────────────────────────────
-      const expiryText = $el
-        .find(
-          '[class*="expir"], [class*="Expir"], [class*="valid"], [class*="Valid"], [class*="date"], [class*="Date"]'
-        )
-        .first()
-        .text()
-        .trim();
-
+      // Expiry lives in a <p> tag directly inside the offer content area.
+      // Format from DOM: "Expires 4/2/26" or "Expires 12/30/25"
+      // Near-expiry rows use class containing "color-status-text-critical"
       let expiryDate = null;
-      if (expiryText) {
-        const cleaned = expiryText
-          .replace(/(?:valid through|expires?|through|by)/i, '')
-          .trim();
-        const parsed = new Date(cleaned);
-        if (!isNaN(parsed.getTime())) expiryDate = parsed.toISOString();
-      }
+      let isExpiringSoon = false;
 
-      // ── Activation Status ──────────────────────────
-      const btnText = $el.find('button, [role="button"]').text().toLowerCase();
-      const isActivated =
-        btnText.includes('added') ||
-        btnText.includes('enrolled') ||
-        btnText.includes('remove') ||
-        $el.find('[class*="enrolled"], [class*="activated"], [class*="added"]').length > 0;
+      const $expiryP = $el.find('p').filter((_, p) => {
+        return $(p).text().toLowerCase().includes('expires');
+      }).first();
+
+      if ($expiryP.length) {
+        isExpiringSoon = ($expiryP.attr('class') || '').includes('color-status-text-critical');
+        const rawExpiry = $expiryP.text().replace(/expires/i, '').trim();
+        // rawExpiry is like "4/2/26" — parse as M/D/YY
+        const parts = rawExpiry.split('/');
+        if (parts.length === 3) {
+          const [m, d, y] = parts;
+          const fullYear = parseInt(y) < 100 ? 2000 + parseInt(y) : parseInt(y);
+          const parsed = new Date(fullYear, parseInt(m) - 1, parseInt(d));
+          if (!isNaN(parsed.getTime())) expiryDate = parsed.toISOString();
+        }
+      }
 
       offers.push({
         merchantName,
@@ -109,12 +108,13 @@ export function parseAmexOffers(html) {
         cashbackAmount,
         cashbackType,
         minimumSpend,
-        category: 'other', // TODO: infer from merchant if needed
+        category: 'other',
         expiryDate,
         isActivated,
+        isExpiringSoon,
       });
     } catch (err) {
-      console.error('⚠️ Error parsing Amex offer card:', err);
+      console.error('⚠️ Error parsing Amex offer row:', err);
     }
   });
 
