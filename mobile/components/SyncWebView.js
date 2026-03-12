@@ -88,17 +88,13 @@ export default function SyncWebView({ visible, bank, onClose, onSuccess }) {
 
   const handleNavigationStateChange = (navState) => {
     if (!navState.url) return;
+    console.log(`[SyncWebView:${bank}] navState url:`, navState.url);
     setCurrentUrl(navState.url);
     setPageLoaded(false);
 
     // Amex: handleLoadEnd is the source of truth for onOffersPage.
-    // navState fires AFTER loadEnd on Amex — resetting here would clobber
-    // the value already set correctly by handleLoadEnd.
     if (config.useAmexCardSwitcher) return;
 
-    // Chase: CARDS_DETECTED message is source of truth — reset is fine here
-    // because CARDS_DETECTED will fire again and restore onOffersPage=true.
-    // Other banks: URL-based detection handled here.
     setOnOffersPage(false);
     if (!config.useCardsDetectedAsOffersSignal) {
       const url      = navState.url.toLowerCase();
@@ -110,6 +106,7 @@ export default function SyncWebView({ visible, bank, onClose, onSuccess }) {
 
   const handleLoadEnd = (syntheticEvent) => {
     const url = (syntheticEvent?.nativeEvent?.url || currentUrl).toLowerCase();
+    console.log(`[SyncWebView:${bank}] loadEnd url:`, url);
     setPageLoaded(true);
 
     if (bank === 'chase') {
@@ -120,8 +117,10 @@ export default function SyncWebView({ visible, bank, onClose, onSuccess }) {
     if (bank === 'amex') {
       const onLogin  = (config.loginPaths  || []).some(p => url.includes(p.toLowerCase()));
       const onOffers = !onLogin && (config.offersPaths || []).some(p => url.includes(p.toLowerCase()));
+      console.log(`[SyncWebView:amex] onLogin=${onLogin} onOffers=${onOffers} cardsDiscovered=${cardsDiscovered.current}`);
       setOnOffersPage(onOffers);
       if (onOffers && !cardsDiscovered.current) {
+        console.log('[SyncWebView:amex] injecting AMEX_OPEN_AND_DETECT_JS');
         webViewRef.current?.injectJavaScript(AMEX_OPEN_AND_DETECT_JS);
       }
     }
@@ -129,20 +128,23 @@ export default function SyncWebView({ visible, bank, onClose, onSuccess }) {
 
   const handleGoToOffers = () => {
     const target = config.offersUrl || config.url;
+    console.log(`[SyncWebView:${bank}] navigating to offersUrl:`, target);
     webViewRef.current?.injectJavaScript(`window.location.replace('${target}'); true;`);
   };
 
   const handleSyncPress = () => {
+    console.log(`[SyncWebView:${bank}] Sync pressed — gridSelector:`, config.gridSelector, 'captureMaxBytes:', config.captureMaxBytes);
     setSyncStarted(true);
     captureArmed.current = true;
-    webViewRef.current?.injectJavaScript(buildCaptureJs(config.gridSelector));
+    webViewRef.current?.injectJavaScript(buildCaptureJs(config.gridSelector, config.captureMaxBytes));
   };
 
   const handleMessage = async (event) => {
     try {
       const data = JSON.parse(event.nativeEvent.data);
+      console.log(`[SyncWebView:${bank}] message type:`, data.type, data.error || '');
 
-      // ── Chase card detection ──────────────────────────────────
+      // ── Chase card detection ────────────────────────────
       if (data.type === 'CARDS_DETECTED') {
         const hasCards = data.cards?.length > 0;
         if (!cardsDiscovered.current && hasCards) {
@@ -158,8 +160,9 @@ export default function SyncWebView({ visible, bank, onClose, onSuccess }) {
         return;
       }
 
-      // ── Amex card detection ───────────────────────────────────
+      // ── Amex card detection ────────────────────────────
       if (data.type === 'AMEX_CARDS_DETECTED') {
+        console.log('[SyncWebView:amex] AMEX_CARDS_DETECTED cards:', data.cards?.length, 'error:', data.error);
         const hasCards = data.cards?.length > 0;
         if (!cardsDiscovered.current && hasCards) {
           cardOptionsRef.current  = data.cards;
@@ -173,7 +176,7 @@ export default function SyncWebView({ visible, bank, onClose, onSuccess }) {
         return;
       }
 
-      // ── Card switched (Chase + Amex) ──────────────────────────
+      // ── Card switched (Chase + Amex) ──────────────────────
       if (data.type === 'CARD_SWITCHED') {
         let switchConfirmed = false;
         if (bank === 'amex') {
@@ -204,7 +207,7 @@ export default function SyncWebView({ visible, bank, onClose, onSuccess }) {
         setTimeout(() => {
           captureArmed.current  = true;
           autoCapturing.current = false;
-          webViewRef.current?.injectJavaScript(buildCaptureJs(config.gridSelector));
+          webViewRef.current?.injectJavaScript(buildCaptureJs(config.gridSelector, config.captureMaxBytes));
         }, POST_SWITCH_DELAY_MS);
         return;
       }
@@ -222,8 +225,13 @@ export default function SyncWebView({ visible, bank, onClose, onSuccess }) {
         return;
       }
 
-      if (data.type !== 'CAPTURE_HTML' || !captureArmed.current) return;
+      if (data.type !== 'CAPTURE_HTML' || !captureArmed.current) {
+        console.log(`[SyncWebView:${bank}] ignoring message — type=${data.type} captureArmed=${captureArmed.current}`);
+        return;
+      }
       captureArmed.current = false;
+
+      console.log(`[SyncWebView:${bank}] CAPTURE_HTML received — html.length=${data.html?.length} cardLabel=${data.cardLabel}`);
 
       setSyncing(true);
       const user = getAuthInstance().currentUser;
@@ -235,12 +243,15 @@ export default function SyncWebView({ visible, bank, onClose, onSuccess }) {
         ? (cardLast4 ? `${cardName} (...${cardLast4})` : cardName)
         : null;
 
+      console.log(`[SyncWebView:${bank}] POSTing to ${API_BASE_URL}/api/offers/parse — bank=${bank} cardName=${fullCardName}`);
+
       const response = await fetch(`${API_BASE_URL}/api/offers/parse`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
         body: JSON.stringify({ html: data.html, bank, cardName: fullCardName }),
       });
       const result = await response.json();
+      console.log(`[SyncWebView:${bank}] API response:`, JSON.stringify(result));
       if (!response.ok) throw new Error(result.error || 'Sync failed');
 
       syncedCardsRef.current = [
@@ -274,6 +285,7 @@ export default function SyncWebView({ visible, bank, onClose, onSuccess }) {
       autoCapturing.current = false;
       setSyncing(false);
       setSwitching(false);
+      console.error(`[SyncWebView:${bank}] handleMessage error:`, err.message);
       Alert.alert('Sync Failed', err.message);
     }
   };
