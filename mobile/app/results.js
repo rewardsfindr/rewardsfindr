@@ -1,6 +1,6 @@
 // ─────────────────────────────────────────────
 // RESULTS SCREEN
-// Layout: hero best-choice card + ranked list of all cards.
+// Layout: hero best-choice card + ranked list of remaining cards.
 // Params: storeName (string), offers (JSON string)
 // ─────────────────────────────────────────────
 import React from 'react';
@@ -54,9 +54,6 @@ const bankLabel = (bank) => {
   return map[bank] || bank.toUpperCase();
 };
 
-const maxReward = (offers) =>
-  Math.max(...offers.map(o => parseFloat(o.cashbackAmount) || 0), 1);
-
 // Opens Chase app if installed, falls back to browser
 const openChaseOffer = (offer) => {
   const deepLink = offer.offerDeepLink || null;
@@ -83,6 +80,7 @@ export default function ResultsScreen() {
     (a, b) => (parseFloat(b.cashbackAmount) || 0) - (parseFloat(a.cashbackAmount) || 0)
   );
   const best = sorted[0];
+  const rest = sorted.slice(1); // all cards except the best
   const hasOffers = sorted.length > 0;
 
   const displayName = (hasOffers && best?.merchantName) ? best.merchantName : (storeName || notFound);
@@ -147,59 +145,57 @@ export default function ResultsScreen() {
               </View>
             </View>
 
-            {/* All Your Cards */}
-            <Text style={s.allCardsLabel}>ALL YOUR CARDS</Text>
-
-            {sorted.map((offer, idx) => {
-              const isActivated = offer.isActivated === true;
-              return (
-                <View
-                  key={offer.offerId || idx}
-                  style={s.rankCard}
-                >
-                  <View style={s.rankRow}>
-                    <Text style={s.rankNum}>{idx + 1}</Text>
-                    <View style={s.rankInfo}>
-                      <View style={s.rankNameRow}>
-                        <Text style={s.rankCardName}>{offer.cardName}</Text>
-                        {idx === 0 && (
-                          <View style={s.topBadge}>
-                            <Text style={s.topBadgeText}>TOP</Text>
+            {/* Other Cards — only shown if there are more than 1 */}
+            {rest.length > 0 && (
+              <>
+                <Text style={s.allCardsLabel}>OTHER CARDS</Text>
+                {rest.map((offer, idx) => {
+                  const isActivated = offer.isActivated === true;
+                  return (
+                    <View
+                      key={offer.offerId || idx}
+                      style={s.rankCard}
+                    >
+                      <View style={s.rankRow}>
+                        <Text style={s.rankNum}>{idx + 2}</Text>
+                        <View style={s.rankInfo}>
+                          <View style={s.rankNameRow}>
+                            <Text style={s.rankCardName}>{offer.cardName}</Text>
+                            {isActivated && (
+                              <View style={s.activatedBadge}>
+                                <Text style={s.activatedBadgeText}>✓ ACTIVATED</Text>
+                              </View>
+                            )}
                           </View>
-                        )}
-                        {isActivated && (
-                          <View style={s.activatedBadge}>
-                            <Text style={s.activatedBadgeText}>✓ ACTIVATED</Text>
+                          <Text style={s.rankDesc}>{formatDesc(offer)}</Text>
+                          <View style={s.rankMeta}>
+                            <View style={[s.bankPillSm, { backgroundColor: BANK_COLORS[offer.bank] || colors.primary }]}>
+                              <Text style={s.bankPillSmText}>{bankLabel(offer.bank)}</Text>
+                            </View>
+                            {offer.cardLast4 && (
+                              <Text style={s.rankLast4}>•• {offer.cardLast4}</Text>
+                            )}
                           </View>
-                        )}
-                      </View>
-                      <Text style={s.rankDesc}>{formatDesc(offer)}</Text>
-                      <View style={s.rankMeta}>
-                        <View style={[s.bankPillSm, { backgroundColor: BANK_COLORS[offer.bank] || colors.primary }]}>
-                          <Text style={s.bankPillSmText}>{bankLabel(offer.bank)}</Text>
+                          {!isActivated && (
+                            <TouchableOpacity
+                              style={s.activateBtn}
+                              onPress={() => openChaseOffer(offer)}
+                              activeOpacity={0.8}
+                            >
+                              <Text style={s.activateBtnText}>⚡ Tap to Activate on Chase</Text>
+                            </TouchableOpacity>
+                          )}
                         </View>
-                        {offer.cardLast4 && (
-                          <Text style={s.rankLast4}>•• {offer.cardLast4}</Text>
-                        )}
+                        <View style={s.rankReward}>
+                          <Text style={s.rankRewardPct}>{formatReward(offer.cashbackAmount, offer.cashbackType)}</Text>
+                          <Text style={s.rankRewardLabel}>{formatRewardLabel(offer.cashbackAmount, offer.cashbackType)}</Text>
+                        </View>
                       </View>
-                      {!isActivated && (
-                        <TouchableOpacity
-                          style={s.activateBtn}
-                          onPress={() => openChaseOffer(offer)}
-                          activeOpacity={0.8}
-                        >
-                          <Text style={s.activateBtnText}>⚡ Tap to Activate on Chase</Text>
-                        </TouchableOpacity>
-                      )}
                     </View>
-                    <View style={s.rankReward}>
-                      <Text style={s.rankRewardPct}>{formatReward(offer.cashbackAmount, offer.cashbackType)}</Text>
-                      <Text style={s.rankRewardLabel}>{formatRewardLabel(offer.cashbackAmount, offer.cashbackType)}</Text>
-                    </View>
-                  </View>
-                </View>
-              );
-            })}
+                  );
+                })}
+              </>
+            )}
           </>
         )}
 
@@ -259,9 +255,6 @@ const s = StyleSheet.create({
   rankInfo:         { flex: 1, marginRight: 8 },
   rankNameRow:      { flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 2, flexWrap: 'wrap' },
   rankCardName:     { fontSize: 16, fontWeight: '800', color: colors.textPrimary },
-  topBadge:         { backgroundColor: colors.primaryLight, borderRadius: radii.sm,
-                      paddingHorizontal: 7, paddingVertical: 2 },
-  topBadgeText:     { fontSize: 10, fontWeight: '900', color: '#fff' },
   activatedBadge:   { backgroundColor: '#2ecc71', borderRadius: radii.sm,
                       paddingHorizontal: 7, paddingVertical: 2 },
   activatedBadgeText: { fontSize: 10, fontWeight: '900', color: '#fff' },
