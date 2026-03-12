@@ -26,12 +26,15 @@ export const BANK_CONFIG = {
     useCardsDetectedAsOffersSignal: true,
   },
   amex: {
+    // Entry URL — redirects to login if not authenticated
     url: 'https://www.americanexpress.com/en-us/benefits/offers/',
-    offersUrl: 'https://www.americanexpress.com/en-us/benefits/offers/',
+    // After login, Amex lands on global.americanexpress.com/offers/enrolled
+    offersUrl: 'https://global.americanexpress.com/offers',
     label: 'Amex Offers',
     color: '#007ac1',
-    offersPaths: ['/benefits/offers'],
-    loginPaths: ['/login', '/sign-in', '/identity', '/auth', '/challenge'],
+    // Actual offers pages on global.americanexpress.com
+    offersPaths: ['/offers/enrolled', '/offers'],
+    loginPaths: ['/account/login', '/login', '/sign-in', '/identity', '/auth', '/challenge'],
     gridSelector: null,
     useAmexCardSwitcher: true,
   },
