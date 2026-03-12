@@ -5,6 +5,10 @@
 //   2. On offers page, idle → "Sync Offers" button
 //   3. Sync in progress    → no button, status text + spinner only
 //   4. All done            → auto-close, no button shown
+//
+// isOnOffersPage = URL matches offersPaths AND does NOT match loginPaths
+// This prevents the sync button showing on Chase's login page which has
+// 'merchantOffers' in its hash fragment before authentication.
 // ─────────────────────────────────────────────────────────────────
 import React, { useRef, useState, useEffect } from 'react';
 import {
@@ -24,7 +28,7 @@ const BANK_CONFIG = {
     label: 'Chase Offers',
     color: '#1a3a6b',
     offersPaths: ['/cardmember-offers', 'merchantOffers'],
-    loginPaths: ['/sign-in', '/logon', '/login', '/sso', '/auth', '/identify', '/challenge'],
+    loginPaths: ['/sign-in', '/logon', '/login', '/sso', '/identify', '/challenge'],
     gridSelector: '[data-testid="grid-items-container"]',
   },
   amex: {
@@ -163,7 +167,7 @@ export default function SyncWebView({ visible, bank, onClose, onSuccess }) {
 
   const [syncing, setSyncing]         = useState(false);
   const [switching, setSwitching]     = useState(false);
-  const [syncStarted, setSyncStarted] = useState(false); // true once user taps Sync
+  const [syncStarted, setSyncStarted] = useState(false);
   const [currentCard, setCurrentCard] = useState(null);
   const [currentUrl, setCurrentUrl]   = useState('');
   const [cardCount, setCardCount]     = useState(0);
@@ -191,9 +195,10 @@ export default function SyncWebView({ visible, bank, onClose, onSuccess }) {
     }
   }, [visible]);
 
-  const isOnOffersPage = (config.offersPaths || []).some(
-    (p) => currentUrl.toLowerCase().includes(p.toLowerCase())
-  );
+  const urlLower = currentUrl.toLowerCase();
+  const isOnLoginPage  = (config.loginPaths  || []).some((p) => urlLower.includes(p.toLowerCase()));
+  const isOnOffersPage = !isOnLoginPage &&
+    (config.offersPaths || []).some((p) => urlLower.includes(p.toLowerCase()));
 
   const handleNavigationStateChange = (navState) => {
     if (!navState.url) return;
@@ -332,20 +337,13 @@ export default function SyncWebView({ visible, bank, onClose, onSuccess }) {
   };
 
   const { cardName } = parseCardLabel(currentCard);
-  const totalCards    = cardCount || 1;
-  const isBusy        = syncing || switching || autoCapturing.current;
+  const totalCards = cardCount || 1;
 
-  // Status text shown while sync is running
   const statusText = switching
     ? `⏳ Switching to card ${cardIndexUi + 1} of ${totalCards}...`
     : syncing
       ? `🔄 Syncing ${cardName || 'card'} (${cardIndexUi + 1} of ${totalCards})...`
       : `⚡ Processing...`;
-
-  // Label for the Sync button (before sync starts)
-  const syncBtnLabel = cardName
-    ? `Sync Offers`
-    : `Sync Offers`;
 
   return (
     <Modal visible={visible} animationType="slide" transparent={true} onRequestClose={onClose}>
@@ -372,18 +370,15 @@ export default function SyncWebView({ visible, bank, onClose, onSuccess }) {
           />
           <View style={s.footer}>
             {syncStarted ? (
-              // Sync in progress — no button, just status
               <View style={s.statusRow}>
                 <ActivityIndicator size="small" color={colors.primary} style={s.spinner} />
                 <Text style={s.statusText}>{statusText}</Text>
               </View>
             ) : isOnOffersPage ? (
-              // On offers page, ready to sync
               <TouchableOpacity style={s.syncBtn} onPress={handleSyncPress}>
-                <Text style={s.syncBtnText}>{syncBtnLabel}</Text>
+                <Text style={s.syncBtnText}>Sync Offers</Text>
               </TouchableOpacity>
             ) : (
-              // Not on offers page — fallback
               <>
                 <Text style={s.hint}>Log in above, then tap to go to your offers.</Text>
                 <TouchableOpacity style={s.goToOffersBtn} onPress={handleGoToOffers}>
