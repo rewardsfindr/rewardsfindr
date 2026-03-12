@@ -1,14 +1,14 @@
 // ─────────────────────────────────────────────────────────────────
 // SYNC WEBVIEW MODAL
 // Footer states:
-//   1. Not on offers page  → "Go to Offers Page" button (fallback only)
-//   2. On offers page, idle → "Sync Offers" button
-//   3. Sync in progress    → no button, status text + spinner only
-//   4. All done            → auto-close, no button shown
+//   0. Page not loaded yet → nothing shown (empty footer)
+//   1. Loaded, not on offers page → "Go to Offers Page" button
+//   2. Loaded, on offers page, idle → "Sync Offers" button
+//   3. Sync in progress → no button, status text + spinner only
+//   4. All done → auto-close
 //
 // isOnOffersPage = URL matches offersPaths AND does NOT match loginPaths
-// This prevents the sync button showing on Chase's login page which has
-// 'merchantOffers' in its hash fragment before authentication.
+// pageLoaded resets on every navigation so buttons never appear mid-load.
 // ─────────────────────────────────────────────────────────────────
 import React, { useRef, useState, useEffect } from 'react';
 import {
@@ -168,6 +168,7 @@ export default function SyncWebView({ visible, bank, onClose, onSuccess }) {
   const [syncing, setSyncing]         = useState(false);
   const [switching, setSwitching]     = useState(false);
   const [syncStarted, setSyncStarted] = useState(false);
+  const [pageLoaded, setPageLoaded]   = useState(false); // true only after onLoadEnd
   const [currentCard, setCurrentCard] = useState(null);
   const [currentUrl, setCurrentUrl]   = useState('');
   const [cardCount, setCardCount]     = useState(0);
@@ -190,6 +191,7 @@ export default function SyncWebView({ visible, bank, onClose, onSuccess }) {
       setSyncing(false);
       setSwitching(false);
       setSyncStarted(false);
+      setPageLoaded(false);
       setCardCount(0);
       setCardIndexUi(0);
     }
@@ -203,9 +205,11 @@ export default function SyncWebView({ visible, bank, onClose, onSuccess }) {
   const handleNavigationStateChange = (navState) => {
     if (!navState.url) return;
     setCurrentUrl(navState.url);
+    setPageLoaded(false); // hide buttons until new page finishes loading
   };
 
   const handleLoadEnd = () => {
+    setPageLoaded(true);
     if (bank === 'chase' && !cardsDiscovered.current) {
       webViewRef.current?.injectJavaScript(DETECT_CARDS_JS);
     }
@@ -322,7 +326,6 @@ export default function SyncWebView({ visible, bank, onClose, onSuccess }) {
         const domIndex = cardOptionsRef.current[nextPos].index;
         webViewRef.current?.injectJavaScript(buildSwitchCardJs(domIndex, SWITCH_TIMEOUT_MS));
       } else {
-        // All done — auto-close
         const total = syncedCardsRef.current.reduce((sum, c) => sum + c.count, 0);
         onSuccess(total, syncedCardsRef.current);
         onClose();
@@ -344,6 +347,33 @@ export default function SyncWebView({ visible, bank, onClose, onSuccess }) {
     : syncing
       ? `🔄 Syncing ${cardName || 'card'} (${cardIndexUi + 1} of ${totalCards})...`
       : `⚡ Processing...`;
+
+  const renderFooter = () => {
+    if (syncStarted) {
+      return (
+        <View style={s.statusRow}>
+          <ActivityIndicator size="small" color={colors.primary} style={s.spinner} />
+          <Text style={s.statusText}>{statusText}</Text>
+        </View>
+      );
+    }
+    if (!pageLoaded) return null; // nothing until page finishes loading
+    if (isOnOffersPage) {
+      return (
+        <TouchableOpacity style={s.syncBtn} onPress={handleSyncPress}>
+          <Text style={s.syncBtnText}>Sync Offers</Text>
+        </TouchableOpacity>
+      );
+    }
+    return (
+      <>
+        <Text style={s.hint}>Log in above, then tap to go to your offers.</Text>
+        <TouchableOpacity style={s.goToOffersBtn} onPress={handleGoToOffers}>
+          <Text style={s.syncBtnText}>Go to Offers Page →</Text>
+        </TouchableOpacity>
+      </>
+    );
+  };
 
   return (
     <Modal visible={visible} animationType="slide" transparent={true} onRequestClose={onClose}>
@@ -369,23 +399,7 @@ export default function SyncWebView({ visible, bank, onClose, onSuccess }) {
             thirdPartyCookiesEnabled={true}
           />
           <View style={s.footer}>
-            {syncStarted ? (
-              <View style={s.statusRow}>
-                <ActivityIndicator size="small" color={colors.primary} style={s.spinner} />
-                <Text style={s.statusText}>{statusText}</Text>
-              </View>
-            ) : isOnOffersPage ? (
-              <TouchableOpacity style={s.syncBtn} onPress={handleSyncPress}>
-                <Text style={s.syncBtnText}>Sync Offers</Text>
-              </TouchableOpacity>
-            ) : (
-              <>
-                <Text style={s.hint}>Log in above, then tap to go to your offers.</Text>
-                <TouchableOpacity style={s.goToOffersBtn} onPress={handleGoToOffers}>
-                  <Text style={s.syncBtnText}>Go to Offers Page →</Text>
-                </TouchableOpacity>
-              </>
-            )}
+            {renderFooter()}
           </View>
         </SafeAreaView>
       </View>
@@ -402,7 +416,7 @@ const s = StyleSheet.create({
   closeBtnText: { fontSize: 14, color: colors.textSecondary, fontWeight: '600' },
   headerTitle:  { fontSize: 16, fontWeight: '700', color: colors.textPrimary },
   webview:      { flex: 1 },
-  footer:       { padding: 16, borderTopWidth: 1, borderTopColor: colors.border, backgroundColor: 'white' },
+  footer:       { minHeight: 56, padding: 16, borderTopWidth: 1, borderTopColor: colors.border, backgroundColor: 'white' },
   hint:         { fontSize: 12, color: colors.textMuted, textAlign: 'center', marginBottom: 10 },
   syncBtn:      { backgroundColor: colors.primary, borderRadius: radii.md, paddingVertical: 14, alignItems: 'center' },
   goToOffersBtn:{ backgroundColor: colors.primaryLight, borderRadius: radii.md, paddingVertical: 14, alignItems: 'center' },
