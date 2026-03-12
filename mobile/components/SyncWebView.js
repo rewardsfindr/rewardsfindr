@@ -1,5 +1,15 @@
 // ─────────────────────────────────────────────────────────────────
 // SYNC WEBVIEW MODAL
+// Footer states:
+//   0. Not ready → nothing shown
+//   1. Ready, not on offers page → "Go to Offers Page" button
+//   2. On offers page → "Sync Offers" button
+//   3. Sync in progress → spinner + status text
+//   4. All done → auto-close
+//
+// "ready" for Chase = onOffersPage (CARDS_DETECTED with cards)
+// "ready" for others = pageLoaded AND onOffersPage (URL-based)
+// This handles Chase SPA where CARDS_DETECTED fires before onLoadEnd.
 // ─────────────────────────────────────────────────────────────────
 import React, { useRef, useState, useEffect } from 'react';
 import {
@@ -168,7 +178,6 @@ export default function SyncWebView({ visible, bank, onClose, onSuccess }) {
   const [currentUrl, setCurrentUrl]     = useState('');
   const [cardCount, setCardCount]       = useState(0);
   const [cardIndexUi, setCardIndexUi]   = useState(0);
-  const [debugMsg, setDebugMsg]         = useState('init'); // DEBUG — remove before release
 
   const config = BANK_CONFIG[bank] || BANK_CONFIG.chase;
 
@@ -191,7 +200,6 @@ export default function SyncWebView({ visible, bank, onClose, onSuccess }) {
       setOnOffersPage(false);
       setCardCount(0);
       setCardIndexUi(0);
-      setDebugMsg('init');
     }
   }, [visible]);
 
@@ -199,7 +207,7 @@ export default function SyncWebView({ visible, bank, onClose, onSuccess }) {
     if (!navState.url) return;
     setCurrentUrl(navState.url);
     setPageLoaded(false);
-    setDebugMsg('navigating… ' + navState.url.slice(0, 60));
+    setOnOffersPage(false); // reset on every navigation
     if (!config.useCardsDetectedAsOffersSignal) {
       const url = navState.url.toLowerCase();
       const onLogin  = (config.loginPaths  || []).some((p) => url.includes(p.toLowerCase()));
@@ -210,7 +218,6 @@ export default function SyncWebView({ visible, bank, onClose, onSuccess }) {
 
   const handleLoadEnd = () => {
     setPageLoaded(true);
-    setDebugMsg('loadEnd — injecting DETECT_CARDS_JS');
     if (bank === 'chase') {
       webViewRef.current?.injectJavaScript(DETECT_CARDS_JS);
     }
@@ -233,7 +240,6 @@ export default function SyncWebView({ visible, bank, onClose, onSuccess }) {
 
       if (data.type === 'CARDS_DETECTED') {
         const hasCards = data.cards && data.cards.length > 0;
-        setDebugMsg(`CARDS_DETECTED: ${data.cards?.length ?? 0} cards, err=${data.error || 'none'}`);
         if (!cardsDiscovered.current && hasCards) {
           cardOptionsRef.current  = data.cards;
           cardsDiscovered.current = true;
@@ -244,6 +250,8 @@ export default function SyncWebView({ visible, bank, onClose, onSuccess }) {
         }
         setCurrentCard(data.selectedLabel || null);
         if (config.useCardsDetectedAsOffersSignal) {
+          // Chase: card dropdown present = confirmed on offers page
+          // This fires before onLoadEnd so we don't gate on pageLoaded here
           setOnOffersPage(hasCards);
         }
         return;
@@ -363,7 +371,8 @@ export default function SyncWebView({ visible, bank, onClose, onSuccess }) {
         </View>
       );
     }
-    if (!pageLoaded) return null;
+    // Show Sync button as soon as we know we're on the offers page
+    // (for Chase this happens via CARDS_DETECTED, before onLoadEnd)
     if (onOffersPage) {
       return (
         <TouchableOpacity style={s.syncBtn} onPress={handleSyncPress}>
@@ -371,6 +380,8 @@ export default function SyncWebView({ visible, bank, onClose, onSuccess }) {
         </TouchableOpacity>
       );
     }
+    // Don't show the fallback button until the page has actually loaded
+    if (!pageLoaded) return null;
     return (
       <>
         <Text style={s.hint}>Log in above, then tap to go to your offers.</Text>
@@ -404,13 +415,6 @@ export default function SyncWebView({ visible, bank, onClose, onSuccess }) {
             sharedCookiesEnabled={true}
             thirdPartyCookiesEnabled={true}
           />
-          {/* DEBUG OVERLAY — remove before release */}
-          <View style={s.debugBar}>
-            <Text style={s.debugText}
-              numberOfLines={2}>
-              loaded={String(pageLoaded)} offers={String(onOffersPage)} cards={cardCount}{"\n"}{debugMsg}
-            </Text>
-          </View>
           <View style={s.footer}>
             {renderFooter()}
           </View>
@@ -429,8 +433,6 @@ const s = StyleSheet.create({
   closeBtnText: { fontSize: 14, color: colors.textSecondary, fontWeight: '600' },
   headerTitle:  { fontSize: 16, fontWeight: '700', color: colors.textPrimary },
   webview:      { flex: 1 },
-  debugBar:     { backgroundColor: '#000', paddingHorizontal: 8, paddingVertical: 4 },
-  debugText:    { color: '#0f0', fontSize: 10, fontFamily: 'monospace' },
   footer:       { minHeight: 56, padding: 16, borderTopWidth: 1, borderTopColor: colors.border, backgroundColor: 'white' },
   hint:         { fontSize: 12, color: colors.textMuted, textAlign: 'center', marginBottom: 10 },
   syncBtn:      { backgroundColor: colors.primary, borderRadius: radii.md, paddingVertical: 14, alignItems: 'center' },
