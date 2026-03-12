@@ -12,7 +12,7 @@
 // ─────────────────────────────────────────────
 import express from 'express';
 import { db, auth } from '../config/firebase.js';
-import { normalizeMerchant } from '../../shared/offerUtils.js';
+import { normalizeMerchant } from '../lib/shared/offerUtils.js';
 
 const router = express.Router();
 

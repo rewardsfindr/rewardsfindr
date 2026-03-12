@@ -9,7 +9,7 @@
 import express from 'express';
 import { db, auth } from '../config/firebase.js';
 import { FieldValue, Timestamp } from 'firebase-admin/firestore';
-import { generateOfferId, normalizeMerchant } from '../../shared/offerUtils.js';
+import { generateOfferId, normalizeMerchant } from '../lib/shared/offerUtils.js';
 import { parseChaseOffers } from '../lib/parsers/chase.js';
 import { parseAmexOffers } from '../lib/parsers/amex.js';
 
@@ -17,8 +17,6 @@ const router = express.Router();
 
 const OFFER_TTL_MS = 90 * 24 * 60 * 60 * 1000;
 
-// Safely convert an ISO date string to a Firestore Timestamp.
-// Falls back to now + 90 days if the value is missing or unparseable.
 function toSafeTimestamp(value) {
   const ms = value ? new Date(value).getTime() : NaN;
   const safeMs = Number.isFinite(ms) ? ms : Date.now() + OFFER_TTL_MS;
@@ -41,11 +39,6 @@ async function verifyToken(req, res) {
   }
 }
 
-// ─────────────────────────────────────────────
-// Delete expired offers for a user+bank on sync.
-// Runs before writing new offers — free-tier safe,
-// only reads/deletes within the user's own subcollection.
-// ─────────────────────────────────────────────
 async function purgeExpiredOffers(userOffersRef, bank) {
   const now = Timestamp.now();
   const expired = await userOffersRef
@@ -62,13 +55,9 @@ async function purgeExpiredOffers(userOffersRef, bank) {
   return expired.size;
 }
 
-// ─────────────────────────────────────────────
-// Write offers to /users/{userId}/offers/{offerId}
-// ─────────────────────────────────────────────
 async function writeOffersToDB(offers, { userId, bank, cardName }) {
   const userOffersRef = db.collection('users').doc(userId).collection('offers');
 
-  // Purge stale offers for this bank before writing fresh ones
   await purgeExpiredOffers(userOffersRef, bank);
 
   const batch = db.batch();

@@ -1,0 +1,9 @@
+node_modules
+.env
+.env.*
+!.env.example
+npm-debug.log
+*.test.js
+README.md
+FIRESTORE_INDEXES.md
+DEPLOYMENT.md
