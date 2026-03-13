@@ -1,5 +1,6 @@
 // ─────────────────────────────────────────────
-// AMEX SYNC — JS injection strings
+// AMEX SYNC — JS injection strings + load handler
+//
 // Amex uses a combobox + listbox pattern:
 //   [data-testid="simple_switcher_combobox"]
 //   [role="option"][data-testid*="CARD_PRODUCT"]
@@ -10,6 +11,13 @@
 //   3. Wait for re-render, then confirm via display label
 //
 // CARD_PRODUCT filter excludes checking/savings accounts.
+//
+// Two-phase sync:
+//   Phase 1 (eligible)  → global.americanexpress.com/offers/eligible
+//   Phase 2 (enrolled)  → global.americanexpress.com/offers/enrolled
+//
+// All Amex-specific URL detection logic lives in amexHandleLoadEnd()
+// so SyncWebView stays bank-agnostic.
 // ─────────────────────────────────────────────
 
 const DETECT_CARDS_INNER = `
@@ -109,3 +117,45 @@ export const AMEX_READ_CARD_LABEL_JS = `
     return name + (last4 ? ' (...' + last4 + ')' : '');
   })()
 `;
+
+// ─────────────────────────────────────────────
+// amexHandleLoadEnd
+// Call this from SyncWebView.handleLoadEnd when bank === 'amex'.
+// Returns { onOffersPage, phase } so SyncWebView can update state.
+// Also triggers card detection injection when appropriate.
+//
+// phases: 'eligible' | 'enrolled'
+// ─────────────────────────────────────────────
+export const amexHandleLoadEnd = ({
+  url,
+  config,
+  syncPhase,          // current phase ref value
+  cardsDiscovered,    // ref.current
+  injectJavaScript,   // webViewRef.current?.injectJavaScript
+}) => {
+  const lower = url.toLowerCase();
+  const onLogin = (config.loginPaths || []).some(p => lower.includes(p.toLowerCase()));
+
+  const onEligible = !onLogin && lower.includes(config.eligiblePath.toLowerCase());
+  const onEnrolled = !onLogin && lower.includes(config.enrolledPath.toLowerCase());
+  const onOffersPage = onEligible || onEnrolled;
+
+  // Determine phase from URL — URL is source of truth
+  const detectedPhase = onEnrolled ? 'enrolled' : 'eligible';
+
+  console.log(
+    `[amexHandleLoadEnd] onLogin=${onLogin} onEligible=${onEligible} onEnrolled=${onEnrolled}`,
+    `syncPhase=${syncPhase} detectedPhase=${detectedPhase} cardsDiscovered=${cardsDiscovered}`
+  );
+
+  // Inject card detection when:
+  // - we are on an offers page
+  // - cards not yet discovered for this phase
+  //   (cardsDiscovered resets to false when phase transitions)
+  if (onOffersPage && !cardsDiscovered) {
+    console.log('[amexHandleLoadEnd] injecting AMEX_OPEN_AND_DETECT_JS');
+    injectJavaScript(AMEX_OPEN_AND_DETECT_JS);
+  }
+
+  return { onOffersPage, detectedPhase };
+};
