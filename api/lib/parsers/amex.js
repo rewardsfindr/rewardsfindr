@@ -24,19 +24,14 @@ export function parseAmexOffers(html) {
   const $ = cheerio.load(html);
   const offers = [];
 
-  // Determine row set:
-  // Case 1: captured HTML is outerHTML of listViewContainer itself (root element)
-  // Case 2: captured HTML is a larger page containing listViewContainer
   let $rows;
   const $root = $.root().children().first();
   const isRootListView = $root.attr('data-testid') === 'listViewContainer';
 
   if (isRootListView) {
-    // Root IS the container — rows are its direct children
     $rows = $root.children('div');
     console.log(`[parseAmexOffers] root IS listViewContainer, direct div children: ${$rows.length}`);
   } else {
-    // Full page — find container then its children
     $rows = $('[data-testid="listViewContainer"]').first().children('div');
     console.log(`[parseAmexOffers] full page mode, listViewContainer children: ${$rows.length}`);
   }
@@ -60,29 +55,34 @@ export function parseAmexOffers(html) {
       const offerDescription = descContainers.eq(1).text().trim() || offerTitle;
 
       // ── Cashback Parsing ─────────────────────────────
+      // Search both title and description; description usually has the cashback value
+      const searchText = offerTitle + ' ' + offerDescription;
+
       let cashbackAmount = 0;
       let cashbackType   = 'fixed';
 
-      const pointsMatch  = offerTitle.match(/[Ee]arn\s+(\d+(?:\.\d+)?)\s+[Mm]embership\s+[Rr]ewards/);
-      const percentMatch = offerTitle.match(/(\d+(?:\.\d+)?)%/);
-      const dollarMatch  = offerTitle.match(/\$([\d.]+)/);
+      const pointsMatch  = searchText.match(/[Ee]arn\s+([\d,]+(?:\.\d+)?)\s+[Mm]embership\s+[Rr]ewards/);
+      const percentMatch = searchText.match(/([\d.]+)%\s+back/);
+      // Match last dollar amount after "earn" (handles "earn $10 back", "earn $25")
+      const dollarMatch  = searchText.match(/[Ee]arn\s+\$([0-9,]+(?:\.[0-9]+)?)/);
 
       if (pointsMatch) {
-        cashbackAmount = parseFloat(pointsMatch[1]);
+        cashbackAmount = parseFloat(pointsMatch[1].replace(/,/g, ''));
         cashbackType   = 'points';
       } else if (percentMatch) {
         cashbackAmount = parseFloat(percentMatch[1]);
         cashbackType   = 'percent';
       } else if (dollarMatch) {
-        cashbackAmount = parseFloat(dollarMatch[1]);
+        cashbackAmount = parseFloat(dollarMatch[1].replace(/,/g, ''));
         cashbackType   = 'fixed';
       }
 
       // ── Minimum Spend ────────────────────────────────
       let minimumSpend = 0;
-      const combinedText  = (offerTitle + ' ' + offerDescription).toLowerCase();
-      const minSpendMatch = combinedText.match(/spend\s+\$?([\d.]+)/);
-      if (minSpendMatch) minimumSpend = parseFloat(minSpendMatch[1]);
+      const combinedText  = searchText.toLowerCase();
+      // Strip commas from amounts like $1,000
+      const minSpendMatch = combinedText.match(/spend\s+\$?([\d,]+(?:\.\d+)?)/);
+      if (minSpendMatch) minimumSpend = parseFloat(minSpendMatch[1].replace(/,/g, ''));
 
       // ── Expiry Date ──────────────────────────────────
       let expiryDate    = null;
