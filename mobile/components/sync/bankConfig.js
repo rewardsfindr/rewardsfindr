@@ -29,18 +29,20 @@ export const BANK_CONFIG = {
   amex: {
     // Entry URL — redirects to login if not authenticated
     url: 'https://www.americanexpress.com/en-us/benefits/offers/',
-    // After login Amex lands on global.americanexpress.com
-    offersUrl: 'https://global.americanexpress.com/offers/eligible',
+    // After login Amex lands on global.americanexpress.com/offers (with query params)
+    // We navigate here to ensure we're on the eligible offers tab
+    offersUrl: 'https://global.americanexpress.com/offers',
     // Activated/enrolled offers page
     enrolledUrl: 'https://global.americanexpress.com/offers/enrolled',
     label: 'Amex Offers',
     color: '#007ac1',
-    // IMPORTANT: must only match global.americanexpress.com/offers* NOT
-    // americanexpress.com/en-us/benefits/offers (marketing page)
-    eligiblePath: 'global.americanexpress.com/offers/eligible',
+    // eligiblePath: matches global.americanexpress.com/offers (with or without query params)
+    // MUST NOT match enrolledPath — check enrolled first in amexHandleLoadEnd
+    // MUST NOT match americanexpress.com/en-us/benefits/offers (marketing page)
+    eligiblePath: 'global.americanexpress.com/offers',
     enrolledPath: 'global.americanexpress.com/offers/enrolled',
     offersPaths: ['global.americanexpress.com/offers'],
-    loginPaths: ['/account/login', '/login', '/sign-in', '/identity', '/auth', '/challenge'],
+    loginPaths: ['/account/login', '/login', '/sign-in', '/identity', '/auth', '/challenge', 'two-step-verification'],
     // Real offer rows are direct DIV children of this container
     gridSelector: '[data-testid="listViewContainer"]',
     captureMaxBytes: 500000,
