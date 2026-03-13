@@ -9,18 +9,18 @@
 //   2. Page loaded, not on offers page  → "Go to Offers Page"
 //   3. Sync in progress                 → spinner + status
 //
-// onOffersPage source of truth per bank:
+// onOffersPage + pageLoaded source of truth per bank:
 //   Chase → CARDS_DETECTED message (SPA)
-//   Amex  → handleLoadEnd URL check via amexHandleLoadEnd()
-//           navState fires AFTER loadEnd on Amex so we skip the reset for Amex
+//   Amex  → handleLoadEnd ONLY via amexHandleLoadEnd()
+//           navState must NOT reset pageLoaded for Amex — navState fires
+//           after loadEnd and would wipe the flag before render
 //   Other → handleNavigationStateChange URL check
 //
 // Amex two-phase sync:
 //   Phase 1 (eligible) — user taps "Sync Offers"
 //   Phase 2 (enrolled) — auto after all eligible cards done
 //   Both phases use the same per-card switching + capture pipeline.
-//   Cookies/session persist across syncs (no incognito) so device trust is maintained.
-//   Entry URL always starts at login page — Amex auto-redirects if session is active.
+//   Cookies/session persist across syncs so device trust is maintained.
 //
 // Adding a new bank:
 //   1. Add entry to sync/bankConfig.js
@@ -55,10 +55,9 @@ export default function SyncWebView({ visible, bank, onClose, onSuccess }) {
   const syncedCardsRef   = useRef([]);
   const cardsDiscovered  = useRef(false);
   const switchRetriesRef = useRef(0);
-  const syncedCountRef   = useRef(0);   // cards synced in current phase
+  const syncedCountRef   = useRef(0);
   const captureArmed     = useRef(false);
   const autoCapturing    = useRef(false);
-  // Amex two-phase: 'eligible' | 'enrolled'
   const syncPhaseRef     = useRef('eligible');
 
   // ── UI state ──────────────────────────────────────────────────
@@ -71,7 +70,6 @@ export default function SyncWebView({ visible, bank, onClose, onSuccess }) {
   const [currentUrl, setCurrentUrl]     = useState('');
   const [cardCount, setCardCount]       = useState(0);
   const [cardIndexUi, setCardIndexUi]   = useState(0);
-  // Amex phase label for status text
   const [syncPhaseUi, setSyncPhaseUi]   = useState('eligible');
 
   const config = BANK_CONFIG[bank] || BANK_CONFIG.chase;
@@ -102,8 +100,6 @@ export default function SyncWebView({ visible, bank, onClose, onSuccess }) {
   }, [visible]);
 
   // ── Helpers ───────────────────────────────────────────────────
-
-  // Reset per-card state when transitioning to a new sync phase.
   const resetForPhase = (phase) => {
     cardIndexRef.current     = 0;
     syncedCountRef.current   = 0;
@@ -116,7 +112,6 @@ export default function SyncWebView({ visible, bank, onClose, onSuccess }) {
     setCardIndexUi(0);
     setSwitching(false);
     setSyncing(false);
-    // Keep cardOptionsRef — same cards, same order, just restart index
   };
 
   // ── Navigation handlers ───────────────────────────────────────
@@ -125,11 +120,13 @@ export default function SyncWebView({ visible, bank, onClose, onSuccess }) {
     if (!navState.url) return;
     console.log(`[SyncWebView:${bank}] navState url:`, navState.url);
     setCurrentUrl(navState.url);
-    setPageLoaded(false);
 
-    // Amex: handleLoadEnd is the source of truth for onOffersPage.
+    // Amex: handleLoadEnd is the ONLY source of truth for pageLoaded + onOffersPage.
+    // navState fires AFTER loadEnd on Amex — resetting pageLoaded here would
+    // wipe the flag set by handleLoadEnd before the next render.
     if (config.useAmexCardSwitcher) return;
 
+    setPageLoaded(false);
     setOnOffersPage(false);
     if (!config.useCardsDetectedAsOffersSignal) {
       const url      = navState.url.toLowerCase();
@@ -150,7 +147,7 @@ export default function SyncWebView({ visible, bank, onClose, onSuccess }) {
     }
 
     if (bank === 'amex') {
-      const { onOffersPage: onOffers, detectedPhase } = amexHandleLoadEnd({
+      const { onOffersPage: onOffers } = amexHandleLoadEnd({
         url,
         config,
         syncPhase:        syncPhaseRef.current,
@@ -170,7 +167,6 @@ export default function SyncWebView({ visible, bank, onClose, onSuccess }) {
     webViewRef.current?.injectJavaScript(`window.location.replace('${target}'); true;`);
   };
 
-  // ── User taps "Sync Offers" (eligible phase only) ─────────────
   const handleSyncPress = () => {
     console.log(`[SyncWebView:${bank}] Sync pressed — gridSelector:`, config.gridSelector);
     setSyncStarted(true);
@@ -178,14 +174,12 @@ export default function SyncWebView({ visible, bank, onClose, onSuccess }) {
     webViewRef.current?.injectJavaScript(buildCaptureJs(config.gridSelector, config.captureMaxBytes));
   };
 
-  // ── Transition from eligible → enrolled (Amex only) ──────────
   const transitionToEnrolled = () => {
     console.log('[SyncWebView:amex] transitioning to enrolled phase');
     resetForPhase('enrolled');
     webViewRef.current?.injectJavaScript(`window.location.replace('${config.enrolledUrl}'); true;`);
   };
 
-  // ── Auto-capture for enrolled phase ─────────────────────────
   const autoCapureEnrolledCard = () => {
     console.log('[SyncWebView:amex] auto-capturing enrolled card at index', cardIndexRef.current);
     captureArmed.current = true;
@@ -198,7 +192,6 @@ export default function SyncWebView({ visible, bank, onClose, onSuccess }) {
       const data = JSON.parse(event.nativeEvent.data);
       console.log(`[SyncWebView:${bank}] message type:`, data.type, data.error || '');
 
-      // ── Chase card detection ──────────────────────────────────
       if (data.type === 'CARDS_DETECTED') {
         const hasCards = data.cards?.length > 0;
         if (!cardsDiscovered.current && hasCards) {
@@ -214,11 +207,9 @@ export default function SyncWebView({ visible, bank, onClose, onSuccess }) {
         return;
       }
 
-      // ── Amex card detection ───────────────────────────────────
       if (data.type === 'AMEX_CARDS_DETECTED') {
         console.log('[SyncWebView:amex] AMEX_CARDS_DETECTED cards:', data.cards?.length, 'phase:', syncPhaseRef.current, 'error:', data.error);
         const hasCards = data.cards?.length > 0;
-
         if (!cardsDiscovered.current && hasCards) {
           if (syncPhaseRef.current === 'eligible') {
             cardOptionsRef.current = data.cards;
@@ -227,13 +218,11 @@ export default function SyncWebView({ visible, bank, onClose, onSuccess }) {
             cardIndexRef.current = activeIdx >= 0 ? activeIdx : 0;
             setCardIndexUi(cardIndexRef.current);
           } else {
-            // enrolled: reuse stored card list, index already reset to 0
             setCardIndexUi(0);
           }
           cardsDiscovered.current = true;
           setCurrentCard(data.selectedLabel || null);
 
-          // enrolled phase: auto-switch to card 0 then capture
           if (syncPhaseRef.current === 'enrolled') {
             console.log('[SyncWebView:amex] enrolled cards detected — switching to card 0');
             const firstCard = cardOptionsRef.current[0];
@@ -248,7 +237,6 @@ export default function SyncWebView({ visible, bank, onClose, onSuccess }) {
         return;
       }
 
-      // ── Card switched (Chase + Amex) ──────────────────────────
       if (data.type === 'CARD_SWITCHED') {
         let switchConfirmed = false;
         if (bank === 'amex') {
@@ -281,7 +269,6 @@ export default function SyncWebView({ visible, bank, onClose, onSuccess }) {
           return;
         }
 
-        // Eligible phase: delay before capture
         autoCapturing.current = true;
         setTimeout(() => {
           captureArmed.current  = true;
@@ -344,7 +331,6 @@ export default function SyncWebView({ visible, bank, onClose, onSuccess }) {
       setSyncing(false);
 
       if (syncedCountRef.current < totalCards) {
-        // More cards in this phase
         const nextPos = (cardIndexRef.current + 1) % totalCards;
         cardIndexRef.current = nextPos;
         setCardIndexUi(nextPos);
@@ -357,10 +343,8 @@ export default function SyncWebView({ visible, bank, onClose, onSuccess }) {
           webViewRef.current?.injectJavaScript(buildSwitchCardJs(cardOptionsRef.current[nextPos].index, SWITCH_TIMEOUT_MS));
         }
       } else if (bank === 'amex' && currentPhase === 'eligible') {
-        // All eligible cards done — auto-transition to enrolled
         transitionToEnrolled();
       } else {
-        // All done
         const total = syncedCardsRef.current.reduce((sum, c) => sum + c.count, 0);
         onSuccess(total, syncedCardsRef.current);
         onClose();
