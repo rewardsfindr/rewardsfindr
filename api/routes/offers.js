@@ -146,7 +146,7 @@ router.post('/parse', async (req, res) => {
     if (!decoded) return;
 
     const userId = decoded.uid;
-    const { html, bank, cardName } = req.body;
+    const { html, bank, cardName, phase } = req.body;
 
     if (!html || typeof html !== 'string') {
       return res.status(400).json({ error: 'html is required and must be a string' });
@@ -156,7 +156,7 @@ router.post('/parse', async (req, res) => {
     }
 
     // DEBUG: log incoming HTML stats
-    console.log(`📥 [parse] bank=${bank} cardName=${cardName} html.length=${html.length}`);
+    console.log(`📥 [parse] bank=${bank} cardName=${cardName} phase=${phase} html.length=${html.length}`);
     console.log(`📥 [parse] html snippet (first 300 chars):`, html.substring(0, 300));
 
     // DEBUG: check if key Amex selectors are present in the HTML
@@ -169,6 +169,14 @@ router.post('/parse', async (req, res) => {
 
     const parseFn = bank === 'chase' ? parseChaseOffers : parseAmexOffers;
     const offers = parseFn(html);
+
+    // For Amex, override isActivated based on phase:
+    // eligible page = all not activated, enrolled page = all activated
+    if (bank === 'amex' && phase) {
+      const activated = phase === 'enrolled';
+      offers.forEach(o => { o.isActivated = activated; });
+      console.log(`🔍 [parse:amex] overriding isActivated=${activated} for all ${offers.length} offers (phase=${phase})`);
+    }
 
     console.log(`🔍 [parse] parsed ${offers.length} offers from ${bank} HTML for user ${userId}`);
     if (offers.length > 0) {

@@ -314,7 +314,7 @@ export default function SyncWebView({ visible, bank, onClose, onSuccess }) {
       const response = await fetch(`${API_BASE_URL}/api/offers/parse`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-        body: JSON.stringify({ html: data.html, bank, cardName: fullCardName }),
+        body: JSON.stringify({ html: data.html, bank, cardName: fullCardName, phase: syncPhaseRef.current }),
       });
       const result = await response.json();
       console.log(`[SyncWebView:${bank}] API response:`, JSON.stringify(result));
