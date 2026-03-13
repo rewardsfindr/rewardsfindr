@@ -3,28 +3,24 @@
 //
 // Amex uses a combobox + listbox pattern:
 //   [data-testid="simple_switcher_combobox"]
-//   [role="option"][data-testid*="CARD_PRODUCT"]
+//   [role="option"][data-testid*="CARD_PRODUCT"]  ← eligible page
+//   [role="option"]                               ← enrolled page (numeric testIds)
 //
 // Card switching:
 //   1. Click combobox to open listbox
-//   2. Click the target option by data-testid
-//   3. Wait for re-render, then confirm via display label
-//
-// CARD_PRODUCT filter excludes checking/savings accounts.
+//   2. Click target option by data-testid (CARD_PRODUCT)
+//      OR fall back to first [role="option"] (enrolled page uses numeric testIds)
+//   3. Wait for re-render, confirm via display label
 //
 // Two-phase sync:
-//   Phase 1 (eligible)  → global.americanexpress.com/offers (with query params)
+//   Phase 1 (eligible)  → global.americanexpress.com/offers
 //   Phase 2 (enrolled)  → global.americanexpress.com/offers/enrolled
 //
 // IMPORTANT: enrolledPath is a substring of eligiblePath so we ALWAYS
 // check enrolled first and make them mutually exclusive.
 //
 // Amex's SPA may auto-navigate to /offers/enrolled during eligible phase.
-// amexHandleLoadEnd returns detectedPhase so SyncWebView can ignore it
-// when syncPhase is still 'eligible'.
-//
-// All Amex-specific URL detection logic lives in amexHandleLoadEnd()
-// so SyncWebView stays bank-agnostic.
+// amexHandleLoadEnd gates injection on syncPhase match to ignore this.
 // ─────────────────────────────────────────────
 
 const DETECT_CARDS_INNER = `
@@ -32,13 +28,13 @@ const DETECT_CARDS_INNER = `
     var options = document.querySelectorAll('[role="option"][data-testid*="CARD_PRODUCT"]');
     var cards = [];
     options.forEach(function(opt, i) {
-      var nameEl  = opt.querySelector('[data-testid="simple_switcher_display_name"]');
-      var numEl   = opt.querySelector('[data-testid="simple_switcher_display_number_val"]');
-      var name    = nameEl ? nameEl.innerText.trim() : '';
-      var numRaw  = numEl  ? numEl.innerText.trim()  : '';
-      var last4   = numRaw.replace(/[^\\d]/g, '').slice(-4);
+      var nameEl   = opt.querySelector('[data-testid="simple_switcher_display_name"]');
+      var numEl    = opt.querySelector('[data-testid="simple_switcher_display_number_val"]');
+      var name     = nameEl ? nameEl.innerText.trim() : '';
+      var numRaw   = numEl  ? numEl.innerText.trim()  : '';
+      var last4    = numRaw.replace(/[^\\d]/g, '').slice(-4);
       var selected = opt.getAttribute('aria-selected') === 'true';
-      var testId  = opt.getAttribute('data-testid') || '';
+      var testId   = opt.getAttribute('data-testid') || '';
       cards.push({ label: name, last4: last4, testId: testId, index: i, selected: selected });
     });
     var selectedCard = cards.find(function(c) { return c.selected; });
@@ -74,6 +70,10 @@ export const AMEX_OPEN_AND_DETECT_JS = `
   true;
 `;
 
+// buildAmexSwitchCardJs
+// Tries to click the option matching testId (CARD_PRODUCT pattern, eligible page).
+// Falls back to first available [role="option"] if not found (enrolled page uses
+// numeric testIds that differ from eligible page testIds).
 export const buildAmexSwitchCardJs = (testId, timeoutMs = 3500) => `
   (function() {
     try {
@@ -84,9 +84,14 @@ export const buildAmexSwitchCardJs = (testId, timeoutMs = 3500) => `
       }
       combobox.click();
       setTimeout(function() {
+        // Try exact testId match first (eligible page CARD_PRODUCT pattern)
         var option = document.querySelector('[data-testid="${testId}"]');
+        // Fallback: first available [role="option"] (enrolled page numeric testIds)
         if (!option) {
-          window.ReactNativeWebView.postMessage(JSON.stringify({ type: 'CARD_SWITCH_ERROR', message: 'Amex option not found: ${testId}' }));
+          option = document.querySelector('[role="option"]');
+        }
+        if (!option) {
+          window.ReactNativeWebView.postMessage(JSON.stringify({ type: 'CARD_SWITCH_ERROR', message: 'No switchable option found for: ${testId}' }));
           return;
         }
         option.click();
@@ -154,12 +159,9 @@ export const amexHandleLoadEnd = ({
   // Eligible must explicitly exclude enrolled
   const onEligible = !onLogin && !onEnrolled && lower.includes(eligiblePathLower);
 
-  // detectedPhase is purely URL-based
   const detectedPhase = onEnrolled ? 'enrolled' : 'eligible';
 
-  // onOffersPage only true when detectedPhase matches the current sync phase.
-  // This prevents Amex's own SPA navigation to /enrolled from showing
-  // the Sync button or injecting card detection during the eligible phase.
+  // Gate on phase match to ignore Amex SPA auto-navigation to /enrolled
   const phaseMatch   = detectedPhase === syncPhase;
   const onOffersPage = phaseMatch && (onEligible || onEnrolled);
 
@@ -168,7 +170,6 @@ export const amexHandleLoadEnd = ({
     `syncPhase=${syncPhase} detectedPhase=${detectedPhase} phaseMatch=${phaseMatch} cardsDiscovered=${cardsDiscovered}`
   );
 
-  // Only inject card detection when phase matches and cards not yet found
   if (onOffersPage && !cardsDiscovered) {
     console.log('[amexHandleLoadEnd] injecting AMEX_OPEN_AND_DETECT_JS');
     injectJavaScript(AMEX_OPEN_AND_DETECT_JS);
