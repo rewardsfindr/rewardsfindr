@@ -61,9 +61,10 @@ export function parseAmexOffers(html) {
       let cashbackAmount = 0;
       let cashbackType   = 'fixed';
 
-      const pointsMatch  = searchText.match(/[Ee]arn\s+([\d,]+(?:\.\d+)?)\s+[Mm]embership\s+[Rr]ewards/);
+      // Handle "Earn +5 Membership Rewards" or "earn 10,000 Membership Rewards"
+      const pointsMatch  = searchText.match(/[Ee]arn\s+\+?([\d,]+(?:\.\d+)?)\s+[Mm]embership\s+[Rr]ewards/);
       const percentMatch = searchText.match(/([\d.]+)%\s+back/);
-      // Match last dollar amount after "earn" (handles "earn $10 back", "earn $25")
+      // Match dollar amount after "earn" (handles "earn $10 back", "earn $25")
       const dollarMatch  = searchText.match(/[Ee]arn\s+\$([0-9,]+(?:\.[0-9]+)?)/);
 
       if (pointsMatch) {
