@@ -53,16 +53,18 @@ export default function SyncWebView({ visible, bank, onClose, onSuccess }) {
   const webViewRef = useRef(null);
 
   // ── Sync state refs (not UI) ──────────────────────────────────
-  const cardOptionsRef    = useRef([]);
-  const cardIndexRef      = useRef(0);
-  const syncedCardsRef    = useRef([]);
-  const cardsDiscovered   = useRef(false);
-  const switchRetriesRef  = useRef(0);
-  const syncedCountRef    = useRef(0);
-  const captureArmed      = useRef(false);
-  const syncPhaseRef      = useRef('eligible');
+  const cardOptionsRef      = useRef([]);
+  const cardIndexRef        = useRef(0);
+  const syncedCardsRef      = useRef([]);
+  const cardsDiscovered     = useRef(false);
+  const switchRetriesRef    = useRef(0);
+  const syncedCountRef      = useRef(0);
+  const captureArmed        = useRef(false);
+  const syncPhaseRef        = useRef('eligible');
   // After reload, switch to this card then capture
-  const switchPendingRef  = useRef(null); // { testId, cardIndex }
+  const switchPendingRef    = useRef(null); // { testId, cardIndex }
+  // Stores cardLabel from CARD_SWITCHED to avoid stale DOM read in CAPTURE_HTML
+  const pendingCardLabelRef = useRef(null);
 
   // ── UI state ──────────────────────────────────────────────────
   const [syncing, setSyncing]           = useState(false);
@@ -81,15 +83,16 @@ export default function SyncWebView({ visible, bank, onClose, onSuccess }) {
   // ── Reset on close ────────────────────────────────────────────
   useEffect(() => {
     if (!visible) {
-      cardOptionsRef.current   = [];
-      cardIndexRef.current     = 0;
-      syncedCardsRef.current   = [];
-      cardsDiscovered.current  = false;
-      switchRetriesRef.current = 0;
-      syncedCountRef.current   = 0;
-      captureArmed.current     = false;
-      syncPhaseRef.current     = 'eligible';
-      switchPendingRef.current = null;
+      cardOptionsRef.current      = [];
+      cardIndexRef.current        = 0;
+      syncedCardsRef.current      = [];
+      cardsDiscovered.current     = false;
+      switchRetriesRef.current    = 0;
+      syncedCountRef.current      = 0;
+      captureArmed.current        = false;
+      syncPhaseRef.current        = 'eligible';
+      switchPendingRef.current    = null;
+      pendingCardLabelRef.current = null;
       setCurrentCard(null);
       setCurrentUrl('');
       setSyncing(false);
@@ -105,13 +108,14 @@ export default function SyncWebView({ visible, bank, onClose, onSuccess }) {
 
   // ── Helpers ───────────────────────────────────────────────────
   const resetForPhase = (phase) => {
-    cardIndexRef.current     = 0;
-    syncedCountRef.current   = 0;
-    cardsDiscovered.current  = false;
-    switchRetriesRef.current = 0;
-    captureArmed.current     = false;
-    switchPendingRef.current = null;
-    syncPhaseRef.current     = phase;
+    cardIndexRef.current        = 0;
+    syncedCountRef.current      = 0;
+    cardsDiscovered.current     = false;
+    switchRetriesRef.current    = 0;
+    captureArmed.current        = false;
+    switchPendingRef.current    = null;
+    pendingCardLabelRef.current = null;
+    syncPhaseRef.current        = phase;
     setSyncPhaseUi(phase);
     setCardIndexUi(0);
     setSwitching(false);
@@ -255,6 +259,8 @@ export default function SyncWebView({ visible, bank, onClose, onSuccess }) {
         setCurrentCard(data.cardLabel || null);
 
         if (bank === 'amex') {
+          // Store label now — DOM may be stale by the time CAPTURE_HTML fires
+          pendingCardLabelRef.current = data.cardLabel || null;
           // Switch confirmed on fresh page — now capture
           console.log(`[SyncWebView:amex] switch confirmed (${data.cardLabel}) — arming capture`);
           setTimeout(() => {
@@ -298,7 +304,10 @@ export default function SyncWebView({ visible, bank, onClose, onSuccess }) {
       if (!user) throw new Error('You must be signed in to sync offers.');
       const token = await user.getIdToken();
 
-      const { cardName, cardLast4 } = parseCardLabel(data.cardLabel);
+      // Use pendingCardLabelRef if set (avoids stale DOM label after Amex card switch)
+      const resolvedLabel = pendingCardLabelRef.current || data.cardLabel;
+      pendingCardLabelRef.current = null;
+      const { cardName, cardLast4 } = parseCardLabel(resolvedLabel);
       const fullCardName = cardName
         ? (cardLast4 ? `${cardName} (...${cardLast4})` : cardName)
         : null;
@@ -347,8 +356,9 @@ export default function SyncWebView({ visible, bank, onClose, onSuccess }) {
         onClose();
       }
     } catch (err) {
-      captureArmed.current     = false;
-      switchPendingRef.current = null;
+      captureArmed.current        = false;
+      switchPendingRef.current    = null;
+      pendingCardLabelRef.current = null;
       setSyncing(false);
       setSwitching(false);
       console.error(`[SyncWebView:${bank}] handleMessage error:`, err.message);
