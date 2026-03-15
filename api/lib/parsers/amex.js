@@ -16,6 +16,9 @@ function parseExpiryDate(expirationText) {
 }
 
 function mapOffer(offer, isActivated) {
+  // Only capture merchant offers — skip CARD (bank promos, referrals, CreditSecure, etc.)
+  if (offer.offerType !== 'MERCHANT') return null;
+
   const merchantName = (offer.title || '').trim();
   if (!merchantName) return null;
 
@@ -39,7 +42,7 @@ function mapOffer(offer, isActivated) {
   };
 }
 
-function extractOfferList(container, label) {
+function extractOfferList(container) {
   if (!container?.offersList) return [];
   const pages = Object.keys(container.offersList).sort();
   return pages.flatMap(key =>
@@ -48,16 +51,22 @@ function extractOfferList(container, label) {
 }
 
 export function parseAmexEligibleOffers(json) {
-  const raw    = extractOfferList(json?.recommendedOffers, 'recommendedOffers');
+  const raw    = extractOfferList(json?.recommendedOffers);
+  const total  = raw.length;
   const offers = raw.map(o => mapOffer(o, false)).filter(Boolean);
-  console.log(`[parseAmexEligibleOffers] ${offers.length} valid offers from ${raw.length} raw`);
+  const skipped = total - offers.length;
+  console.log(`[parseAmexEligibleOffers] ${offers.length} merchant offers captured, ${skipped} non-merchant skipped (${total} raw)`);
   return offers;
 }
 
 export function parseAmexEnrolledOffers(json) {
-  const raw    = extractOfferList(json?.addedToCard, 'addedToCard');
+  // Enrolled page returns addedToCardViewAll, not addedToCard
+  const container = json?.addedToCardViewAll ?? json?.addedToCard;
+  const raw    = extractOfferList(container);
+  const total  = raw.length;
   const offers = raw.map(o => mapOffer(o, true)).filter(Boolean);
-  console.log(`[parseAmexEnrolledOffers] ${offers.length} valid offers from ${raw.length} raw`);
+  const skipped = total - offers.length;
+  console.log(`[parseAmexEnrolledOffers] ${offers.length} merchant offers captured, ${skipped} non-merchant skipped (${total} raw)`);
   return offers;
 }
 

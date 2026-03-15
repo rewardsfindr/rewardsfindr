@@ -64,9 +64,17 @@ async function writeOffersToDB(offers, { userId, bank, cardName }) {
 
   await purgeExpiredOffers(userOffersRef, bank);
 
+  // Fetch all existing offer IDs for this card in one read
+  const existingSnap = await userOffersRef
+    .where('bank', '==', bank)
+    .where('cardName', '==', cardName)
+    .get();
+  const existingIds = new Set(existingSnap.docs.map(d => d.id));
+
   const batch = db.batch();
-  let syncedCount = 0;
-  let skippedCount = 0;
+  let newCount     = 0;
+  let updatedCount = 0;
+  let errorCount   = 0;
 
   for (const offer of offers) {
     try {
@@ -101,15 +109,20 @@ async function writeOffersToDB(offers, { userId, bank, cardName }) {
       };
 
       batch.set(userOffersRef.doc(offerId), offerDoc, { merge: true });
-      syncedCount++;
+
+      if (existingIds.has(offerId)) {
+        updatedCount++;
+      } else {
+        newCount++;
+      }
     } catch (error) {
       console.error(`❌ Error processing offer "${offer.merchantName}":`, error);
-      skippedCount++;
+      errorCount++;
     }
   }
 
   await batch.commit();
-  return { syncedCount, skippedCount };
+  return { newCount, updatedCount, errorCount };
 }
 
 /**
@@ -131,10 +144,10 @@ router.post('/sync', async (req, res) => {
     }
 
     console.log(`🔄 Syncing ${offers.length} offers for user ${userId} (${bank} - ${cardName})`);
-    const { syncedCount, skippedCount } = await writeOffersToDB(offers, { userId, bank, cardName });
-    console.log(`✅ Sync complete: ${syncedCount} synced, ${skippedCount} skipped`);
+    const { newCount, updatedCount, errorCount } = await writeOffersToDB(offers, { userId, bank, cardName });
+    console.log(`✅ Sync complete: ${newCount} new, ${updatedCount} updated, ${errorCount} errors`);
 
-    res.json({ success: true, synced: syncedCount, skipped: skippedCount, total: offers.length });
+    res.json({ success: true, newCount, updatedCount, errorCount, total: offers.length });
   } catch (error) {
     console.error('❌ Offers sync error:', error);
     res.status(500).json({ error: 'Failed to sync offers' });
@@ -174,18 +187,19 @@ router.post('/parse', async (req, res) => {
       const resolvedPhase = phase === 'enrolled' ? 'enrolled' : 'eligible';
       console.log(`🔍 [parse:amex] phase=${resolvedPhase} cardName=${cardName}`);
       console.log(`🔍 [parse:amex] json top-level keys:`, Object.keys(json));
-      console.log(`🔍 [parse:amex] recommendedOffers present:`, !!json.recommendedOffers);
-      console.log(`🔍 [parse:amex] addedToCard present:`, !!json.addedToCard);
+
       if (json.recommendedOffers?.offersList) {
         const pages = Object.keys(json.recommendedOffers.offersList);
         const total = pages.reduce((s, p) => s + (json.recommendedOffers.offersList[p]?.length || 0), 0);
         console.log(`🔍 [parse:amex] recommendedOffers pages=${JSON.stringify(pages)} totalRaw=${total}`);
       }
-      if (json.addedToCard?.offersList) {
-        const pages = Object.keys(json.addedToCard.offersList);
-        const total = pages.reduce((s, p) => s + (json.addedToCard.offersList[p]?.length || 0), 0);
-        console.log(`🔍 [parse:amex] addedToCard pages=${JSON.stringify(pages)} totalRaw=${total}`);
+      const enrolledContainer = json.addedToCardViewAll ?? json.addedToCard;
+      if (enrolledContainer?.offersList) {
+        const pages = Object.keys(enrolledContainer.offersList);
+        const total = pages.reduce((s, p) => s + (enrolledContainer.offersList[p]?.length || 0), 0);
+        console.log(`🔍 [parse:amex] addedToCardViewAll pages=${JSON.stringify(pages)} totalRaw=${total}`);
       }
+
       offers = parseAmexOffers(json, resolvedPhase);
       console.log(`✅ [parse:amex] parsed ${offers.length} offers`);
       if (offers.length > 0) {
@@ -209,16 +223,16 @@ router.post('/parse', async (req, res) => {
 
     if (offers.length === 0) {
       console.log(`⚠️ [parse] 0 offers found for ${bank} phase=${phase} — returning empty`);
-      return res.json({ success: true, offers: [], synced: 0, bank, message: 'No offers found.' });
+      return res.json({ success: true, offers: [], newCount: 0, updatedCount: 0, errorCount: 0, bank, message: 'No offers found.' });
     }
 
     const resolvedCardName = cardName || (bank === 'chase' ? 'Chase Card' : 'Amex Card');
     console.log(`💾 [parse] writing ${offers.length} offers to DB for ${bank} — ${resolvedCardName}`);
-    const { syncedCount, skippedCount } = await writeOffersToDB(offers, { userId, bank, cardName: resolvedCardName });
+    const { newCount, updatedCount, errorCount } = await writeOffersToDB(offers, { userId, bank, cardName: resolvedCardName });
 
-    console.log(`✅ [parse] done: ${syncedCount} synced, ${skippedCount} skipped (${bank} — ${resolvedCardName})`);
+    console.log(`✅ [parse] done: ${offers.length} parsed → ${newCount} new, ${updatedCount} updated, ${errorCount} errors (${bank} — ${resolvedCardName})`);
 
-    res.json({ success: true, offers, synced: syncedCount, skipped: skippedCount, bank, cardName: resolvedCardName });
+    res.json({ success: true, offers, newCount, updatedCount, errorCount, bank, cardName: resolvedCardName });
   } catch (error) {
     console.error('❌ Offers parse error:', error);
     res.status(500).json({ error: 'Failed to parse and sync offers' });
