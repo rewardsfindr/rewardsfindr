@@ -18,14 +18,18 @@
 //
 // Amex two-phase sync:
 //   Phase 1 (eligible) — user taps "Sync Offers"
-//     → injects JSON interceptor, waits for CAPTURE_JSON
+//     → reloads the page; interceptor arms on loadEnd, catches API call
 //   Phase 2 (enrolled) — auto after all eligible cards done
-//     → same JSON interceptor pattern
+//     → same reload pattern
 //
 // Amex capture strategy:
 //   Instead of capturing DOM HTML, we inject buildAmexJsonCaptureJs()
 //   which intercepts the ReadOffersHubPresentation XHR/fetch response.
-//   This gives us clean structured JSON instead of raw HTML.
+//   The interceptor is armed on every loadEnd for Amex offers pages.
+//   On sync press we RELOAD the page — this triggers a fresh API call
+//   which the already-armed interceptor catches and posts as CAPTURE_JSON.
+//   We must NOT re-inject on sync press because the API call already fired
+//   on the initial page load; re-injecting just waits for a call that never comes.
 //   CAPTURE_JSON message is handled here; CAPTURE_HTML is Chase-only.
 //
 // Amex card switching strategy:
@@ -175,7 +179,10 @@ export default function SyncWebView({ visible, bank, onClose, onSuccess }) {
       setOnOffersPage(onOffers);
 
       if (onOffers) {
-        console.log(`[SyncWebView:amex] arming JSON interceptor on loadEnd (phase=${syncPhaseRef.current})`);
+        // Always arm interceptor on offers page load.
+        // On sync press we reload → this loadEnd fires again →
+        // interceptor re-arms → catches the fresh API call → CAPTURE_JSON.
+        console.log(`[SyncWebView:amex] arming JSON interceptor on loadEnd (phase=${syncPhaseRef.current} captureArmed=${captureArmed.current})`);
         webViewRef.current?.injectJavaScript(buildAmexJsonCaptureJs());
       }
 
@@ -197,13 +204,19 @@ export default function SyncWebView({ visible, bank, onClose, onSuccess }) {
 
   // ── Sync press — bank-specific capture trigger ─────────────────
   const handleSyncPress = () => {
-    console.log(`[SyncWebView:${bank}] Sync pressed — phase=${syncPhaseRef.current} captureArmed=${captureArmed.current}`);
+    console.log(`[SyncWebView:${bank}] Sync pressed — phase=${syncPhaseRef.current}`);
     setSyncStarted(true);
     captureArmed.current = true;
 
     if (bank === 'amex') {
-      console.log('[SyncWebView:amex] re-injecting JSON interceptor on sync press');
-      webViewRef.current?.injectJavaScript(buildAmexJsonCaptureJs());
+      // Reload the page so Amex fires a fresh ReadOffersHubPresentation API call.
+      // The interceptor will be re-armed in handleLoadEnd (on the fresh load)
+      // and will catch that call automatically.
+      const reloadUrl = syncPhaseRef.current === 'enrolled'
+        ? config.enrolledUrl
+        : (config.offersUrl || config.url);
+      console.log(`[SyncWebView:amex] reloading ${reloadUrl} to trigger fresh API call`);
+      webViewRef.current?.injectJavaScript(`window.location.replace('${reloadUrl}'); true;`);
       return;
     }
 
