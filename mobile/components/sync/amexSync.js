@@ -19,6 +19,13 @@
 // IMPORTANT: enrolledPath is a substring of eligiblePath so we ALWAYS
 // check enrolled first and make them mutually exclusive.
 //
+// JSON capture strategy:
+//   Instead of capturing DOM HTML, we intercept the ReadOffersHubPresentation
+//   XHR/fetch response that Amex already fires when the page loads or when
+//   the card switcher changes the selected card.
+//   The interceptor is injected once on page load and posts CAPTURE_JSON
+//   when the next matching response arrives.
+//
 // Amex's SPA may auto-navigate to /offers/enrolled during eligible phase.
 // amexHandleLoadEnd gates injection on syncPhase match to ignore this.
 // ─────────────────────────────────────────────
@@ -127,6 +134,112 @@ export const AMEX_READ_CARD_LABEL_JS = `
     var last4     = numRaw.replace(/[^\\d]/g, '').slice(-4);
     return name + (last4 ? ' (...' + last4 + ')' : '');
   })()
+`;
+
+// ─────────────────────────────────────────────
+// buildAmexJsonCaptureJs
+//
+// Installs a one-shot XHR + fetch interceptor that listens for the
+// ReadOffersHubPresentation API response Amex fires on every page load
+// and card switch. When it fires, the raw JSON body is posted as
+// CAPTURE_JSON so SyncWebView can send it directly to the API instead
+// of sending DOM HTML.
+//
+// The interceptor fires once then removes itself (oneShot flag).
+// cardLabel is read from the combobox display at fire-time so the
+// label is always fresh.
+// ─────────────────────────────────────────────
+export const buildAmexJsonCaptureJs = () => `
+  (function() {
+    try {
+      if (window.__amexJsonCaptureArmed) {
+        console.log('[AmexCapture] already armed, skipping');
+        return;
+      }
+      window.__amexJsonCaptureArmed = true;
+
+      function readCardLabel() {
+        var displayEl = document.querySelector('[data-testid="simple_switcher_selected_option_display"]');
+        var nameEl    = displayEl ? displayEl.querySelector('[data-testid="simple_switcher_display_name"]') : null;
+        var numEl     = displayEl ? displayEl.querySelector('[data-testid="simple_switcher_display_number_val"]') : null;
+        var name      = nameEl ? nameEl.innerText.trim() : '';
+        var numRaw    = numEl  ? numEl.innerText.trim()  : '';
+        var last4     = numRaw.replace(/[^\\d]/g, '').slice(-4);
+        return name + (last4 ? ' (...' + last4 + ')' : '');
+      }
+
+      function fireCapture(jsonText) {
+        window.__amexJsonCaptureArmed = false;
+        var cardLabel = readCardLabel();
+        console.log('[AmexCapture] firing CAPTURE_JSON cardLabel=' + cardLabel);
+        try {
+          var parsed = JSON.parse(jsonText);
+          window.ReactNativeWebView.postMessage(JSON.stringify({
+            type: 'CAPTURE_JSON',
+            json: parsed,
+            cardLabel: cardLabel,
+          }));
+        } catch(e) {
+          window.ReactNativeWebView.postMessage(JSON.stringify({
+            type: 'ERROR',
+            message: 'AmexCapture JSON parse error: ' + e.message,
+          }));
+        }
+      }
+
+      // ── XHR interceptor ──────────────────────────────
+      var OrigXHR = window.XMLHttpRequest;
+      function PatchedXHR() {
+        var xhr = new OrigXHR();
+        var _url = '';
+        var origOpen = xhr.open.bind(xhr);
+        xhr.open = function(method, url) {
+          _url = url || '';
+          return origOpen.apply(xhr, arguments);
+        };
+        var origSend = xhr.send.bind(xhr);
+        xhr.send = function() {
+          if (_url.includes('ReadOffersHubPresentation') && window.__amexJsonCaptureArmed) {
+            xhr.addEventListener('load', function() {
+              if (xhr.status >= 200 && xhr.status < 300) {
+                console.log('[AmexCapture] XHR intercepted ReadOffersHubPresentation');
+                fireCapture(xhr.responseText);
+              }
+            });
+          }
+          return origSend.apply(xhr, arguments);
+        };
+        return xhr;
+      }
+      PatchedXHR.prototype = OrigXHR.prototype;
+      window.XMLHttpRequest = PatchedXHR;
+
+      // ── fetch interceptor ─────────────────────────────
+      var origFetch = window.fetch;
+      window.fetch = function(input, init) {
+        var url = (typeof input === 'string' ? input : (input && input.url)) || '';
+        var p = origFetch.apply(window, arguments);
+        if (url.includes('ReadOffersHubPresentation') && window.__amexJsonCaptureArmed) {
+          p = p.then(function(response) {
+            var cloned = response.clone();
+            cloned.text().then(function(text) {
+              if (response.ok) {
+                console.log('[AmexCapture] fetch intercepted ReadOffersHubPresentation');
+                fireCapture(text);
+              }
+            });
+            return response;
+          });
+        }
+        return p;
+      };
+
+      console.log('[AmexCapture] XHR+fetch interceptor armed');
+    } catch(e) {
+      window.ReactNativeWebView.postMessage(JSON.stringify({ type: 'ERROR', message: 'AmexCapture setup error: ' + e.message }));
+    }
+  })();
+  true;
 `;
 
 // ─────────────────────────────────────────────

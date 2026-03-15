@@ -1,7 +1,11 @@
 // ─────────────────────────────────────────────
 // OFFERS ROUTES
 // POST /api/offers/sync  — sync pre-parsed offers from Chrome extension
-// POST /api/offers/parse — parse raw HTML from mobile WebView + sync
+// POST /api/offers/parse — parse raw data from mobile WebView + sync
+//
+// Parse payload by bank:
+//   Chase → { html: string,  bank: 'chase', cardName, phase? }
+//   Amex  → { json: object,  bank: 'amex',  cardName, phase: 'eligible'|'enrolled' }
 //
 // Storage: /users/{userId}/offers/{offerId}  (subcollection per user)
 // Cleanup: expired offers are purged on every sync (no Firestore TTL needed)
@@ -11,7 +15,7 @@ import { db, auth } from '../config/firebase.js';
 import { FieldValue, Timestamp } from 'firebase-admin/firestore';
 import { generateOfferId, normalizeMerchant } from '../lib/shared/offerUtils.js';
 import { parseChaseOffers } from '../lib/parsers/chase.js';
-import { parseAmexOffers } from '../lib/parsers/amex.js';
+import { parseAmexOffers }  from '../lib/parsers/amex.js';
 
 const router = express.Router();
 
@@ -139,6 +143,9 @@ router.post('/sync', async (req, res) => {
 
 /**
  * POST /api/offers/parse
+ *
+ * Chase: expects { html: string, bank: 'chase', cardName, phase? }
+ * Amex:  expects { json: object, bank: 'amex',  cardName, phase: 'eligible'|'enrolled' }
  */
 router.post('/parse', async (req, res) => {
   try {
@@ -146,33 +153,45 @@ router.post('/parse', async (req, res) => {
     if (!decoded) return;
 
     const userId = decoded.uid;
-    const { html, bank, cardName, phase } = req.body;
+    const { bank, cardName, phase } = req.body;
 
-    if (!html || typeof html !== 'string') {
-      return res.status(400).json({ error: 'html is required and must be a string' });
-    }
     if (!bank || !['chase', 'amex'].includes(bank)) {
       return res.status(400).json({ error: "bank must be 'chase' or 'amex'" });
     }
 
-    const parseFn = bank === 'chase' ? parseChaseOffers : parseAmexOffers;
-    const offers = parseFn(html);
+    let offers;
 
-    // For Amex, override isActivated based on phase:
-    // eligible page = all not activated, enrolled page = all activated
-    if (bank === 'amex' && phase) {
-      const activated = phase === 'enrolled';
-      offers.forEach(o => { o.isActivated = activated; });
+    // ── Amex: JSON path ──────────────────────────────────────────
+    if (bank === 'amex') {
+      const { json } = req.body;
+      if (!json || typeof json !== 'object') {
+        return res.status(400).json({ error: 'json (object) is required for amex' });
+      }
+      const resolvedPhase = phase === 'enrolled' ? 'enrolled' : 'eligible';
+      console.log(`📥 [parse:amex] phase=${resolvedPhase} cardName=${cardName}`);
+      offers = parseAmexOffers(json, resolvedPhase);
+      console.log(`🔍 [parse:amex] parsed ${offers.length} offers`);
+    }
+
+    // ── Chase: HTML path (unchanged) ─────────────────────────────
+    else {
+      const { html } = req.body;
+      if (!html || typeof html !== 'string') {
+        return res.status(400).json({ error: 'html (string) is required for chase' });
+      }
+      console.log(`📥 [parse:chase] cardName=${cardName} html.length=${html.length}`);
+      offers = parseChaseOffers(html);
+      console.log(`🔍 [parse:chase] parsed ${offers.length} offers`);
     }
 
     if (offers.length === 0) {
-      return res.json({ success: true, offers: [], synced: 0, bank, message: 'No offers found in provided HTML.' });
+      return res.json({ success: true, offers: [], synced: 0, bank, message: 'No offers found.' });
     }
 
     const resolvedCardName = cardName || (bank === 'chase' ? 'Chase Card' : 'Amex Card');
     const { syncedCount, skippedCount } = await writeOffersToDB(offers, { userId, bank, cardName: resolvedCardName });
 
-    console.log(`✅ [parse] ${bank} — ${resolvedCardName} — ${syncedCount} synced (phase=${phase})`);
+    console.log(`✅ [parse] ${bank} parse+sync complete: ${syncedCount} synced, ${skippedCount} skipped (${resolvedCardName})`);
 
     res.json({ success: true, offers, synced: syncedCount, skipped: skippedCount, bank, cardName: resolvedCardName });
   } catch (error) {
