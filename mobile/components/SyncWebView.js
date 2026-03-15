@@ -1,49 +1,6 @@
 // ─────────────────────────────────────────────────────────────────
 // SYNC WEBVIEW MODAL — orchestrator
 // Handles modal UI, state, and message routing.
-// Bank-specific JS injection is in sync/ modules.
-//
-// Footer states:
-//   0. Not ready                        → nothing
-//   1. On offers page + page loaded     → "Sync Offers" button (enabled)
-//   2. Page loaded, not on offers page  → "Go to Offers Page"
-//   3. Sync in progress                 → spinner + status
-//
-// onOffersPage + pageLoaded source of truth per bank:
-//   Chase → CARDS_DETECTED message (SPA)
-//   Amex  → handleLoadEnd ONLY via amexHandleLoadEnd()
-//           navState must NOT reset pageLoaded for Amex — navState fires
-//           after loadEnd and would wipe the flag before render
-//   Other → handleNavigationStateChange URL check
-//
-// Amex two-phase sync:
-//   Phase 1 (eligible) — user taps "Sync Offers"
-//     → reloads the page; interceptor arms on loadEnd, catches API call
-//   Phase 2 (enrolled) — auto after all eligible cards done
-//     → same reload pattern
-//
-// Amex capture strategy:
-//   Instead of capturing DOM HTML, we inject buildAmexJsonCaptureJs()
-//   which intercepts the ReadOffersHubPresentation XHR/fetch response.
-//   The interceptor is armed on every loadEnd for Amex offers pages.
-//   On sync press we RELOAD the page — this triggers a fresh API call
-//   which the already-armed interceptor catches and posts as CAPTURE_JSON.
-//   We must NOT re-inject on sync press because the API call already fired
-//   on the initial page load; re-injecting just waits for a call that never comes.
-//   CAPTURE_JSON message is handled here; CAPTURE_HTML is Chase-only.
-//
-// Amex card switching strategy:
-//   After capturing card N, we reload the page fresh, THEN switch to card N+1.
-//   switchPendingRef holds the next card to switch to after reload.
-//   On loadEnd with switchPendingRef set: switch card, JSON interceptor
-//   will fire automatically when the card switch triggers a new API call.
-//
-// Chase is completely unchanged — still uses buildCaptureJs + CAPTURE_HTML.
-//
-// Adding a new bank:
-//   1. Add entry to sync/bankConfig.js
-//   2. Create sync/<bank>Sync.js with detect + switch JS
-//   3. Wire up in handleLoadEnd + handleMessage below
 // ─────────────────────────────────────────────────────────────────
 import React, { useRef, useState, useEffect } from 'react';
 import {
@@ -179,18 +136,8 @@ export default function SyncWebView({ visible, bank, onClose, onSuccess }) {
       setOnOffersPage(onOffers);
 
       if (onOffers) {
-        // Always arm interceptor on offers page load.
-        // On sync press we reload → this loadEnd fires again →
-        // interceptor re-arms → catches the fresh API call → CAPTURE_JSON.
-        console.log(`[SyncWebView:amex] arming JSON interceptor on loadEnd (phase=${syncPhaseRef.current} captureArmed=${captureArmed.current})`);
+        console.log(`[SyncWebView:amex] arming JSON interceptor on loadEnd (phase=${syncPhaseRef.current})`);
         webViewRef.current?.injectJavaScript(buildAmexJsonCaptureJs());
-      }
-
-      if (onOffers && switchPendingRef.current) {
-        const pending = switchPendingRef.current;
-        switchPendingRef.current = null;
-        console.log(`[SyncWebView:amex] page reloaded — switching to testId=${pending.testId} (cardIndex=${pending.cardIndex})`);
-        webViewRef.current?.injectJavaScript(buildAmexSwitchCardJs(pending.testId, SWITCH_TIMEOUT_MS));
       }
       return;
     }
@@ -202,21 +149,26 @@ export default function SyncWebView({ visible, bank, onClose, onSuccess }) {
     webViewRef.current?.injectJavaScript(`window.location.replace('${target}'); true;`);
   };
 
-  // ── Sync press — bank-specific capture trigger ─────────────────
+  // ── Sync press ────────────────────────────────────────────────
   const handleSyncPress = () => {
     console.log(`[SyncWebView:${bank}] Sync pressed — phase=${syncPhaseRef.current}`);
     setSyncStarted(true);
     captureArmed.current = true;
 
     if (bank === 'amex') {
-      // Reload the page so Amex fires a fresh ReadOffersHubPresentation API call.
-      // The interceptor will be re-armed in handleLoadEnd (on the fresh load)
-      // and will catch that call automatically.
-      const reloadUrl = syncPhaseRef.current === 'enrolled'
-        ? config.enrolledUrl
-        : (config.offersUrl || config.url);
-      console.log(`[SyncWebView:amex] reloading ${reloadUrl} to trigger fresh API call`);
-      webViewRef.current?.injectJavaScript(`window.location.replace('${reloadUrl}'); true;`);
+      const cards      = cardOptionsRef.current;
+      const activeIdx  = cards.findIndex(c => c.selected);
+      // Switch to the first card that is NOT currently active
+      const nextIdx    = cards.findIndex((_, i) => i !== activeIdx);
+      if (nextIdx === -1) {
+        console.log('[SyncWebView:amex] only one card found — cannot switch');
+        Alert.alert('Only one card found', 'Cannot cycle cards to trigger API call.');
+        return;
+      }
+      const nextCard = cards[nextIdx];
+      cardIndexRef.current = nextIdx;
+      console.log(`[SyncWebView:amex] TEST — switching to card[${nextIdx}] testId=${nextCard.testId} to verify API fires`);
+      webViewRef.current?.injectJavaScript(buildAmexSwitchCardJs(nextCard.testId, SWITCH_TIMEOUT_MS));
       return;
     }
 
@@ -247,7 +199,7 @@ export default function SyncWebView({ visible, bank, onClose, onSuccess }) {
       ? { json: payload, bank, cardName: fullCardName, phase }
       : { html: payload, bank, cardName: fullCardName, phase };
 
-    console.log(`[SyncWebView:${bank}] handleCaptureResult — phase=${phase} cardName=${fullCardName} payloadType=${isAmex ? 'json' : 'html'} payloadSize=${isAmex ? JSON.stringify(payload).length : payload?.length}`);
+    console.log(`[SyncWebView:${bank}] handleCaptureResult — phase=${phase} cardName=${fullCardName} payloadSize=${isAmex ? JSON.stringify(payload).length : payload?.length}`);
     console.log(`[SyncWebView:${bank}] POSTing to ${API_BASE_URL}/api/offers/parse`);
 
     const response = await fetch(`${API_BASE_URL}/api/offers/parse`, {
@@ -256,7 +208,7 @@ export default function SyncWebView({ visible, bank, onClose, onSuccess }) {
       body: JSON.stringify(bodyObj),
     });
     const result = await response.json();
-    console.log(`[SyncWebView:${bank}] API /parse response:`, JSON.stringify(result));
+    console.log(`[SyncWebView:${bank}] API /parse response: synced=${result.synced} skipped=${result.skipped}`);
     if (!response.ok) throw new Error(result.error || 'Sync failed');
 
     syncedCardsRef.current = [
@@ -264,37 +216,9 @@ export default function SyncWebView({ visible, bank, onClose, onSuccess }) {
       { cardName: fullCardName || 'Unknown Card', count: result.synced ?? 0, phase },
     ];
     syncedCountRef.current += 1;
-
-    const totalCards = cardOptionsRef.current.length;
-    console.log(`[SyncWebView:${bank}] syncedCount=${syncedCountRef.current} totalCards=${totalCards} phase=${phase}`);
     setSyncing(false);
 
-    if (syncedCountRef.current < totalCards) {
-      const nextPos = (cardIndexRef.current + 1) % totalCards;
-      cardIndexRef.current = nextPos;
-      setCardIndexUi(nextPos);
-      setSwitching(true);
-      switchRetriesRef.current = 0;
-      cardsDiscovered.current  = false;
-
-      if (bank === 'amex') {
-        const nextCard  = cardOptionsRef.current[nextPos];
-        const reloadUrl = phase === 'enrolled' ? config.enrolledUrl : (config.offersUrl || config.url);
-        console.log(`[SyncWebView:amex] reloading ${reloadUrl} — will switch to testId=${nextCard.testId} after load`);
-        switchPendingRef.current = { testId: nextCard.testId, cardIndex: nextPos };
-        webViewRef.current?.injectJavaScript(`window.location.replace('${reloadUrl}'); true;`);
-      } else {
-        webViewRef.current?.injectJavaScript(buildSwitchCardJs(cardOptionsRef.current[nextPos].index, SWITCH_TIMEOUT_MS));
-      }
-    } else if (bank === 'amex' && phase === 'eligible') {
-      console.log('[SyncWebView:amex] all eligible cards done — transitioning to enrolled phase');
-      transitionToEnrolled();
-    } else {
-      const total = syncedCardsRef.current.reduce((sum, c) => sum + c.count, 0);
-      console.log(`[SyncWebView:${bank}] all phases done — total offers synced: ${total}`);
-      onSuccess(total, syncedCardsRef.current);
-      onClose();
-    }
+    console.log(`[SyncWebView:${bank}] ✅ captured card — syncedCount=${syncedCountRef.current} totalCards=${cardOptionsRef.current.length} phase=${phase}`);
   };
 
   // ── Message handler ───────────────────────────────────────────
@@ -334,53 +258,18 @@ export default function SyncWebView({ visible, bank, onClose, onSuccess }) {
         }
         if (!cardsDiscovered.current) cardsDiscovered.current = true;
         setCurrentCard(data.selectedLabel || null);
-
-        if (syncPhaseRef.current === 'enrolled' && !captureArmed.current) {
-          console.log('[SyncWebView:amex] enrolled page ready — arming captureArmed flag');
-          captureArmed.current = true;
-        }
         return;
       }
 
       // ── Card switched (Chase + Amex) ──────────────────
       if (data.type === 'CARD_SWITCHED') {
-        console.log(`[SyncWebView:${bank}] CARD_SWITCHED cardLabel=${data.cardLabel} expectedTestId=${data.expectedTestId || data.expectedIndex}`);
-        const switchConfirmed = bank === 'amex' ? !!data.cardLabel : (() => {
-          const expectedLabel = cardOptionsRef.current.find(c => c.index === data.expectedIndex)?.label || '';
-          const confirmed = expectedLabel ? data.cardLabel?.trim() === expectedLabel.trim() : !!data.cardLabel;
-          console.log(`[SyncWebView:chase] switch confirm: expected="${expectedLabel}" got="${data.cardLabel}" confirmed=${confirmed}`);
-          return confirmed;
-        })();
-
-        if (!switchConfirmed && switchRetriesRef.current < MAX_SWITCH_RETRIES) {
-          switchRetriesRef.current += 1;
-          const retryDelay = SWITCH_TIMEOUT_MS + switchRetriesRef.current * 1500;
-          console.log(`[SyncWebView:${bank}] switch not confirmed, retry ${switchRetriesRef.current}/${MAX_SWITCH_RETRIES} in ${retryDelay}ms`);
-          if (bank === 'amex') {
-            const card = cardOptionsRef.current[cardIndexRef.current];
-            webViewRef.current?.injectJavaScript(buildAmexSwitchCardJs(card.testId, retryDelay));
-          } else {
-            webViewRef.current?.injectJavaScript(buildSwitchCardJs(data.expectedIndex, retryDelay));
-          }
-          return;
-        }
-
-        switchRetriesRef.current = 0;
+        console.log(`[SyncWebView:${bank}] CARD_SWITCHED cardLabel=${data.cardLabel}`);
         setSwitching(false);
         setCurrentCard(data.cardLabel || null);
-
         if (bank === 'amex') {
           pendingCardLabelRef.current = data.cardLabel || null;
-          console.log(`[SyncWebView:amex] switch confirmed (${data.cardLabel}) — JSON interceptor will fire on next API call`);
-          return;
+          console.log(`[SyncWebView:amex] switch confirmed (${data.cardLabel}) — waiting for CAPTURE_JSON`);
         }
-
-        // Chase: capture after delay
-        console.log(`[SyncWebView:chase] switch confirmed — capturing HTML in ${POST_SWITCH_DELAY_MS}ms`);
-        setTimeout(() => {
-          captureArmed.current = true;
-          webViewRef.current?.injectJavaScript(buildCaptureJs(config.gridSelector, config.captureMaxBytes));
-        }, POST_SWITCH_DELAY_MS);
         return;
       }
 
@@ -401,17 +290,15 @@ export default function SyncWebView({ visible, bank, onClose, onSuccess }) {
 
       // ── Amex JSON capture ─────────────────────────────
       if (data.type === 'CAPTURE_JSON' && bank === 'amex') {
-        console.log(`[SyncWebView:amex] CAPTURE_JSON received — captureArmed=${captureArmed.current} cardLabel=${data.cardLabel} jsonKeys=${Object.keys(data.json || {}).join(',')}`);
+        console.log(`[SyncWebView:amex] CAPTURE_JSON received — captureArmed=${captureArmed.current} cardLabel=${data.cardLabel}`);
         if (!captureArmed.current) {
           console.log('[SyncWebView:amex] CAPTURE_JSON ignored — not armed');
           return;
         }
         captureArmed.current = false;
-
         const resolvedLabel = pendingCardLabelRef.current || data.cardLabel;
         pendingCardLabelRef.current = null;
-        console.log(`[SyncWebView:amex] resolvedLabel=${resolvedLabel} phase=${syncPhaseRef.current}`);
-
+        console.log(`[SyncWebView:amex] ✅ CAPTURE_JSON confirmed — card switch DID trigger the API call!`);
         await handleCaptureResult({
           payload:   data.json,
           cardLabel: resolvedLabel,
@@ -427,10 +314,8 @@ export default function SyncWebView({ visible, bank, onClose, onSuccess }) {
       }
       captureArmed.current = false;
       console.log(`[SyncWebView:chase] CAPTURE_HTML received — html.length=${data.html?.length} cardLabel=${data.cardLabel}`);
-
       const resolvedLabel = pendingCardLabelRef.current || data.cardLabel;
       pendingCardLabelRef.current = null;
-
       await handleCaptureResult({
         payload:   data.html,
         cardLabel: resolvedLabel,
@@ -454,7 +339,7 @@ export default function SyncWebView({ visible, bank, onClose, onSuccess }) {
   const phaseLabel   = syncPhaseUi === 'enrolled' ? 'activated' : 'eligible';
 
   const statusText = switching
-    ? `⏳ Switching card — reloading...`
+    ? `⏳ Switching card...`
     : syncing
       ? `🔄 Syncing ${phaseLabel} offers — ${cardName || 'card'} (${cardIndexUi + 1} of ${totalCards})...`
       : `⚡ Processing...`;
