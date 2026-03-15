@@ -8,7 +8,6 @@
 //   Amex  → { json: object,  bank: 'amex',  cardName, phase: 'eligible'|'enrolled' }
 //
 // Storage: /users/{userId}/offers/{offerId}  (subcollection per user)
-// Cleanup: expired offers are purged on every sync (no Firestore TTL needed)
 // ─────────────────────────────────────────────
 import express from 'express';
 import { db, auth } from '../config/firebase.js';
@@ -43,26 +42,8 @@ async function verifyToken(req, res) {
   }
 }
 
-async function purgeExpiredOffers(userOffersRef, bank) {
-  const now = Timestamp.now();
-  const expired = await userOffersRef
-    .where('bank', '==', bank)
-    .where('expiresAt', '<', now)
-    .get();
-
-  if (expired.empty) return 0;
-
-  const batch = db.batch();
-  expired.docs.forEach(doc => batch.delete(doc.ref));
-  await batch.commit();
-  console.log(`🗑️  Purged ${expired.size} expired ${bank} offers`);
-  return expired.size;
-}
-
 async function writeOffersToDB(offers, { userId, bank, cardName }) {
   const userOffersRef = db.collection('users').doc(userId).collection('offers');
-
-  await purgeExpiredOffers(userOffersRef, bank);
 
   // Fetch all existing offer IDs for this card in one read
   const existingSnap = await userOffersRef
