@@ -155,6 +155,9 @@ router.post('/parse', async (req, res) => {
     const userId = decoded.uid;
     const { bank, cardName, phase } = req.body;
 
+    console.log(`📥 [parse] bank=${bank} phase=${phase} cardName=${cardName} userId=${userId}`);
+    console.log(`📥 [parse] body keys:`, Object.keys(req.body));
+
     if (!bank || !['chase', 'amex'].includes(bank)) {
       return res.status(400).json({ error: "bank must be 'chase' or 'amex'" });
     }
@@ -165,12 +168,29 @@ router.post('/parse', async (req, res) => {
     if (bank === 'amex') {
       const { json } = req.body;
       if (!json || typeof json !== 'object') {
+        console.error('❌ [parse:amex] json field missing or not an object. typeof json:', typeof json);
         return res.status(400).json({ error: 'json (object) is required for amex' });
       }
       const resolvedPhase = phase === 'enrolled' ? 'enrolled' : 'eligible';
-      console.log(`📥 [parse:amex] phase=${resolvedPhase} cardName=${cardName}`);
+      console.log(`🔍 [parse:amex] phase=${resolvedPhase} cardName=${cardName}`);
+      console.log(`🔍 [parse:amex] json top-level keys:`, Object.keys(json));
+      console.log(`🔍 [parse:amex] recommendedOffers present:`, !!json.recommendedOffers);
+      console.log(`🔍 [parse:amex] addedToCard present:`, !!json.addedToCard);
+      if (json.recommendedOffers?.offersList) {
+        const pages = Object.keys(json.recommendedOffers.offersList);
+        const total = pages.reduce((s, p) => s + (json.recommendedOffers.offersList[p]?.length || 0), 0);
+        console.log(`🔍 [parse:amex] recommendedOffers pages=${JSON.stringify(pages)} totalRaw=${total}`);
+      }
+      if (json.addedToCard?.offersList) {
+        const pages = Object.keys(json.addedToCard.offersList);
+        const total = pages.reduce((s, p) => s + (json.addedToCard.offersList[p]?.length || 0), 0);
+        console.log(`🔍 [parse:amex] addedToCard pages=${JSON.stringify(pages)} totalRaw=${total}`);
+      }
       offers = parseAmexOffers(json, resolvedPhase);
-      console.log(`🔍 [parse:amex] parsed ${offers.length} offers`);
+      console.log(`✅ [parse:amex] parsed ${offers.length} offers`);
+      if (offers.length > 0) {
+        console.log(`✅ [parse:amex] first offer sample:`, JSON.stringify(offers[0]));
+      }
     }
 
     // ── Chase: HTML path (unchanged) ─────────────────────────────
@@ -179,19 +199,24 @@ router.post('/parse', async (req, res) => {
       if (!html || typeof html !== 'string') {
         return res.status(400).json({ error: 'html (string) is required for chase' });
       }
-      console.log(`📥 [parse:chase] cardName=${cardName} html.length=${html.length}`);
+      console.log(`🔍 [parse:chase] cardName=${cardName} html.length=${html.length}`);
       offers = parseChaseOffers(html);
-      console.log(`🔍 [parse:chase] parsed ${offers.length} offers`);
+      console.log(`✅ [parse:chase] parsed ${offers.length} offers`);
+      if (offers.length > 0) {
+        console.log(`✅ [parse:chase] first offer sample:`, JSON.stringify(offers[0]));
+      }
     }
 
     if (offers.length === 0) {
+      console.log(`⚠️ [parse] 0 offers found for ${bank} phase=${phase} — returning empty`);
       return res.json({ success: true, offers: [], synced: 0, bank, message: 'No offers found.' });
     }
 
     const resolvedCardName = cardName || (bank === 'chase' ? 'Chase Card' : 'Amex Card');
+    console.log(`💾 [parse] writing ${offers.length} offers to DB for ${bank} — ${resolvedCardName}`);
     const { syncedCount, skippedCount } = await writeOffersToDB(offers, { userId, bank, cardName: resolvedCardName });
 
-    console.log(`✅ [parse] ${bank} parse+sync complete: ${syncedCount} synced, ${skippedCount} skipped (${resolvedCardName})`);
+    console.log(`✅ [parse] done: ${syncedCount} synced, ${skippedCount} skipped (${bank} — ${resolvedCardName})`);
 
     res.json({ success: true, offers, synced: syncedCount, skipped: skippedCount, bank, cardName: resolvedCardName });
   } catch (error) {
