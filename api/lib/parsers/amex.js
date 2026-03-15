@@ -1,64 +1,50 @@
 // ─────────────────────────────────────────────
 // AMEX OFFERS PARSER — JSON-based
+// Parses the ReadOffersHubPresentation API response intercepted
+// by buildAmexJsonCaptureJs() in mobile/components/sync/amexSync.js
 // ─────────────────────────────────────────────
 
+function parseExpiryDate(expirationText) {
+  if (!expirationText) return null;
+  // e.g. "Expires 3/15/26"
+  const match = expirationText.match(/(\d{1,2})\/(\d{1,2})\/(\d{2,4})/);
+  if (!match) return null;
+  const [, month, day, year] = match;
+  const fullYear = year.length === 2 ? `20${year}` : year;
+  const parsed = new Date(`${fullYear}-${month.padStart(2, '0')}-${day.padStart(2, '0')}`);
+  return isNaN(parsed.getTime()) ? null : parsed.toISOString();
+}
+
 function mapOffer(offer, isActivated) {
-  const title       = offer.title            || '';
-  const description = offer.shortDescription || title;
-  const merchant    = (offer.businessName    || '').trim();
+  const merchantName = (offer.title || '').trim();
+  if (!merchantName) return null;
 
-  if (!merchant) {
-    return null;
-  }
-
-  const currency = (offer.currencyType || '').toUpperCase();
-  const cashbackAmount = parseFloat(offer.rewardValue) || 0;
-  let cashbackType;
-
-  if (currency === 'MR') {
-    cashbackType = 'points';
-  } else if (currency === 'PERCENT') {
-    cashbackType = 'percent';
-  } else {
-    cashbackType = 'fixed';
-  }
-
-  const minimumSpend = parseFloat(offer.minimumSpend) || 0;
-
-  let expiryDate = null;
-  if (offer.offerEndDate) {
-    const parsed = new Date(offer.offerEndDate);
-    if (!isNaN(parsed.getTime())) {
-      expiryDate = parsed.toISOString();
-    }
-  }
+  const offerDescription = offer.shortDescription || '';
+  const category = (offer.applicableCategories?.[0]?.optionType || 'OTHER').toLowerCase();
+  const expiryDate = parseExpiryDate(offer.expiration?.text);
+  const activated = isActivated ?? (offer.enrollmentDetails?.status === 'ENROLLED');
 
   return {
-    merchantName:     merchant,
-    offerDescription: description,
-    cashbackAmount,
-    cashbackType,
-    minimumSpend,
-    category:         'other',
+    merchantName,
+    offerDescription,
+    cashbackAmount: null,
+    cashbackType:   null,
+    minimumSpend:   null,
+    category,
     expiryDate,
-    isActivated,
-    offerDeepLink:    offer.offerId ? `https://global.americanexpress.com/offers?offerId=${offer.offerId}` : null,
+    isActivated:    activated,
+    offerDeepLink:  offer.offerId
+      ? `https://global.americanexpress.com/offers?offerId=${encodeURIComponent(offer.offerId)}`
+      : null,
   };
 }
 
 function extractOfferList(container, label) {
-  if (!container) return [];
-  const offersList = container.offersList;
-  if (!offersList) return [];
-
-  const pages = Object.keys(offersList).sort();
-  const all = pages.flatMap(key => Array.isArray(offersList[key]) ? offersList[key] : []);
-
-  if (all.length > 0) {
-    console.log(`[amex:sample] first offer from "${label}":\n`, JSON.stringify(all[0], null, 2));
-  }
-
-  return all;
+  if (!container?.offersList) return [];
+  const pages = Object.keys(container.offersList).sort();
+  return pages.flatMap(key =>
+    Array.isArray(container.offersList[key]) ? container.offersList[key] : []
+  );
 }
 
 export function parseAmexEligibleOffers(json) {
@@ -75,6 +61,11 @@ export function parseAmexEnrolledOffers(json) {
   return offers;
 }
 
+/**
+ * Auto-routes by phase. Called from api/routes/offers.js.
+ * @param {object} json  — parsed ReadOffersHubPresentation response
+ * @param {string} phase — 'eligible' | 'enrolled'
+ */
 export function parseAmexOffers(json, phase) {
   if (phase === 'enrolled') return parseAmexEnrolledOffers(json);
   return parseAmexEligibleOffers(json);
