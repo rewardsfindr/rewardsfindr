@@ -60,7 +60,7 @@ export default function SyncWebView({ visible, bank, onClose, onSuccess }) {
   const [syncStarted, setSyncStarted]       = useState(false);
   const [pageLoaded, setPageLoaded]         = useState(false);
   const [onOffersPage, setOnOffersPage]     = useState(false);
-  const [amexCardsReady, setAmexCardsReady] = useState(false); // true only after AMEX_CARDS_DETECTED fires with cards
+  const [amexCardsReady, setAmexCardsReady] = useState(false);
   const [currentCard, setCurrentCard]       = useState(null);
   const [currentUrl, setCurrentUrl]         = useState('');
   const [cardCount, setCardCount]           = useState(0);
@@ -98,13 +98,11 @@ export default function SyncWebView({ visible, bank, onClose, onSuccess }) {
   }, [visible]);
 
   // ── Amex: switch to next unvisited card ──────────────────────────
-  // Returns true if a switch was initiated, false if all cards visited.
   const switchToNextAmexCard = () => {
     const cards   = cardOptionsRef.current;
     const visited = visitedCardsRef.current;
-    // Find next unvisited card — initial active card is saved for last
     const next = cards.find(c => !visited.has(c.testId) && c.testId !== initialActiveRef.current)
-      ?? cards.find(c => !visited.has(c.testId)); // fallback: initial active card (last)
+      ?? cards.find(c => !visited.has(c.testId));
     if (!next) {
       console.log('[SyncWebView:amex] all cards visited for phase', syncPhaseRef.current);
       return false;
@@ -154,7 +152,6 @@ export default function SyncWebView({ visible, bank, onClose, onSuccess }) {
         injectJavaScript: (js) => webViewRef.current?.injectJavaScript(js),
       });
       setOnOffersPage(onOffers);
-      // Reset cards-ready on each new page load so button re-gates until detection completes
       if (onOffers) {
         setAmexCardsReady(false);
         console.log(`[SyncWebView:amex] arming JSON interceptor on loadEnd (phase=${syncPhaseRef.current})`);
@@ -181,7 +178,6 @@ export default function SyncWebView({ visible, bank, onClose, onSuccess }) {
         Alert.alert('No cards found', 'Please wait for the page to fully load.');
         return;
       }
-      // Save the currently active card — it will be captured last
       const activeCard = cards.find(c => c.selected) ?? cards[0];
       initialActiveRef.current = activeCard.testId;
       console.log(`[SyncWebView:amex] sync start — active card: ${activeCard.label} (will capture last)`);
@@ -189,7 +185,6 @@ export default function SyncWebView({ visible, bank, onClose, onSuccess }) {
       return;
     }
 
-    // Chase
     captureArmed.current = true;
     webViewRef.current?.injectJavaScript(buildCaptureJs(config.gridSelector, config.captureMaxBytes));
   };
@@ -228,19 +223,16 @@ export default function SyncWebView({ visible, bank, onClose, onSuccess }) {
     setSyncing(false);
 
     if (bank === 'amex') {
-      // Mark this card as visited
       if (capturedTestId) visitedCardsRef.current.add(capturedTestId);
       const totalCards = cardOptionsRef.current.length;
       const visited    = visitedCardsRef.current.size;
       console.log(`[SyncWebView:amex] visited=${visited}/${totalCards} phase=${phase}`);
 
       if (visited < totalCards) {
-        // More cards to capture in this phase
         switchToNextAmexCard();
         return;
       }
 
-      // All cards done for this phase
       if (phase === 'eligible') {
         console.log('[SyncWebView:amex] eligible phase complete — transitioning to enrolled');
         visitedCardsRef.current  = new Set();
@@ -252,7 +244,6 @@ export default function SyncWebView({ visible, bank, onClose, onSuccess }) {
         return;
       }
 
-      // enrolled phase complete — all done
       const total = syncedCardsRef.current.reduce((sum, c) => sum + c.count, 0);
       console.log(`[SyncWebView:amex] all phases complete — total offers synced: ${total}`);
       onSuccess(total, syncedCardsRef.current);
@@ -260,7 +251,6 @@ export default function SyncWebView({ visible, bank, onClose, onSuccess }) {
       return;
     }
 
-    // Chase multi-card
     syncedCountRef.current += 1;
     const totalCards = cardOptionsRef.current.length;
     if (syncedCountRef.current < totalCards) {
@@ -284,7 +274,6 @@ export default function SyncWebView({ visible, bank, onClose, onSuccess }) {
       const data = JSON.parse(event.nativeEvent.data);
       console.log(`[SyncWebView:${bank}] ✉️ message type=${data.type}`, data.error ? `error=${data.error}` : '');
 
-      // ── Chase card detection ──────────────────────────
       if (data.type === 'CARDS_DETECTED') {
         const hasCards = data.cards?.length > 0;
         console.log(`[SyncWebView:chase] CARDS_DETECTED count=${data.cards?.length} selected=${data.selectedLabel}`);
@@ -301,12 +290,10 @@ export default function SyncWebView({ visible, bank, onClose, onSuccess }) {
         return;
       }
 
-      // ── Amex card detection ───────────────────────────
       if (data.type === 'AMEX_CARDS_DETECTED') {
         const hasCards = data.cards?.length > 0;
         console.log(`[SyncWebView:amex] AMEX_CARDS_DETECTED count=${data.cards?.length} phase=${syncPhaseRef.current} alreadyDiscovered=${cardsDiscovered.current}`);
         if (!cardsDiscovered.current && hasCards && cardOptionsRef.current.length === 0) {
-          // Only store cards once (eligible phase) — reuse for enrolled
           cardOptionsRef.current = data.cards;
           setCardCount(data.cards.length);
           const activeIdx = data.cards.findIndex(c => c.selected);
@@ -316,10 +303,8 @@ export default function SyncWebView({ visible, bank, onClose, onSuccess }) {
         }
         if (!cardsDiscovered.current) cardsDiscovered.current = true;
         setCurrentCard(data.selectedLabel || null);
-        // Mark cards ready — Sync button will now be enabled
         if (hasCards) setAmexCardsReady(true);
 
-        // Enrolled phase: cards already known, start switching immediately
         if (syncPhaseRef.current === 'enrolled' && syncStarted) {
           console.log('[SyncWebView:amex] enrolled page ready — starting card cycle');
           const activeCard = data.cards?.find(c => c.selected) ?? cardOptionsRef.current[0];
@@ -329,16 +314,13 @@ export default function SyncWebView({ visible, bank, onClose, onSuccess }) {
         return;
       }
 
-      // ── Card switched ─────────────────────────────────────
       if (data.type === 'CARD_SWITCHED') {
         console.log(`[SyncWebView:${bank}] CARD_SWITCHED cardLabel=${data.cardLabel}`);
         setSwitching(false);
         setCurrentCard(data.cardLabel || null);
         if (bank === 'amex') {
-          // CAPTURE_JSON already fired before this — just update label for next use
           pendingCardLabelRef.current = data.cardLabel || null;
         } else {
-          // Chase: capture after delay
           console.log(`[SyncWebView:chase] switch confirmed — capturing in ${POST_SWITCH_DELAY_MS}ms`);
           setTimeout(() => {
             captureArmed.current = true;
@@ -372,7 +354,15 @@ export default function SyncWebView({ visible, bank, onClose, onSuccess }) {
         }
         captureArmed.current = false;
 
-        // Find the testId of the card that just fired the API
+        // ── DEBUG: log raw offersList as received from WebView ──
+        const offersList = data.json?.recommendedOffers?.offersList;
+        if (offersList) {
+          console.log('[SyncWebView:amex] DEBUG recommendedOffers.offersList:', JSON.stringify(offersList));
+        } else {
+          console.log('[SyncWebView:amex] DEBUG recommendedOffers.offersList: missing');
+        }
+        // ───────────────────────────────────────────────────────
+
         const cards = cardOptionsRef.current;
         const capturedCard = cards.find(c =>
           data.cardLabel && (c.label + (c.last4 ? ` (...${c.last4})` : '')) === data.cardLabel
@@ -433,7 +423,6 @@ export default function SyncWebView({ visible, bank, onClose, onSuccess }) {
       );
     }
     if (onOffersPage) {
-      // For Amex: wait for card detection before enabling Sync button
       const ready = pageLoaded && (bank === 'amex' ? amexCardsReady : true);
       return (
         <TouchableOpacity
