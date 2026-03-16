@@ -21,7 +21,12 @@ function mapOffer(offer, isActivated) {
   }
 
   const merchantName = (offer.title || '').trim();
-  if (!merchantName) return null;
+  if (!merchantName) {
+    console.warn(`[SKIPPED] offerId="${offer.offerId}" — empty/missing title`);
+    return null;
+  }
+
+  console.log(`[PARSED] "${merchantName}"`);
 
   const offerDescription = offer.shortDescription || '';
   const category = (offer.applicableCategories?.[0]?.optionType || 'OTHER').toLowerCase();
@@ -52,14 +57,15 @@ function extractOfferList(container) {
 }
 
 export function parseAmexEligibleOffers(json) {
-  // Debug: log offersMap keys if present to check for missing offers
   if (json?.offersMap) {
     console.log(`[parseAmexEligibleOffers] offersMap keys:`, Object.keys(json.offersMap));
   }
 
   const raw    = extractOfferList(json?.recommendedOffers);
+  console.log(`[parseAmexEligibleOffers] raw offer count: ${raw.length}`);
+
   const offers = raw.map(o => mapOffer(o, false)).filter(Boolean);
-  console.log(`✅ [parse:amex] eligible: ${offers.length} offers parsed (${raw.length} raw)`);
+  console.log(`✅ [parse:amex] eligible: ${offers.length} parsed, ${raw.length - offers.length} skipped`);
   return offers;
 }
 
