@@ -178,31 +178,16 @@ export const buildAmexJsonCaptureJs = () => `
         console.log('[AmexCapture] fireCapture source=' + source + ' jsonText.length=' + jsonText.length + ' cardLabel=' + cardLabel);
         try {
           var parsed = JSON.parse(jsonText);
-          var topKeys = Object.keys(parsed);
-          console.log('[AmexCapture] parsed JSON top-level keys:', JSON.stringify(topKeys));
+          console.log('[AmexCapture] parsed JSON top-level keys:', JSON.stringify(Object.keys(parsed)));
 
           if (parsed.recommendedOffers && parsed.recommendedOffers.offersList) {
-            var pages = Object.keys(parsed.recommendedOffers.offersList);
-            var titles = [];
-            pages.forEach(function(p) {
-              var pageOffers = parsed.recommendedOffers.offersList[p] || [];
-              pageOffers.forEach(function(o) { titles.push(o.title || '(no title)'); });
-            });
-            console.log('[AmexCapture] recommendedOffers pages:', JSON.stringify(pages), 'total:', titles.length);
-            console.log('[AmexCapture] recommendedOffers titles:', JSON.stringify(titles));
+            console.log('[AmexCapture] recommendedOffers.offersList:', JSON.stringify(parsed.recommendedOffers.offersList));
           } else {
             console.log('[AmexCapture] recommendedOffers missing or no offersList');
           }
 
           if (parsed.addedToCard && parsed.addedToCard.offersList) {
-            var epages = Object.keys(parsed.addedToCard.offersList);
-            var etitles = [];
-            epages.forEach(function(p) {
-              var pageOffers = parsed.addedToCard.offersList[p] || [];
-              pageOffers.forEach(function(o) { etitles.push(o.title || '(no title)'); });
-            });
-            console.log('[AmexCapture] addedToCard pages:', JSON.stringify(epages), 'total:', etitles.length);
-            console.log('[AmexCapture] addedToCard titles:', JSON.stringify(etitles));
+            console.log('[AmexCapture] addedToCard.offersList:', JSON.stringify(parsed.addedToCard.offersList));
           } else {
             console.log('[AmexCapture] addedToCard missing or no offersList');
           }
