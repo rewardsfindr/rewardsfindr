@@ -17,7 +17,10 @@ function parseExpiryDate(expirationText) {
 
 function mapOffer(offer, isActivated) {
   // Only capture merchant offers — skip CARD (bank promos, referrals, CreditSecure, etc.)
-  if (offer.offerType !== 'MERCHANT') return null;
+  if (offer.offerType !== 'MERCHANT') {
+    console.log(`[SKIPPED] offerType=${offer.offerType} title="${offer.title}"`);
+    return null;
+  }
 
   const merchantName = (offer.title || '').trim();
   if (!merchantName) return null;
