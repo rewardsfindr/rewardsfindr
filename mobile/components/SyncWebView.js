@@ -346,16 +346,15 @@ export default function SyncWebView({ visible, bank, onClose, onSuccess }) {
         }
         captureArmed.current = false;
 
-        // ── DEBUG: dump raw offersList to api/debug-dumps/ ──
-        const offersList = data.json?.recommendedOffers?.offersList;
-        const cardLabel  = data.cardLabel || 'unknown';
-        const safeLabel  = cardLabel.replace(/[^a-z0-9]/gi, '_');
+        // ── DEBUG: dump full raw response (no filtering) to api/debug-dumps/ ──
+        const cardLabel = data.cardLabel || 'unknown';
+        const safeLabel = cardLabel.replace(/[^a-z0-9]/gi, '_');
         fetch(`${API_BASE_URL}/api/debug/dump`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ label: `offersList_${safeLabel}`, data: offersList ?? null }),
+          body: JSON.stringify({ label: `rawResponse_${safeLabel}`, data: data.json ?? null }),
         }).then(r => r.json()).then(r => console.log('[SyncWebView:amex] debug dump:', r.file));
-        // ───────────────────────────────────────────────────────
+        // ─────────────────────────────────────────────────────────────────────
 
         const cards = cardOptionsRef.current;
         const capturedCard = cards.find(c =>
