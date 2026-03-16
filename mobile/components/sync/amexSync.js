@@ -85,10 +85,6 @@ export const AMEX_OPEN_AND_DETECT_JS = `
   true;
 `;
 
-// buildAmexSwitchCardJs
-// Tries to click the option matching testId (CARD_PRODUCT pattern, eligible page).
-// Falls back to first available [role="option"] if not found (enrolled page uses
-// numeric testIds that differ from eligible page testIds).
 export const buildAmexSwitchCardJs = (testId, timeoutMs = 3500) => `
   (function() {
     try {
@@ -152,22 +148,12 @@ export const AMEX_READ_CARD_LABEL_JS = `
 
 // ─────────────────────────────────────────────
 // buildAmexJsonCaptureJs
-//
-// Installs a one-shot XHR + fetch interceptor that listens for the
-// ReadOffersHubPresentation API response Amex fires on every page load
-// and card switch. When it fires, the raw JSON body is posted as
-// CAPTURE_JSON so SyncWebView can send it directly to the API instead
-// of sending DOM HTML.
-//
-// The interceptor fires once then removes itself (__amexJsonCaptureArmed flag).
-// cardLabel is read from the combobox display at fire-time.
 // ─────────────────────────────────────────────
 export const buildAmexJsonCaptureJs = () => `
   (function() {
     try {
       console.log('[AmexCapture] buildAmexJsonCaptureJs called. currently armed:', !!window.__amexJsonCaptureArmed);
 
-      // Always reset the flag so re-arming works after a previous capture
       window.__amexJsonCaptureArmed = true;
 
       function readCardLabel() {
@@ -194,23 +180,33 @@ export const buildAmexJsonCaptureJs = () => `
           var parsed = JSON.parse(jsonText);
           var topKeys = Object.keys(parsed);
           console.log('[AmexCapture] parsed JSON top-level keys:', JSON.stringify(topKeys));
-          // Log offer counts
-          var eligibleCount = 0;
-          var enrolledCount = 0;
+
           if (parsed.recommendedOffers && parsed.recommendedOffers.offersList) {
             var pages = Object.keys(parsed.recommendedOffers.offersList);
-            pages.forEach(function(p) { eligibleCount += (parsed.recommendedOffers.offersList[p] || []).length; });
-            console.log('[AmexCapture] recommendedOffers pages:', JSON.stringify(pages), 'total offers:', eligibleCount);
+            var titles = [];
+            pages.forEach(function(p) {
+              var pageOffers = parsed.recommendedOffers.offersList[p] || [];
+              pageOffers.forEach(function(o) { titles.push(o.title || '(no title)'); });
+            });
+            console.log('[AmexCapture] recommendedOffers pages:', JSON.stringify(pages), 'total:', titles.length);
+            console.log('[AmexCapture] recommendedOffers titles:', JSON.stringify(titles));
           } else {
             console.log('[AmexCapture] recommendedOffers missing or no offersList');
           }
+
           if (parsed.addedToCard && parsed.addedToCard.offersList) {
             var epages = Object.keys(parsed.addedToCard.offersList);
-            epages.forEach(function(p) { enrolledCount += (parsed.addedToCard.offersList[p] || []).length; });
-            console.log('[AmexCapture] addedToCard pages:', JSON.stringify(epages), 'total offers:', enrolledCount);
+            var etitles = [];
+            epages.forEach(function(p) {
+              var pageOffers = parsed.addedToCard.offersList[p] || [];
+              pageOffers.forEach(function(o) { etitles.push(o.title || '(no title)'); });
+            });
+            console.log('[AmexCapture] addedToCard pages:', JSON.stringify(epages), 'total:', etitles.length);
+            console.log('[AmexCapture] addedToCard titles:', JSON.stringify(etitles));
           } else {
             console.log('[AmexCapture] addedToCard missing or no offersList');
           }
+
           console.log('[AmexCapture] posting CAPTURE_JSON to RN bridge');
           window.ReactNativeWebView.postMessage(JSON.stringify({
             type: 'CAPTURE_JSON',
@@ -226,8 +222,6 @@ export const buildAmexJsonCaptureJs = () => `
         }
       }
 
-      // ── XHR interceptor ──────────────────────────────
-      // Only patch once to avoid stacking interceptors on re-arm
       if (!window.__amexXhrPatched) {
         window.__amexXhrPatched = true;
         var OrigXHR = window.XMLHttpRequest;
@@ -262,7 +256,6 @@ export const buildAmexJsonCaptureJs = () => `
         console.log('[AmexCapture] XHR interceptor already installed, re-armed only');
       }
 
-      // ── fetch interceptor ─────────────────────────────
       if (!window.__amexFetchPatched) {
         window.__amexFetchPatched = true;
         var origFetch = window.fetch;
@@ -271,7 +264,6 @@ export const buildAmexJsonCaptureJs = () => `
           if (url.includes('ReadOffersHubPresentation')) {
             console.log('[AmexCapture:fetch] ReadOffersHubPresentation detected, armed=', window.__amexJsonCaptureArmed);
           } else {
-            // Log all fetch URLs at trace level so we know what APIs Amex calls
             console.log('[AmexCapture:fetch] url:', url.substring(0, 120));
           }
           var p = origFetch.apply(window, arguments);
@@ -308,18 +300,6 @@ export const buildAmexJsonCaptureJs = () => `
   true;
 `;
 
-// ─────────────────────────────────────────────
-// amexHandleLoadEnd
-// Call from SyncWebView.handleLoadEnd when bank === 'amex'.
-//
-// Returns:
-//   onOffersPage  — whether to show Sync Offers button
-//   detectedPhase — 'eligible' | 'enrolled' based on URL
-//
-// SyncWebView must only act on detectedPhase if it matches
-// the current syncPhaseRef. Amex SPA navigates to /enrolled
-// on its own during the eligible phase — we must ignore that.
-// ─────────────────────────────────────────────
 export const amexHandleLoadEnd = ({
   url,
   config,
@@ -333,14 +313,10 @@ export const amexHandleLoadEnd = ({
 
   const onLogin = (config.loginPaths || []).some(p => lower.includes(p.toLowerCase()));
 
-  // Check enrolled FIRST — enrolled path is a substring of eligible path
   const onEnrolled = !onLogin && lower.includes(enrolledPathLower);
-  // Eligible must explicitly exclude enrolled
   const onEligible = !onLogin && !onEnrolled && lower.includes(eligiblePathLower);
 
   const detectedPhase = onEnrolled ? 'enrolled' : 'eligible';
-
-  // Gate on phase match to ignore Amex SPA auto-navigation to /enrolled
   const phaseMatch   = detectedPhase === syncPhase;
   const onOffersPage = phaseMatch && (onEligible || onEnrolled);
 
