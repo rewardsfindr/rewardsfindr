@@ -45,7 +45,6 @@ async function verifyToken(req, res) {
 async function writeOffersToDB(offers, { userId, bank, cardName }) {
   const userOffersRef = db.collection('users').doc(userId).collection('offers');
 
-  // Fetch all existing offer IDs for this card in one read
   const existingSnap = await userOffersRef
     .where('bank', '==', bank)
     .where('cardName', '==', cardName)
@@ -124,9 +123,8 @@ router.post('/sync', async (req, res) => {
       return res.status(400).json({ error: 'bank and cardName are required' });
     }
 
-    console.log(`🔄 Syncing ${offers.length} offers for user ${userId} (${bank} - ${cardName})`);
     const { newCount, updatedCount, errorCount } = await writeOffersToDB(offers, { userId, bank, cardName });
-    console.log(`✅ Sync complete: ${newCount} new, ${updatedCount} updated, ${errorCount} errors`);
+    console.log(`✅ [sync] done: ${offers.length} parsed → ${newCount} new, ${updatedCount} updated, ${errorCount} errors (${bank} — ${cardName})`);
 
     res.json({ success: true, newCount, updatedCount, errorCount, total: offers.length });
   } catch (error) {
@@ -149,43 +147,20 @@ router.post('/parse', async (req, res) => {
     const userId = decoded.uid;
     const { bank, cardName, phase } = req.body;
 
-    console.log(`📥 [parse] bank=${bank} phase=${phase} cardName=${cardName} userId=${userId}`);
-    console.log(`📥 [parse] body keys:`, Object.keys(req.body));
-
     if (!bank || !['chase', 'amex'].includes(bank)) {
       return res.status(400).json({ error: "bank must be 'chase' or 'amex'" });
     }
 
     let offers;
 
-    // ── Amex: JSON path ──────────────────────────────────────────
+    // ── Amex: JSON path ────────────────────────────────────────────
     if (bank === 'amex') {
       const { json } = req.body;
       if (!json || typeof json !== 'object') {
-        console.error('❌ [parse:amex] json field missing or not an object. typeof json:', typeof json);
         return res.status(400).json({ error: 'json (object) is required for amex' });
       }
       const resolvedPhase = phase === 'enrolled' ? 'enrolled' : 'eligible';
-      console.log(`🔍 [parse:amex] phase=${resolvedPhase} cardName=${cardName}`);
-      console.log(`🔍 [parse:amex] json top-level keys:`, Object.keys(json));
-
-      if (json.recommendedOffers?.offersList) {
-        const pages = Object.keys(json.recommendedOffers.offersList);
-        const total = pages.reduce((s, p) => s + (json.recommendedOffers.offersList[p]?.length || 0), 0);
-        console.log(`🔍 [parse:amex] recommendedOffers pages=${JSON.stringify(pages)} totalRaw=${total}`);
-      }
-      const enrolledContainer = json.addedToCardViewAll ?? json.addedToCard;
-      if (enrolledContainer?.offersList) {
-        const pages = Object.keys(enrolledContainer.offersList);
-        const total = pages.reduce((s, p) => s + (enrolledContainer.offersList[p]?.length || 0), 0);
-        console.log(`🔍 [parse:amex] addedToCardViewAll pages=${JSON.stringify(pages)} totalRaw=${total}`);
-      }
-
       offers = parseAmexOffers(json, resolvedPhase);
-      console.log(`✅ [parse:amex] parsed ${offers.length} offers`);
-      if (offers.length > 0) {
-        console.log(`✅ [parse:amex] first offer sample:`, JSON.stringify(offers[0]));
-      }
     }
 
     // ── Chase: HTML path (unchanged) ─────────────────────────────
@@ -194,21 +169,14 @@ router.post('/parse', async (req, res) => {
       if (!html || typeof html !== 'string') {
         return res.status(400).json({ error: 'html (string) is required for chase' });
       }
-      console.log(`🔍 [parse:chase] cardName=${cardName} html.length=${html.length}`);
       offers = parseChaseOffers(html);
-      console.log(`✅ [parse:chase] parsed ${offers.length} offers`);
-      if (offers.length > 0) {
-        console.log(`✅ [parse:chase] first offer sample:`, JSON.stringify(offers[0]));
-      }
     }
 
     if (offers.length === 0) {
-      console.log(`⚠️ [parse] 0 offers found for ${bank} phase=${phase} — returning empty`);
       return res.json({ success: true, offers: [], newCount: 0, updatedCount: 0, errorCount: 0, bank, message: 'No offers found.' });
     }
 
     const resolvedCardName = cardName || (bank === 'chase' ? 'Chase Card' : 'Amex Card');
-    console.log(`💾 [parse] writing ${offers.length} offers to DB for ${bank} — ${resolvedCardName}`);
     const { newCount, updatedCount, errorCount } = await writeOffersToDB(offers, { userId, bank, cardName: resolvedCardName });
 
     console.log(`✅ [parse] done: ${offers.length} parsed → ${newCount} new, ${updatedCount} updated, ${errorCount} errors (${bank} — ${resolvedCardName})`);
