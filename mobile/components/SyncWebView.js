@@ -55,16 +55,17 @@ export default function SyncWebView({ visible, bank, onClose, onSuccess }) {
   const pendingCardLabelRef = useRef(null);
 
   // ── UI state ──────────────────────────────────────────────────
-  const [syncing, setSyncing]           = useState(false);
-  const [switching, setSwitching]       = useState(false);
-  const [syncStarted, setSyncStarted]   = useState(false);
-  const [pageLoaded, setPageLoaded]     = useState(false);
-  const [onOffersPage, setOnOffersPage] = useState(false);
-  const [currentCard, setCurrentCard]   = useState(null);
-  const [currentUrl, setCurrentUrl]     = useState('');
-  const [cardCount, setCardCount]       = useState(0);
-  const [cardIndexUi, setCardIndexUi]   = useState(0);
-  const [syncPhaseUi, setSyncPhaseUi]   = useState('eligible');
+  const [syncing, setSyncing]               = useState(false);
+  const [switching, setSwitching]           = useState(false);
+  const [syncStarted, setSyncStarted]       = useState(false);
+  const [pageLoaded, setPageLoaded]         = useState(false);
+  const [onOffersPage, setOnOffersPage]     = useState(false);
+  const [amexCardsReady, setAmexCardsReady] = useState(false); // true only after AMEX_CARDS_DETECTED fires with cards
+  const [currentCard, setCurrentCard]       = useState(null);
+  const [currentUrl, setCurrentUrl]         = useState('');
+  const [cardCount, setCardCount]           = useState(0);
+  const [cardIndexUi, setCardIndexUi]       = useState(0);
+  const [syncPhaseUi, setSyncPhaseUi]       = useState('eligible');
 
   const config = BANK_CONFIG[bank] || BANK_CONFIG.chase;
 
@@ -89,6 +90,7 @@ export default function SyncWebView({ visible, bank, onClose, onSuccess }) {
       setSyncStarted(false);
       setPageLoaded(false);
       setOnOffersPage(false);
+      setAmexCardsReady(false);
       setCardCount(0);
       setCardIndexUi(0);
       setSyncPhaseUi('eligible');
@@ -152,7 +154,9 @@ export default function SyncWebView({ visible, bank, onClose, onSuccess }) {
         injectJavaScript: (js) => webViewRef.current?.injectJavaScript(js),
       });
       setOnOffersPage(onOffers);
+      // Reset cards-ready on each new page load so button re-gates until detection completes
       if (onOffers) {
+        setAmexCardsReady(false);
         console.log(`[SyncWebView:amex] arming JSON interceptor on loadEnd (phase=${syncPhaseRef.current})`);
         webViewRef.current?.injectJavaScript(buildAmexJsonCaptureJs());
       }
@@ -312,6 +316,8 @@ export default function SyncWebView({ visible, bank, onClose, onSuccess }) {
         }
         if (!cardsDiscovered.current) cardsDiscovered.current = true;
         setCurrentCard(data.selectedLabel || null);
+        // Mark cards ready — Sync button will now be enabled
+        if (hasCards) setAmexCardsReady(true);
 
         // Enrolled phase: cards already known, start switching immediately
         if (syncPhaseRef.current === 'enrolled' && syncStarted) {
@@ -427,14 +433,17 @@ export default function SyncWebView({ visible, bank, onClose, onSuccess }) {
       );
     }
     if (onOffersPage) {
-      const ready = pageLoaded;
+      // For Amex: wait for card detection before enabling Sync button
+      const ready = pageLoaded && (bank === 'amex' ? amexCardsReady : true);
       return (
         <TouchableOpacity
           style={[s.syncBtn, !ready && s.syncBtnDisabled]}
           onPress={ready ? handleSyncPress : undefined}
           disabled={!ready}
         >
-          <Text style={s.syncBtnText}>{ready ? 'Sync Offers' : 'Loading...'}</Text>
+          <Text style={s.syncBtnText}>
+            {ready ? 'Sync Offers' : (bank === 'amex' && pageLoaded ? 'Detecting cards...' : 'Loading...')}
+          </Text>
         </TouchableOpacity>
       );
     }
