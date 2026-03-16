@@ -90,9 +90,10 @@ export const buildResultsForCategory = (category, allCards = []) => {
 
 export const generateOfferId = (merchantName, cashbackAmount, expiryDate, cardName = '') => {
   const raw = `${merchantName.toLowerCase().trim()}_${cashbackAmount}_${cardName.toLowerCase().trim()}_${expiryDate}`;
-  const encoded = btoa(unescape(encodeURIComponent(raw)))
+  // No truncation — full encoded string prevents collisions between offers
+  // with same merchant/expiry across different cards or same card.
+  return btoa(unescape(encodeURIComponent(raw)))
     .replace(/[^a-zA-Z0-9]/g, '');
-  return encoded.slice(0, 32);
 };
 
 export const generateCardId = (bankName, cardName) => {
