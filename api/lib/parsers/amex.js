@@ -15,16 +15,10 @@ function parseExpiryDate(expirationText) {
 }
 
 function mapOffer(offer, isActivated) {
-  if (offer.offerType !== 'MERCHANT') {
-    console.log(`[SKIPPED] offerType=${offer.offerType} title="${offer.title}"`);
-    return null;
-  }
+  if (offer.offerType !== 'MERCHANT') return null;
 
   const merchantName = (offer.title || '').trim();
-  if (!merchantName) {
-    console.warn(`[SKIPPED] offerId="${offer.offerId}" — empty/missing title`);
-    return null;
-  }
+  if (!merchantName) return null;
 
   const offerDescription = offer.shortDescription || '';
   const category = (offer.applicableCategories?.[0]?.optionType || 'OTHER').toLowerCase();
@@ -55,25 +49,15 @@ function extractOfferList(container) {
 }
 
 export function parseAmexEligibleOffers(json) {
-  if (json?.offersMap) {
-    console.log(`[parseAmexEligibleOffers] offersMap keys:`, Object.keys(json.offersMap));
-  }
-
   const raw = extractOfferList(json?.recommendedOffers);
-  console.log(`[parseAmexEligibleOffers] raw offer count: ${raw.length}`);
-  console.log(`[parseAmexEligibleOffers] titles: ${JSON.stringify(raw.map(o => o.title))}`);
-
   const offers = raw.map(o => mapOffer(o, false)).filter(Boolean);
-  console.log(`✅ [parse:amex] eligible: ${offers.length} parsed, ${raw.length - offers.length} skipped`);
   return offers;
 }
 
 export function parseAmexEnrolledOffers(json) {
   const container = json?.addedToCardViewAll ?? json?.addedToCard;
   const raw = extractOfferList(container);
-  const offers = raw.map(o => mapOffer(o, true)).filter(Boolean);
-  console.log(`✅ [parse:amex] enrolled: ${offers.length} offers parsed (${raw.length} raw)`);
-  return offers;
+  return raw.map(o => mapOffer(o, true)).filter(Boolean);
 }
 
 /**

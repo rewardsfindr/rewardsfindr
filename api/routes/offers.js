@@ -36,7 +36,6 @@ async function verifyToken(req, res) {
     const idToken = authHeader.split('Bearer ')[1];
     return await auth.verifyIdToken(idToken);
   } catch (error) {
-    console.error('Token verification failed:', error);
     res.status(401).json({ error: 'Invalid authentication token' });
     return null;
   }
@@ -124,7 +123,7 @@ router.post('/sync', async (req, res) => {
     }
 
     const { newCount, updatedCount, errorCount } = await writeOffersToDB(offers, { userId, bank, cardName });
-    console.log(`✅ [sync] done: ${offers.length} parsed → ${newCount} new, ${updatedCount} updated, ${errorCount} errors (${bank} — ${cardName})`);
+    console.log(`✅ [sync] ${bank} — ${cardName}: ${newCount} new, ${updatedCount} updated`);
 
     res.json({ success: true, newCount, updatedCount, errorCount, total: offers.length });
   } catch (error) {
@@ -179,9 +178,9 @@ router.post('/parse', async (req, res) => {
     const resolvedCardName = cardName || (bank === 'chase' ? 'Chase Card' : 'Amex Card');
     const { newCount, updatedCount, errorCount } = await writeOffersToDB(offers, { userId, bank, cardName: resolvedCardName });
 
-    console.log(`✅ [parse] done: ${offers.length} parsed → ${newCount} new, ${updatedCount} updated, ${errorCount} errors (${bank} — ${resolvedCardName})`);
+    console.log(`✅ [parse] ${bank} — ${resolvedCardName} (${phase}): ${newCount} new, ${updatedCount} updated`);
 
-    res.json({ success: true, offers, newCount, updatedCount, errorCount, bank, cardName: resolvedCardName });
+    res.json({ success: true, synced: offers.length, newCount, updatedCount, errorCount, bank, cardName: resolvedCardName });
   } catch (error) {
     console.error('❌ Offers parse error:', error);
     res.status(500).json({ error: 'Failed to parse and sync offers' });
