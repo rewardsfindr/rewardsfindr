@@ -337,6 +337,20 @@ export default function SyncWebView({ visible, bank, onClose, onSuccess }) {
         return;
       }
 
+      // ── DEBUG_DUMP: log every Amex API call to disk (fired by amexSync.js for ALL calls) ──
+      if (data.type === 'DEBUG_DUMP' && bank === 'amex') {
+        console.log(`[SyncWebView:amex] DEBUG_DUMP label=${data.label}`);
+        fetch(`${API_BASE_URL}/api/debug/dump`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ label: data.label, data: data.data ?? null }),
+        })
+          .then(r => r.json())
+          .then(r => console.log('[SyncWebView:amex] DEBUG_DUMP wrote:', r.file))
+          .catch(e => console.log('[SyncWebView:amex] DEBUG_DUMP error:', e.message));
+        return;
+      }
+
       // ── Amex JSON capture ─────────────────────────────
       if (data.type === 'CAPTURE_JSON' && bank === 'amex') {
         console.log(`[SyncWebView:amex] CAPTURE_JSON — captureArmed=${captureArmed.current} cardLabel=${data.cardLabel}`);
@@ -345,16 +359,6 @@ export default function SyncWebView({ visible, bank, onClose, onSuccess }) {
           return;
         }
         captureArmed.current = false;
-
-        // ── DEBUG: dump full raw response (no filtering) to api/debug-dumps/ ──
-        const cardLabel = data.cardLabel || 'unknown';
-        const safeLabel = cardLabel.replace(/[^a-z0-9]/gi, '_');
-        fetch(`${API_BASE_URL}/api/debug/dump`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ label: `rawResponse_${safeLabel}`, data: data.json ?? null }),
-        }).then(r => r.json()).then(r => console.log('[SyncWebView:amex] debug dump:', r.file));
-        // ─────────────────────────────────────────────────────────────────────
 
         const cards = cardOptionsRef.current;
         const capturedCard = cards.find(c =>
