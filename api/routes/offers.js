@@ -183,7 +183,6 @@ router.post('/parse', async (req, res) => {
     const { newCount, updatedCount, errorCount } = await writeOffersToDB(offers, { userId, bank, cardName: resolvedCardName, phase: resolvedPhase });
 
     console.log(`✅ [parse] ${bank} — ${resolvedCardName} (${resolvedPhase}): ${offers.length} total, ${newCount} new, ${updatedCount} updated`);
-    console.log(`   [${resolvedPhase}] merchants: ${offers.map(o => o.merchantName).join(', ')}`);
 
     res.json({ success: true, synced: offers.length, newCount, updatedCount, errorCount, bank, cardName: resolvedCardName });
   } catch (error) {
