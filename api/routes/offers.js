@@ -1,4 +1,4 @@
-// ─────────────────────────────────────────────
+// ─────────────────────────────────────────────────────────────────────
 // OFFERS ROUTES
 // POST /api/offers/sync  — sync pre-parsed offers from Chrome extension
 // POST /api/offers/parse — parse raw data from mobile WebView + sync
@@ -8,7 +8,7 @@
 //   Amex  → { json: object,  bank: 'amex',  cardName, phase: 'eligible'|'enrolled' }
 //
 // Storage: /users/{userId}/offers/{offerId}  (subcollection per user)
-// ─────────────────────────────────────────────
+// ─────────────────────────────────────────────────────────────────────
 import express from 'express';
 import { db, auth } from '../config/firebase.js';
 import { FieldValue, Timestamp } from 'firebase-admin/firestore';
@@ -41,12 +41,13 @@ async function verifyToken(req, res) {
   }
 }
 
-async function writeOffersToDB(offers, { userId, bank, cardName }) {
+async function writeOffersToDB(offers, { userId, bank, cardName, phase }) {
   const userOffersRef = db.collection('users').doc(userId).collection('offers');
 
   const existingSnap = await userOffersRef
     .where('bank', '==', bank)
     .where('cardName', '==', cardName)
+    .where('phase', '==', phase)
     .get();
   const existingIds = new Set(existingSnap.docs.map(d => d.id));
 
@@ -64,7 +65,8 @@ async function writeOffersToDB(offers, { userId, bank, cardName }) {
         offer.merchantName,
         offer.cashbackAmount,
         expiryDate,
-        cardName
+        cardName,
+        phase
       );
 
       const offerDoc = {
@@ -84,6 +86,7 @@ async function writeOffersToDB(offers, { userId, bank, cardName }) {
         offerDeepLink:      offer.offerDeepLink || null,
         bank,
         cardName,
+        phase,
         syncedAt:           FieldValue.serverTimestamp(),
       };
 
@@ -122,7 +125,7 @@ router.post('/sync', async (req, res) => {
       return res.status(400).json({ error: 'bank and cardName are required' });
     }
 
-    const { newCount, updatedCount, errorCount } = await writeOffersToDB(offers, { userId, bank, cardName });
+    const { newCount, updatedCount, errorCount } = await writeOffersToDB(offers, { userId, bank, cardName, phase: '' });
     console.log(`✅ [sync] ${bank} — ${cardName}: ${newCount} new, ${updatedCount} updated`);
 
     res.json({ success: true, newCount, updatedCount, errorCount, total: offers.length });
@@ -152,7 +155,7 @@ router.post('/parse', async (req, res) => {
 
     let offers;
 
-    // ── Amex: JSON path ────────────────────────────────────────────
+    // ── Amex: JSON path ──────────────────────────────────────────
     if (bank === 'amex') {
       const { json } = req.body;
       if (!json || typeof json !== 'object') {
@@ -162,7 +165,7 @@ router.post('/parse', async (req, res) => {
       offers = parseAmexOffers(json, resolvedPhase);
     }
 
-    // ── Chase: HTML path (unchanged) ─────────────────────────────
+    // ── Chase: HTML path ─────────────────────────────────────────
     else {
       const { html } = req.body;
       if (!html || typeof html !== 'string') {
@@ -175,10 +178,12 @@ router.post('/parse', async (req, res) => {
       return res.json({ success: true, offers: [], newCount: 0, updatedCount: 0, errorCount: 0, bank, message: 'No offers found.' });
     }
 
+    const resolvedPhase    = bank === 'amex' ? (phase === 'enrolled' ? 'enrolled' : 'eligible') : (phase || '');
     const resolvedCardName = cardName || (bank === 'chase' ? 'Chase Card' : 'Amex Card');
-    const { newCount, updatedCount, errorCount } = await writeOffersToDB(offers, { userId, bank, cardName: resolvedCardName });
+    const { newCount, updatedCount, errorCount } = await writeOffersToDB(offers, { userId, bank, cardName: resolvedCardName, phase: resolvedPhase });
 
-    console.log(`✅ [parse] ${bank} — ${resolvedCardName} (${phase}): ${newCount} new, ${updatedCount} updated`);
+    console.log(`✅ [parse] ${bank} — ${resolvedCardName} (${resolvedPhase}): ${offers.length} total, ${newCount} new, ${updatedCount} updated`);
+    console.log(`   [${resolvedPhase}] merchants: ${offers.map(o => o.merchantName).join(', ')}`);
 
     res.json({ success: true, synced: offers.length, newCount, updatedCount, errorCount, bank, cardName: resolvedCardName });
   } catch (error) {

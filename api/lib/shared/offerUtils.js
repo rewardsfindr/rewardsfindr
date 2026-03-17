@@ -88,10 +88,10 @@ export const buildResultsForCategory = (category, allCards = []) => {
     .sort((a, b) => b.rate - a.rate);
 };
 
-export const generateOfferId = (merchantName, cashbackAmount, expiryDate, cardName = '') => {
-  const raw = `${merchantName.toLowerCase().trim()}_${cashbackAmount}_${cardName.toLowerCase().trim()}_${expiryDate}`;
-  // No truncation — full encoded string prevents collisions between offers
-  // with same merchant/expiry across different cards or same card.
+// phase is included so eligible and enrolled offers for the same merchant
+// never collide in Firestore even when merchant + expiry are identical.
+export const generateOfferId = (merchantName, cashbackAmount, expiryDate, cardName = '', phase = '') => {
+  const raw = `${merchantName.toLowerCase().trim()}_${cashbackAmount}_${cardName.toLowerCase().trim()}_${expiryDate}_${phase}`;
   return btoa(unescape(encodeURIComponent(raw)))
     .replace(/[^a-zA-Z0-9]/g, '');
 };
