@@ -148,6 +148,11 @@ export const AMEX_READ_CARD_LABEL_JS = `
 
 // ─────────────────────────────────────────────
 // buildAmexJsonCaptureJs
+// Intercepts ALL ReadOffersHubPresentation calls.
+// Every response is:
+//   1. Posted as CAPTURE_JSON to RN (only when armed, for actual sync)
+//   2. ALWAYS dumped to api/debug-dumps/ via DEBUG_DUMP message
+//      so we can see every call Amex makes and its full response.
 // ─────────────────────────────────────────────
 export const buildAmexJsonCaptureJs = () => `
   (function() {
@@ -155,6 +160,8 @@ export const buildAmexJsonCaptureJs = () => `
       console.log('[AmexCapture] buildAmexJsonCaptureJs called. currently armed:', !!window.__amexJsonCaptureArmed);
 
       window.__amexJsonCaptureArmed = true;
+
+      if (!window.__amexCallCounter) window.__amexCallCounter = 0;
 
       function readCardLabel() {
         var displayEl = document.querySelector('[data-testid="simple_switcher_selected_option_display"]');
@@ -169,37 +176,35 @@ export const buildAmexJsonCaptureJs = () => `
       }
 
       function fireCapture(jsonText, source) {
-        if (!window.__amexJsonCaptureArmed) {
-          console.log('[AmexCapture] fireCapture called but not armed (source=' + source + ') — ignoring');
-          return;
-        }
-        window.__amexJsonCaptureArmed = false;
+        var seq = ++window.__amexCallCounter;
         var cardLabel = readCardLabel();
-        console.log('[AmexCapture] fireCapture source=' + source + ' jsonText.length=' + jsonText.length + ' cardLabel=' + cardLabel);
+        console.log('[AmexCapture] fireCapture #' + seq + ' source=' + source + ' jsonText.length=' + jsonText.length + ' cardLabel=' + cardLabel + ' armed=' + window.__amexJsonCaptureArmed);
+
         try {
           var parsed = JSON.parse(jsonText);
-          console.log('[AmexCapture] parsed JSON top-level keys:', JSON.stringify(Object.keys(parsed)));
+          console.log('[AmexCapture] #' + seq + ' parsed JSON top-level keys:', JSON.stringify(Object.keys(parsed)));
 
-          if (parsed.recommendedOffers && parsed.recommendedOffers.offersList) {
-            console.log('[AmexCapture] recommendedOffers.offersList:', JSON.stringify(parsed.recommendedOffers.offersList));
-          } else {
-            console.log('[AmexCapture] recommendedOffers missing or no offersList');
-          }
-
-          if (parsed.addedToCard && parsed.addedToCard.offersList) {
-            console.log('[AmexCapture] addedToCard.offersList:', JSON.stringify(parsed.addedToCard.offersList));
-          } else {
-            console.log('[AmexCapture] addedToCard missing or no offersList');
-          }
-
-          console.log('[AmexCapture] posting CAPTURE_JSON to RN bridge');
+          // ── DEBUG: always dump every call regardless of armed state ──
+          var safeLabel = (cardLabel || 'unknown').replace(/[^a-z0-9]/gi, '_');
           window.ReactNativeWebView.postMessage(JSON.stringify({
-            type: 'CAPTURE_JSON',
-            json: parsed,
-            cardLabel: cardLabel,
+            type: 'DEBUG_DUMP',
+            label: 'ReadOffersHubPresentation_' + safeLabel + '_call' + seq,
+            data: parsed,
           }));
+          // ────────────────────────────────────────────────────────────
+
+          // Only forward to sync pipeline when armed
+          if (window.__amexJsonCaptureArmed) {
+            window.__amexJsonCaptureArmed = false;
+            console.log('[AmexCapture] #' + seq + ' posting CAPTURE_JSON to RN bridge');
+            window.ReactNativeWebView.postMessage(JSON.stringify({
+              type: 'CAPTURE_JSON',
+              json: parsed,
+              cardLabel: cardLabel,
+            }));
+          }
         } catch(e) {
-          console.log('[AmexCapture] JSON parse error:', e.message, 'first 200 chars:', jsonText.substring(0, 200));
+          console.log('[AmexCapture] #' + seq + ' JSON parse error:', e.message);
           window.ReactNativeWebView.postMessage(JSON.stringify({
             type: 'ERROR',
             message: 'AmexCapture JSON parse error: ' + e.message,
@@ -225,7 +230,7 @@ export const buildAmexJsonCaptureJs = () => `
               console.log('[AmexCapture:XHR] ReadOffersHubPresentation detected, armed=', window.__amexJsonCaptureArmed);
               xhr.addEventListener('load', function() {
                 console.log('[AmexCapture:XHR] response status=' + xhr.status + ' responseText.length=' + (xhr.responseText || '').length);
-                if (xhr.status >= 200 && xhr.status < 300 && window.__amexJsonCaptureArmed) {
+                if (xhr.status >= 200 && xhr.status < 300) {
                   fireCapture(xhr.responseText, 'XHR');
                 }
               });
@@ -254,16 +259,14 @@ export const buildAmexJsonCaptureJs = () => `
           var p = origFetch.apply(window, arguments);
           if (url.includes('ReadOffersHubPresentation')) {
             p = p.then(function(response) {
-              console.log('[AmexCapture:fetch] ReadOffersHubPresentation response ok=' + response.ok + ' status=' + response.status);
+              console.log('[AmexCapture:fetch] response ok=' + response.ok + ' status=' + response.status);
               var cloned = response.clone();
               cloned.text().then(function(text) {
                 console.log('[AmexCapture:fetch] response body length=' + text.length);
-                if (response.ok && window.__amexJsonCaptureArmed) {
+                if (response.ok) {
                   fireCapture(text, 'fetch');
-                } else if (!response.ok) {
-                  console.log('[AmexCapture:fetch] response not ok, skipping capture');
                 } else {
-                  console.log('[AmexCapture:fetch] not armed, skipping capture');
+                  console.log('[AmexCapture:fetch] response not ok, skipping capture');
                 }
               });
               return response;
