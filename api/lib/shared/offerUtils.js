@@ -88,11 +88,12 @@ export const buildResultsForCategory = (category, allCards = []) => {
     .sort((a, b) => b.rate - a.rate);
 };
 
-export const generateOfferId = (merchantName, cashbackAmount, expiryDate, cardName = '') => {
-  const raw = `${merchantName.toLowerCase().trim()}_${cashbackAmount}_${cardName.toLowerCase().trim()}_${expiryDate}`;
-  const encoded = btoa(unescape(encodeURIComponent(raw)))
+// phase is included so eligible and enrolled offers for the same merchant
+// never collide in Firestore even when merchant + expiry are identical.
+export const generateOfferId = (merchantName, cashbackAmount, expiryDate, cardName = '', phase = '') => {
+  const raw = `${merchantName.toLowerCase().trim()}_${cashbackAmount}_${cardName.toLowerCase().trim()}_${expiryDate}_${phase}`;
+  return btoa(unescape(encodeURIComponent(raw)))
     .replace(/[^a-zA-Z0-9]/g, '');
-  return encoded.slice(0, 32);
 };
 
 export const generateCardId = (bankName, cardName) => {

@@ -1,17 +1,20 @@
-// ─────────────────────────────────────────────
+// ─────────────────────────────────────────────────────────────────────
 // OFFERS ROUTES
 // POST /api/offers/sync  — sync pre-parsed offers from Chrome extension
-// POST /api/offers/parse — parse raw HTML from mobile WebView + sync
+// POST /api/offers/parse — parse raw data from mobile WebView + sync
+//
+// Parse payload by bank:
+//   Chase → { html: string,  bank: 'chase', cardName, phase? }
+//   Amex  → { json: object,  bank: 'amex',  cardName, phase: 'eligible'|'enrolled' }
 //
 // Storage: /users/{userId}/offers/{offerId}  (subcollection per user)
-// Cleanup: expired offers are purged on every sync (no Firestore TTL needed)
-// ─────────────────────────────────────────────
+// ─────────────────────────────────────────────────────────────────────
 import express from 'express';
 import { db, auth } from '../config/firebase.js';
 import { FieldValue, Timestamp } from 'firebase-admin/firestore';
 import { generateOfferId, normalizeMerchant } from '../lib/shared/offerUtils.js';
 import { parseChaseOffers } from '../lib/parsers/chase.js';
-import { parseAmexOffers } from '../lib/parsers/amex.js';
+import { parseAmexOffers }  from '../lib/parsers/amex.js';
 
 const router = express.Router();
 
@@ -33,36 +36,25 @@ async function verifyToken(req, res) {
     const idToken = authHeader.split('Bearer ')[1];
     return await auth.verifyIdToken(idToken);
   } catch (error) {
-    console.error('Token verification failed:', error);
     res.status(401).json({ error: 'Invalid authentication token' });
     return null;
   }
 }
 
-async function purgeExpiredOffers(userOffersRef, bank) {
-  const now = Timestamp.now();
-  const expired = await userOffersRef
-    .where('bank', '==', bank)
-    .where('expiresAt', '<', now)
-    .get();
-
-  if (expired.empty) return 0;
-
-  const batch = db.batch();
-  expired.docs.forEach(doc => batch.delete(doc.ref));
-  await batch.commit();
-  console.log(`🗑️  Purged ${expired.size} expired ${bank} offers`);
-  return expired.size;
-}
-
-async function writeOffersToDB(offers, { userId, bank, cardName }) {
+async function writeOffersToDB(offers, { userId, bank, cardName, phase }) {
   const userOffersRef = db.collection('users').doc(userId).collection('offers');
 
-  await purgeExpiredOffers(userOffersRef, bank);
+  const existingSnap = await userOffersRef
+    .where('bank', '==', bank)
+    .where('cardName', '==', cardName)
+    .where('phase', '==', phase)
+    .get();
+  const existingIds = new Set(existingSnap.docs.map(d => d.id));
 
   const batch = db.batch();
-  let syncedCount = 0;
-  let skippedCount = 0;
+  let newCount     = 0;
+  let updatedCount = 0;
+  let errorCount   = 0;
 
   for (const offer of offers) {
     try {
@@ -73,7 +65,8 @@ async function writeOffersToDB(offers, { userId, bank, cardName }) {
         offer.merchantName,
         offer.cashbackAmount,
         expiryDate,
-        cardName
+        cardName,
+        phase
       );
 
       const offerDoc = {
@@ -93,19 +86,25 @@ async function writeOffersToDB(offers, { userId, bank, cardName }) {
         offerDeepLink:      offer.offerDeepLink || null,
         bank,
         cardName,
+        phase,
         syncedAt:           FieldValue.serverTimestamp(),
       };
 
       batch.set(userOffersRef.doc(offerId), offerDoc, { merge: true });
-      syncedCount++;
+
+      if (existingIds.has(offerId)) {
+        updatedCount++;
+      } else {
+        newCount++;
+      }
     } catch (error) {
       console.error(`❌ Error processing offer "${offer.merchantName}":`, error);
-      skippedCount++;
+      errorCount++;
     }
   }
 
   await batch.commit();
-  return { syncedCount, skippedCount };
+  return { newCount, updatedCount, errorCount };
 }
 
 /**
@@ -126,11 +125,10 @@ router.post('/sync', async (req, res) => {
       return res.status(400).json({ error: 'bank and cardName are required' });
     }
 
-    console.log(`🔄 Syncing ${offers.length} offers for user ${userId} (${bank} - ${cardName})`);
-    const { syncedCount, skippedCount } = await writeOffersToDB(offers, { userId, bank, cardName });
-    console.log(`✅ Sync complete: ${syncedCount} synced, ${skippedCount} skipped`);
+    const { newCount, updatedCount, errorCount } = await writeOffersToDB(offers, { userId, bank, cardName, phase: '' });
+    console.log(`✅ [sync] ${bank} — ${cardName}: ${newCount} new, ${updatedCount} updated`);
 
-    res.json({ success: true, synced: syncedCount, skipped: skippedCount, total: offers.length });
+    res.json({ success: true, newCount, updatedCount, errorCount, total: offers.length });
   } catch (error) {
     console.error('❌ Offers sync error:', error);
     res.status(500).json({ error: 'Failed to sync offers' });
@@ -139,6 +137,9 @@ router.post('/sync', async (req, res) => {
 
 /**
  * POST /api/offers/parse
+ *
+ * Chase: expects { html: string, bank: 'chase', cardName, phase? }
+ * Amex:  expects { json: object, bank: 'amex',  cardName, phase: 'eligible'|'enrolled' }
  */
 router.post('/parse', async (req, res) => {
   try {
@@ -146,45 +147,44 @@ router.post('/parse', async (req, res) => {
     if (!decoded) return;
 
     const userId = decoded.uid;
-    const { html, bank, cardName } = req.body;
+    const { bank, cardName, phase } = req.body;
 
-    if (!html || typeof html !== 'string') {
-      return res.status(400).json({ error: 'html is required and must be a string' });
-    }
     if (!bank || !['chase', 'amex'].includes(bank)) {
       return res.status(400).json({ error: "bank must be 'chase' or 'amex'" });
     }
 
-    // DEBUG: log incoming HTML stats
-    console.log(`📥 [parse] bank=${bank} cardName=${cardName} html.length=${html.length}`);
-    console.log(`📥 [parse] html snippet (first 300 chars):`, html.substring(0, 300));
+    let offers;
 
-    // DEBUG: check if key Amex selectors are present in the HTML
+    // ── Amex: JSON path ──────────────────────────────────────────
     if (bank === 'amex') {
-      console.log(`🔍 [parse:amex] listViewRow count:`, (html.match(/listViewRow/g) || []).length);
-      console.log(`🔍 [parse:amex] merchantOfferListAddButton count:`, (html.match(/merchantOfferListAddButton/g) || []).length);
-      console.log(`🔍 [parse:amex] merchantOfferSuccessIcon count:`, (html.match(/merchantOfferSuccessIcon/g) || []).length);
-      console.log(`🔍 [parse:amex] listViewContainer present:`, html.includes('listViewContainer'));
+      const { json } = req.body;
+      if (!json || typeof json !== 'object') {
+        return res.status(400).json({ error: 'json (object) is required for amex' });
+      }
+      const resolvedPhase = phase === 'enrolled' ? 'enrolled' : 'eligible';
+      offers = parseAmexOffers(json, resolvedPhase);
     }
 
-    const parseFn = bank === 'chase' ? parseChaseOffers : parseAmexOffers;
-    const offers = parseFn(html);
-
-    console.log(`🔍 [parse] parsed ${offers.length} offers from ${bank} HTML for user ${userId}`);
-    if (offers.length > 0) {
-      console.log(`🔍 [parse] first offer sample:`, JSON.stringify(offers[0]));
+    // ── Chase: HTML path ─────────────────────────────────────────
+    else {
+      const { html } = req.body;
+      if (!html || typeof html !== 'string') {
+        return res.status(400).json({ error: 'html (string) is required for chase' });
+      }
+      offers = parseChaseOffers(html);
     }
 
     if (offers.length === 0) {
-      return res.json({ success: true, offers: [], synced: 0, bank, message: 'No offers found in provided HTML.' });
+      return res.json({ success: true, offers: [], newCount: 0, updatedCount: 0, errorCount: 0, bank, message: 'No offers found.' });
     }
 
+    const resolvedPhase    = bank === 'amex' ? (phase === 'enrolled' ? 'enrolled' : 'eligible') : (phase || '');
     const resolvedCardName = cardName || (bank === 'chase' ? 'Chase Card' : 'Amex Card');
-    const { syncedCount, skippedCount } = await writeOffersToDB(offers, { userId, bank, cardName: resolvedCardName });
+    const { newCount, updatedCount, errorCount } = await writeOffersToDB(offers, { userId, bank, cardName: resolvedCardName, phase: resolvedPhase });
 
-    console.log(`✅ [parse] Parse+sync complete: ${syncedCount} synced, ${skippedCount} skipped (${bank} — ${resolvedCardName})`);
+    console.log(`✅ [parse] ${bank} — ${resolvedCardName} (${resolvedPhase}): ${offers.length} total, ${newCount} new, ${updatedCount} updated`);
 
-    res.json({ success: true, offers, synced: syncedCount, skipped: skippedCount, bank, cardName: resolvedCardName });
+    res.json({ success: true, synced: offers.length, newCount, updatedCount, errorCount, bank, cardName: resolvedCardName });
   } catch (error) {
     console.error('❌ Offers parse error:', error);
     res.status(500).json({ error: 'Failed to parse and sync offers' });

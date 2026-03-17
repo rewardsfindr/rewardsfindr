@@ -6,14 +6,15 @@ import express from 'express';
 import cors from 'cors';
 import searchRoutes from './routes/search.js';
 import offersRoutes from './routes/offers.js';
+import debugRoutes from './routes/debug.js';
 
 const app = express();
 const PORT = process.env.PORT || 3001;
 
 // Middleware
 app.use(cors());
-// Raised from default 100KB to 512KB to handle bank offers HTML payloads
-app.use(express.json({ limit: '512kb' }));
+// Raised to 10MB to support debug offersList dumps
+app.use(express.json({ limit: '10mb' }));
 
 // Request logging
 app.use((req, res, next) => {
@@ -24,6 +25,7 @@ app.use((req, res, next) => {
 // Routes
 app.use('/api/search', searchRoutes);
 app.use('/api/offers', offersRoutes);
+app.use('/api/debug', debugRoutes);
 
 // Health check
 app.get('/api/health', (req, res) => {
