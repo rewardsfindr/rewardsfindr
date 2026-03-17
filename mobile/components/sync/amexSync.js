@@ -26,6 +26,16 @@
 //   The interceptor is injected once on page load and posts CAPTURE_JSON
 //   when the next matching response arrives.
 //
+// Fixes applied:
+//   1. Only forward responseType === 'REPLACE' to sync pipeline.
+//      Amex fires UPDATE (partial) first, then REPLACE (full). We want the full one.
+//   2. buildAmexJsonCaptureJs no longer auto-sets __amexJsonCaptureArmed = true.
+//      Arming is now the caller's responsibility (SyncWebView sets captureArmed
+//      before injecting this, and the bridge gate handles it).
+//      This prevents the interceptor re-arming itself on loadEnd after sync is done.
+//   3. buildAmexClearFiltersJs resets all active filters to "All" so that the
+//      count captured matches what the user sees on screen (not a filtered subset).
+//
 // Amex's SPA may auto-navigate to /offers/enrolled during eligible phase.
 // amexHandleLoadEnd gates injection on syncPhase match to ignore this.
 // ─────────────────────────────────────────────
@@ -147,19 +157,56 @@ export const AMEX_READ_CARD_LABEL_JS = `
 `;
 
 // ─────────────────────────────────────────────
+// buildAmexClearFiltersJs
+// Resets all active filter chips to "All" so the next
+// ReadOffersHubPresentation call returns the full unfiltered offer set.
+// This ensures the captured count matches what the user sees on screen.
+// Safe to call even if no filters are active — it's a no-op in that case.
+// ─────────────────────────────────────────────
+export const buildAmexClearFiltersJs = () => `
+  (function() {
+    try {
+      console.log('[AmexFilters] clearing active filters before capture');
+      // Active filter chips have aria-pressed="true" or aria-selected="true"
+      // Amex uses button chips with data-testid containing "filter"
+      var activeFilters = document.querySelectorAll(
+        '[data-testid*="filter"][aria-pressed="true"], [data-testid*="filter"][aria-selected="true"]'
+      );
+      console.log('[AmexFilters] active filter chips found:', activeFilters.length);
+      activeFilters.forEach(function(chip) {
+        console.log('[AmexFilters] clicking to deactivate:', chip.getAttribute('data-testid'));
+        chip.click();
+      });
+      // Also look for any "All" chip and click it to ensure default state
+      var allChip = document.querySelector('[data-testid*="filter-all"], [data-testid*="RECOMMENDED"]');
+      if (allChip && allChip.getAttribute('aria-pressed') !== 'true') {
+        console.log('[AmexFilters] clicking All/Recommended chip:', allChip.getAttribute('data-testid'));
+        allChip.click();
+      }
+      console.log('[AmexFilters] filter reset complete');
+    } catch(e) {
+      console.log('[AmexFilters] ERROR clearing filters:', e.message);
+    }
+  })();
+  true;
+`;
+
+// ─────────────────────────────────────────────
 // buildAmexJsonCaptureJs
 // Intercepts ALL ReadOffersHubPresentation calls.
 // Every response is:
 //   1. Posted as CAPTURE_JSON to RN (only when armed, for actual sync)
+//      but ONLY when responseType === 'REPLACE' (full dataset, not partial UPDATE)
 //   2. ALWAYS dumped to api/debug-dumps/ via DEBUG_DUMP message
-//      so we can see every call Amex makes and its full response.
+//
+// NOTE: This function no longer auto-sets __amexJsonCaptureArmed = true.
+// The caller (SyncWebView via captureArmed ref) controls arming via
+// window.__amexJsonCaptureArmed. This prevents re-arming after sync completes.
 // ─────────────────────────────────────────────
 export const buildAmexJsonCaptureJs = () => `
   (function() {
     try {
       console.log('[AmexCapture] buildAmexJsonCaptureJs called. currently armed:', !!window.__amexJsonCaptureArmed);
-
-      window.__amexJsonCaptureArmed = true;
 
       if (!window.__amexCallCounter) window.__amexCallCounter = 0;
 
@@ -182,18 +229,30 @@ export const buildAmexJsonCaptureJs = () => `
 
         try {
           var parsed = JSON.parse(jsonText);
-          console.log('[AmexCapture] #' + seq + ' parsed JSON top-level keys:', JSON.stringify(Object.keys(parsed)));
+          var responseType = parsed && parsed.responseType;
+          console.log('[AmexCapture] #' + seq + ' parsed JSON top-level keys:', JSON.stringify(Object.keys(parsed)), 'responseType:', responseType);
 
-          // ── DEBUG: always dump every call regardless of armed state ──
+          // ── DEBUG: always dump every call regardless of armed/responseType ──
           var safeLabel = (cardLabel || 'unknown').replace(/[^a-z0-9]/gi, '_');
           window.ReactNativeWebView.postMessage(JSON.stringify({
             type: 'DEBUG_DUMP',
             label: 'ReadOffersHubPresentation_' + safeLabel + '_call' + seq,
             data: parsed,
           }));
-          // ────────────────────────────────────────────────────────────
+          // ────────────────────────────────────────────────────────────────────
 
-          // Only forward to sync pipeline when armed
+          // Fix 1: Only process full REPLACE responses, skip partial UPDATEs.
+          // Amex fires UPDATE first (partial/intermediate), then REPLACE (full).
+          // Capturing UPDATE gives fewer offers than what the user sees on screen.
+          if (responseType !== 'REPLACE') {
+            console.log('[AmexCapture] #' + seq + ' skipping — responseType is', responseType, '(only REPLACE is captured)');
+            return;
+          }
+
+          // Fix 2: Only forward to sync pipeline when armed.
+          // Caller sets window.__amexJsonCaptureArmed = true before injecting this
+          // script (via SyncWebView captureArmed ref). We do NOT auto-set it here
+          // to prevent re-arming after sync is complete.
           if (window.__amexJsonCaptureArmed) {
             window.__amexJsonCaptureArmed = false;
             console.log('[AmexCapture] #' + seq + ' posting CAPTURE_JSON to RN bridge');
@@ -202,6 +261,8 @@ export const buildAmexJsonCaptureJs = () => `
               json: parsed,
               cardLabel: cardLabel,
             }));
+          } else {
+            console.log('[AmexCapture] #' + seq + ' REPLACE received but not armed — ignoring');
           }
         } catch(e) {
           console.log('[AmexCapture] #' + seq + ' JSON parse error:', e.message);
@@ -279,7 +340,7 @@ export const buildAmexJsonCaptureJs = () => `
         console.log('[AmexCapture] fetch interceptor already installed, re-armed only');
       }
 
-      console.log('[AmexCapture] interceptor armed and ready');
+      console.log('[AmexCapture] interceptor ready — armed:', !!window.__amexJsonCaptureArmed);
     } catch(e) {
       console.log('[AmexCapture] SETUP ERROR:', e.message);
       window.ReactNativeWebView.postMessage(JSON.stringify({ type: 'ERROR', message: 'AmexCapture setup error: ' + e.message }));
