@@ -1,20 +1,22 @@
-// ─────────────────────────────────────────────────────────────────────
+// ─────────────────────────────────────────────────────────────────────────────
 // OFFERS ROUTES
 // POST /api/offers/sync  — sync pre-parsed offers from Chrome extension
 // POST /api/offers/parse — parse raw data from mobile WebView + sync
 //
 // Parse payload by bank:
-//   Chase → { html: string,  bank: 'chase', cardName, phase? }
-//   Amex  → { json: object,  bank: 'amex',  cardName, phase: 'eligible'|'enrolled' }
+//   Chase       → { html: string,  bank: 'chase',       cardName, phase? }
+//   Amex        → { json: object,  bank: 'amex',        cardName, phase: 'eligible'|'enrolled' }
+//   Capital One → { json: Array,   bank: 'capitalone',  cardName, phase? }
 //
 // Storage: /users/{userId}/offers/{offerId}  (subcollection per user)
-// ─────────────────────────────────────────────────────────────────────
+// ─────────────────────────────────────────────────────────────────────────────
 import express from 'express';
 import { db, auth } from '../config/firebase.js';
 import { FieldValue, Timestamp } from 'firebase-admin/firestore';
 import { generateOfferId, normalizeMerchant } from '../lib/shared/offerUtils.js';
-import { parseChaseOffers } from '../lib/parsers/chase.js';
-import { parseAmexOffers }  from '../lib/parsers/amex.js';
+import { parseChaseOffers }       from '../lib/parsers/chase.js';
+import { parseAmexOffers }        from '../lib/parsers/amex.js';
+import { parseCapitalOneOffers }  from '../lib/parsers/capitalOne.js';
 
 const router = express.Router();
 
@@ -138,8 +140,9 @@ router.post('/sync', async (req, res) => {
 /**
  * POST /api/offers/parse
  *
- * Chase: expects { html: string, bank: 'chase', cardName, phase? }
- * Amex:  expects { json: object, bank: 'amex',  cardName, phase: 'eligible'|'enrolled' }
+ * Chase:       expects { html: string, bank: 'chase',      cardName, phase? }
+ * Amex:        expects { json: object, bank: 'amex',       cardName, phase: 'eligible'|'enrolled' }
+ * Capital One: expects { json: Array,  bank: 'capitalone', cardName, phase? }
  */
 router.post('/parse', async (req, res) => {
   try {
@@ -149,14 +152,23 @@ router.post('/parse', async (req, res) => {
     const userId = decoded.uid;
     const { bank, cardName, phase } = req.body;
 
-    if (!bank || !['chase', 'amex'].includes(bank)) {
-      return res.status(400).json({ error: "bank must be 'chase' or 'amex'" });
+    if (!bank || !['chase', 'amex', 'capitalone'].includes(bank)) {
+      return res.status(400).json({ error: "bank must be 'chase', 'amex', or 'capitalone'" });
     }
 
     let offers;
 
-    // ── Amex: JSON path ──────────────────────────────────────────
-    if (bank === 'amex') {
+    // ── Capital One: tiles array path ────────────────────────────
+    if (bank === 'capitalone') {
+      const { json } = req.body;
+      if (!json || !Array.isArray(json)) {
+        return res.status(400).json({ error: 'json (Array of tiles) is required for capitalone' });
+      }
+      offers = parseCapitalOneOffers(json);
+    }
+
+    // ── Amex: JSON object path ───────────────────────────────────
+    else if (bank === 'amex') {
       const { json } = req.body;
       if (!json || typeof json !== 'object') {
         return res.status(400).json({ error: 'json (object) is required for amex' });
@@ -175,12 +187,21 @@ router.post('/parse', async (req, res) => {
     }
 
     if (offers.length === 0) {
-      return res.json({ success: true, offers: [], newCount: 0, updatedCount: 0, errorCount: 0, bank, message: 'No offers found.' });
+      return res.json({
+        success: true, offers: [], newCount: 0, updatedCount: 0, errorCount: 0,
+        bank, message: 'No offers found.',
+      });
     }
 
-    const resolvedPhase    = bank === 'amex' ? (phase === 'enrolled' ? 'enrolled' : 'eligible') : (phase || '');
-    const resolvedCardName = cardName || (bank === 'chase' ? 'Chase Card' : 'Amex Card');
-    const { newCount, updatedCount, errorCount } = await writeOffersToDB(offers, { userId, bank, cardName: resolvedCardName, phase: resolvedPhase });
+    const resolvedPhase    = bank === 'amex'
+      ? (phase === 'enrolled' ? 'enrolled' : 'eligible')
+      : (phase || 'default');
+    const resolvedCardName = cardName
+      || (bank === 'chase' ? 'Chase Card' : bank === 'amex' ? 'Amex Card' : 'Capital One Card');
+
+    const { newCount, updatedCount, errorCount } = await writeOffersToDB(
+      offers, { userId, bank, cardName: resolvedCardName, phase: resolvedPhase }
+    );
 
     console.log(`✅ [parse] ${bank} — ${resolvedCardName} (${resolvedPhase}): ${offers.length} total, ${newCount} new, ${updatedCount} updated`);
 

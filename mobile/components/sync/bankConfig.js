@@ -1,4 +1,4 @@
-// ─────────────────────────────────────────────
+// ─────────────────────────────────────────────────────────────────────────────
 // BANK CONFIG
 // Add a new entry here to support a new bank.
 //
@@ -10,9 +10,13 @@
 //   → Amex-style combobox. Use AMEX_CARDS_DETECTED
 //     and buildAmexSwitchCardJs to switch cards.
 //
+// useCapitalOneFeedInterceptor: true
+//   → Capital One style. Patch window.fetch on /feed,
+//     auto-paginate via cursor, post CAP1_CAPTURE_COMPLETE.
+//
 // Neither flag (default)
 //   → URL-based offers detection (future banks).
-// ─────────────────────────────────────────────
+// ─────────────────────────────────────────────────────────────────────────────
 
 export const BANK_CONFIG = {
   chase: {
@@ -30,22 +34,30 @@ export const BANK_CONFIG = {
     // Entry URL — redirects to login if not authenticated
     url: 'https://www.americanexpress.com/en-us/benefits/offers/',
     // After login Amex lands on global.americanexpress.com/offers (with query params)
-    // We navigate here to ensure we're on the eligible offers tab
     offersUrl: 'https://global.americanexpress.com/offers',
-    // Activated/enrolled offers page
     enrolledUrl: 'https://global.americanexpress.com/offers/enrolled',
     label: 'Amex Offers',
     color: '#007ac1',
-    // eligiblePath: matches global.americanexpress.com/offers (with or without query params)
-    // MUST NOT match enrolledPath — check enrolled first in amexHandleLoadEnd
-    // MUST NOT match americanexpress.com/en-us/benefits/offers (marketing page)
     eligiblePath: 'global.americanexpress.com/offers',
     enrolledPath: 'global.americanexpress.com/offers/enrolled',
     offersPaths: ['global.americanexpress.com/offers'],
     loginPaths: ['/account/login', '/login', '/sign-in', '/identity', '/auth', '/challenge', 'two-step-verification'],
-    // Real offer rows are direct DIV children of this container
     gridSelector: '[data-testid="listViewContainer"]',
     captureMaxBytes: 500000,
     useAmexCardSwitcher: true,
+  },
+  capitalone: {
+    // Entry URL — Capital One offers feed
+    // viewInstanceId in the URL is card-specific. We load the root
+    // and let the user navigate to their card's feed. The actual
+    // feed URL is captured from currentUrl in SyncWebView.
+    url: 'https://capitaloneoffers.com',
+    offersUrl: 'https://capitaloneoffers.com',
+    label: 'Capital One Offers',
+    color: '#d03027',
+    offersPaths: ['capitaloneoffers.com/feed'],
+    loginPaths: ['/login', '/sign-in', '/auth', '/signin', '/account/login'],
+    captureMaxBytes: 2000000,
+    useCapitalOneFeedInterceptor: true,
   },
 };
