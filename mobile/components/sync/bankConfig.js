@@ -47,17 +47,17 @@ export const BANK_CONFIG = {
     useAmexCardSwitcher: true,
   },
   capitalone: {
-    // Entry URL — Capital One main site. User signs in here.
+    // Entry URL — Capital One sign-in page (verified subdomain).
     // After login, user taps "Go to Offers Page" which navigates to offersUrl.
     // From there they navigate to their specific card's feed (viewInstanceId in URL).
     // The actual feed URL is captured from currentUrl in SyncWebView.
-    url: 'https://www.capitalone.com',
+    url: 'https://verified.capitalone.com/auth/signin',
     // Offers site — card-specific feed URLs live under capitaloneoffers.com/feed
     offersUrl: 'https://capitaloneoffers.com',
     label: 'Capital One Offers',
     color: '#d03027',
     offersPaths: ['capitaloneoffers.com/feed'],
-    loginPaths: ['/login', '/sign-in', '/auth', '/signin', '/account/login', 'capitalone.com/sign-in'],
+    loginPaths: ['/auth/signin', '/sign-in', '/login', '/auth', '/signin'],
     captureMaxBytes: 2000000,
     useCapitalOneFeedInterceptor: true,
   },
