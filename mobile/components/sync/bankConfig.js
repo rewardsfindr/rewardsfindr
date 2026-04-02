@@ -39,7 +39,7 @@ export const BANK_CONFIG = {
     label: 'Amex Offers',
     color: '#007ac1',
     eligiblePath: 'global.americanexpress.com/offers',
-    enrolledPath: 'global.americanexpress.com/offers/enrolled',
+    enrolledPath: 'global.americanexpress.com/offers/offered',
     offersPaths: ['global.americanexpress.com/offers'],
     loginPaths: ['/account/login', '/login', '/sign-in', '/identity', '/auth', '/challenge', 'two-step-verification'],
     gridSelector: '[data-testid="listViewContainer"]',
@@ -47,17 +47,14 @@ export const BANK_CONFIG = {
     useAmexCardSwitcher: true,
   },
   capitalone: {
-    // Entry URL — Capital One main site. Loading www.capitalone.com first
-    // avoids the ERR_NAME_NOT_RESOLVED DNS failure that occurs when navigating
-    // directly to verified.capitalone.com in a cold WebView session.
-    // The Sign In button on this page redirects naturally to verified.capitalone.com.
+    // Entry URL — Capital One main site. Loads fine in a cold WebView.
+    // Sign In button redirects naturally to verified.capitalone.com.
     url: 'https://www.capitalone.com',
-    // After login, "Go to Offers Page" navigates to the account dashboard.
-    // The user then taps "View All Offers" on their card natively, which
-    // opens capitaloneoffers.com/feed?viewInstanceId=... with a valid session.
-    // We cannot deep-link directly to capitaloneoffers.com — it requires
-    // a viewInstanceId that is card-specific and session-generated.
-    offersUrl: 'https://myaccount.capitalone.com',
+    // After login, "Go to Offers Page" reloads www.capitalone.com (already logged in).
+    // From the homepage the user taps "View All Offers" on their card natively,
+    // which opens capitaloneoffers.com/feed?viewInstanceId=... with a valid session.
+    // We cannot deep-link directly — viewInstanceId is card-specific & session-generated.
+    offersUrl: 'https://www.capitalone.com',
     label: 'Capital One Offers',
     color: '#d03027',
     offersPaths: ['capitaloneoffers.com/feed'],
