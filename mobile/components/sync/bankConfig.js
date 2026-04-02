@@ -47,8 +47,11 @@ export const BANK_CONFIG = {
     useAmexCardSwitcher: true,
   },
   capitalone: {
-    // Entry URL — Capital One sign-in page (verified subdomain).
-    url: 'https://verified.capitalone.com/auth/signin',
+    // Entry URL — Capital One main site. Loading www.capitalone.com first
+    // avoids the ERR_NAME_NOT_RESOLVED DNS failure that occurs when navigating
+    // directly to verified.capitalone.com in a cold WebView session.
+    // The Sign In button on this page redirects naturally to verified.capitalone.com.
+    url: 'https://www.capitalone.com',
     // After login, "Go to Offers Page" navigates to the account dashboard.
     // The user then taps "View All Offers" on their card natively, which
     // opens capitaloneoffers.com/feed?viewInstanceId=... with a valid session.
@@ -58,7 +61,7 @@ export const BANK_CONFIG = {
     label: 'Capital One Offers',
     color: '#d03027',
     offersPaths: ['capitaloneoffers.com/feed'],
-    loginPaths: ['/auth/signin', '/sign-in', '/login', '/auth', '/signin'],
+    loginPaths: ['/auth/signin', '/sign-in', '/login', '/auth', '/signin', 'verified.capitalone.com'],
     captureMaxBytes: 2000000,
     useCapitalOneFeedInterceptor: true,
   },
