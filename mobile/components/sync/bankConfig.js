@@ -49,14 +49,15 @@ export const BANK_CONFIG = {
   capitalone: {
     // Entry URL — Capital One sign-in page (verified subdomain).
     url: 'https://verified.capitalone.com/auth/signin',
-    // After login, "Go to Offers Page" navigates here.
-    // This is the SSO bridge on the capitalone.com domain — it carries the
-    // authenticated session and redirects into capitaloneoffers.com with a
-    // valid session token, avoiding a second login prompt.
-    offersUrl: 'https://www.capitalone.com/card-benefits/offers',
+    // After login, "Go to Offers Page" navigates to the account dashboard.
+    // The user then taps "View All Offers" on their card natively, which
+    // opens capitaloneoffers.com/feed?viewInstanceId=... with a valid session.
+    // We cannot deep-link directly to capitaloneoffers.com — it requires
+    // a viewInstanceId that is card-specific and session-generated.
+    offersUrl: 'https://myaccount.capitalone.com',
     label: 'Capital One Offers',
     color: '#d03027',
-    offersPaths: ['capitaloneoffers.com/feed', 'capitaloneoffers.com'],
+    offersPaths: ['capitaloneoffers.com/feed'],
     loginPaths: ['/auth/signin', '/sign-in', '/login', '/auth', '/signin'],
     captureMaxBytes: 2000000,
     useCapitalOneFeedInterceptor: true,
