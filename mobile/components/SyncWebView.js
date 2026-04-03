@@ -550,6 +550,8 @@ export default function SyncWebView({ visible, bank, onClose, onSuccess }) {
             incognito={false}
             sharedCookiesEnabled={true}
             thirdPartyCookiesEnabled={true}
+            setSupportMultipleWindows={false}
+            onShouldStartLoadWithRequest={() => true}
           />
           <View style={s.footer}>
             {renderFooter()}
