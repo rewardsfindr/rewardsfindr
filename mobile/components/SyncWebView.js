@@ -1,4 +1,4 @@
-// ─────────────────────────────────────────────────────────────────
+// ─────────────────────────────────────────────────────────────────────────────
 // SYNC WEBVIEW MODAL — orchestrator
 // Handles modal UI, state, and message routing.
 //
@@ -14,11 +14,23 @@
 //
 // Chase is completely unchanged — still uses buildCaptureJs + CAPTURE_HTML.
 //
+// Capital One sync flow:
+//   1. User navigates to their card's feed (capitaloneoffers.com/feed?viewInstanceId=...)
+//   2. loadEnd fires → inject CAP1_FEED_INTERCEPTOR_JS (patches window.fetch)
+//      → posts CAP1_INTERCEPTOR_READY, sets pageLoaded + onOffersPage = true
+//   3. User taps Sync → buildCap1StartSyncJs(currentUrl) fires
+//      → arms interceptor, kicks off initial fetch
+//   4. Interceptor auto-paginates via cursor until all pages fetched
+//      → posts CAP1_PROGRESS { count } each page
+//      → posts CAP1_CAPTURE_COMPLETE { offers, count } when done
+//   5. POST to /api/offers/parse with { json: offers, bank: 'capitalone', ... }
+//   6. onSuccess + onClose
+//
 // Key timing note for Amex:
 //   Amex fires ReadOffersHubPresentation (REPLACE) BEFORE CARD_SWITCHED
 //   comes back from the JS timeout. So we must set window.__amexJsonCaptureArmed
 //   = true IMMEDIATELY in switchToNextAmexCard, not in the CARD_SWITCHED handler.
-// ─────────────────────────────────────────────────────────────────
+// ─────────────────────────────────────────────────────────────────────────────
 import React, { useRef, useState, useEffect } from 'react';
 import {
   Modal, View, Text, TouchableOpacity,
@@ -37,6 +49,11 @@ import {
   buildAmexClearFiltersJs,
   amexHandleLoadEnd,
 } from './sync/amexSync.js';
+import {
+  CAP1_FEED_INTERCEPTOR_JS,
+  buildCap1StartSyncJs,
+  cap1HandleLoadEnd,
+} from './sync/capitalOneSync.js';
 import { buildCaptureJs, parseCardLabel }                 from './sync/captureJs.js';
 
 const API_BASE_URL         = process.env.EXPO_PUBLIC_API_URL || 'http://localhost:3001';
@@ -44,9 +61,30 @@ const SWITCH_TIMEOUT_MS    = 3500;
 const POST_SWITCH_DELAY_MS = 2500;
 const MAX_SWITCH_RETRIES   = 3;
 
+// Finds the first Capital One "View All Offers" anchor on the account page and clicks it.
+// Falls back to any link whose href points to capitaloneoffers.com.
+const CAP1_CLICK_OFFERS_LINK_JS = `
+(function() {
+  // Try text match first (most reliable)
+  const allEls = Array.from(document.querySelectorAll('a, button, [role="link"]'));
+  const byText = allEls.find(el => {
+    const t = (el.innerText || el.textContent || '').trim().toLowerCase();
+    return t === 'view all offers' || t === 'view offers' || t === 'see all offers';
+  });
+  if (byText) { byText.click(); return; }
+  // Fallback: any anchor pointing to capitaloneoffers.com
+  const byHref = document.querySelector('a[href*="capitaloneoffers.com"]');
+  if (byHref) { byHref.click(); return; }
+  // Nothing found — post a message so we can show feedback
+  window.ReactNativeWebView.postMessage(JSON.stringify({ type: 'CAP1_OFFERS_LINK_NOT_FOUND' }));
+})();
+true;
+`;
+
 export default function SyncWebView({ visible, bank, onClose, onSuccess }) {
   const webViewRef = useRef(null);
 
+  // ── Shared refs ───────────────────────────────────────────────
   const cardOptionsRef      = useRef([]);
   const cardIndexRef        = useRef(0);
   const visitedCardsRef     = useRef(new Set());
@@ -59,6 +97,7 @@ export default function SyncWebView({ visible, bank, onClose, onSuccess }) {
   const syncPhaseRef        = useRef('eligible');
   const pendingCardLabelRef = useRef(null);
 
+  // ── Shared state ──────────────────────────────────────────────
   const [syncing, setSyncing]               = useState(false);
   const [switching, setSwitching]           = useState(false);
   const [syncStarted, setSyncStarted]       = useState(false);
@@ -71,8 +110,12 @@ export default function SyncWebView({ visible, bank, onClose, onSuccess }) {
   const [cardIndexUi, setCardIndexUi]       = useState(0);
   const [syncPhaseUi, setSyncPhaseUi]       = useState('eligible');
 
+  // ── Capital One specific state ────────────────────────────────
+  const [cap1OfferCount, setCap1OfferCount] = useState(0);
+
   const config = BANK_CONFIG[bank] || BANK_CONFIG.chase;
 
+  // ── Reset on close ────────────────────────────────────────────
   useEffect(() => {
     if (!visible) {
       cardOptionsRef.current      = [];
@@ -97,9 +140,11 @@ export default function SyncWebView({ visible, bank, onClose, onSuccess }) {
       setCardCount(0);
       setCardIndexUi(0);
       setSyncPhaseUi('eligible');
+      setCap1OfferCount(0);
     }
   }, [visible]);
 
+  // ── Amex: switch to next unvisited card ───────────────────────
   const switchToNextAmexCard = () => {
     const cards   = cardOptionsRef.current;
     const visited = visitedCardsRef.current;
@@ -122,10 +167,12 @@ export default function SyncWebView({ visible, bank, onClose, onSuccess }) {
     return true;
   };
 
+  // ── Navigation state change ───────────────────────────────────
   const handleNavigationStateChange = (navState) => {
     if (!navState.url) return;
     setCurrentUrl(navState.url);
     if (config.useAmexCardSwitcher) return;
+    if (config.useCapitalOneFeedInterceptor) return;
     setPageLoaded(false);
     setOnOffersPage(false);
     if (!config.useCardsDetectedAsOffersSignal) {
@@ -136,6 +183,7 @@ export default function SyncWebView({ visible, bank, onClose, onSuccess }) {
     }
   };
 
+  // ── Load end ──────────────────────────────────────────────────
   const handleLoadEnd = (syntheticEvent) => {
     const url = (syntheticEvent?.nativeEvent?.url || currentUrl).toLowerCase();
     setPageLoaded(true);
@@ -158,16 +206,42 @@ export default function SyncWebView({ visible, bank, onClose, onSuccess }) {
         setAmexCardsReady(false);
         webViewRef.current?.injectJavaScript(buildAmexJsonCaptureJs());
       }
+      return;
+    }
+
+    if (bank === 'capitalone') {
+      const { onFeedPage } = cap1HandleLoadEnd({ url });
+      setOnOffersPage(onFeedPage);
+      if (onFeedPage) {
+        // Inject interceptor on every load (guard inside JS prevents double-patching)
+        webViewRef.current?.injectJavaScript(CAP1_FEED_INTERCEPTOR_JS);
+      }
     }
   };
 
+  // ── Go to offers ──────────────────────────────────────────────
   const handleGoToOffers = () => {
+    if (bank === 'capitalone') {
+      // Simulate a native click on Capital One's "View All Offers" link.
+      // window.location.replace() loses the session; a real anchor click preserves SSO.
+      webViewRef.current?.injectJavaScript(CAP1_CLICK_OFFERS_LINK_JS);
+      return;
+    }
     const target = config.offersUrl || config.url;
     webViewRef.current?.injectJavaScript(`window.location.replace('${target}'); true;`);
   };
 
+  // ── Sync button press ─────────────────────────────────────────
   const handleSyncPress = () => {
     setSyncStarted(true);
+
+    if (bank === 'capitalone') {
+      // Use the live URL so viewInstanceId (card-specific) is preserved
+      const feedUrl = currentUrl || config.offersUrl;
+      setCap1OfferCount(0);
+      webViewRef.current?.injectJavaScript(buildCap1StartSyncJs(feedUrl));
+      return;
+    }
 
     if (bank === 'amex') {
       const cards = cardOptionsRef.current;
@@ -182,10 +256,12 @@ export default function SyncWebView({ visible, bank, onClose, onSuccess }) {
       return;
     }
 
+    // Chase
     captureArmed.current = true;
     webViewRef.current?.injectJavaScript(buildCaptureJs(config.gridSelector, config.captureMaxBytes));
   };
 
+  // ── Handle capture result (shared: Amex + Chase) ──────────────
   const handleCaptureResult = async ({ payload, cardLabel, phase, capturedTestId }) => {
     setSyncing(true);
     const user = getAuthInstance().currentUser;
@@ -242,6 +318,7 @@ export default function SyncWebView({ visible, bank, onClose, onSuccess }) {
       return;
     }
 
+    // Chase
     syncedCountRef.current += 1;
     const totalCards = cardOptionsRef.current.length;
     if (syncedCountRef.current < totalCards) {
@@ -259,10 +336,75 @@ export default function SyncWebView({ visible, bank, onClose, onSuccess }) {
     }
   };
 
+  // ── Capital One: complete handler ─────────────────────────────
+  const handleCap1Complete = async (offers) => {
+    setSyncing(true);
+    try {
+      const user = getAuthInstance().currentUser;
+      if (!user) throw new Error('You must be signed in to sync offers.');
+      const token = await user.getIdToken();
+
+      const response = await fetch(`${API_BASE_URL}/api/offers/parse`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        body: JSON.stringify({
+          json: offers,
+          bank: 'capitalone',
+          cardName: 'Capital One Card',
+          phase: 'default',
+        }),
+      });
+      const result = await response.json();
+      if (!response.ok) throw new Error(result.error || 'Sync failed');
+
+      setSyncing(false);
+      onSuccess(result.synced ?? offers.length, [{
+        cardName: 'Capital One Card',
+        count: result.synced ?? offers.length,
+        phase: 'default',
+      }]);
+      onClose();
+    } catch (err) {
+      setSyncing(false);
+      Alert.alert('Capital One Sync Failed', err.message);
+    }
+  };
+
+  // ── Message handler ───────────────────────────────────────────
   const handleMessage = async (event) => {
     try {
       const data = JSON.parse(event.nativeEvent.data);
 
+      // ── Capital One messages ──────────────────────────────────
+      if (bank === 'capitalone') {
+        if (data.type === 'CAP1_INTERCEPTOR_READY') {
+          return;
+        }
+        if (data.type === 'CAP1_PROGRESS') {
+          setCap1OfferCount(data.count || 0);
+          return;
+        }
+        if (data.type === 'CAP1_CAPTURE_COMPLETE') {
+          await handleCap1Complete(data.offers || []);
+          return;
+        }
+        if (data.type === 'CAP1_ERROR') {
+          setSyncing(false);
+          setSyncStarted(false);
+          Alert.alert('Capital One Sync Error', data.error || 'Unknown error');
+          return;
+        }
+        if (data.type === 'CAP1_OFFERS_LINK_NOT_FOUND') {
+          Alert.alert(
+            'Could not find offers link',
+            'Please scroll to your card on the Capital One homepage and tap “View All Offers” manually.'
+          );
+          return;
+        }
+        return;
+      }
+
+      // ── Chase messages ────────────────────────────────────────
       if (data.type === 'CARDS_DETECTED') {
         const hasCards = data.cards?.length > 0;
         if (!cardsDiscovered.current && hasCards) {
@@ -278,6 +420,7 @@ export default function SyncWebView({ visible, bank, onClose, onSuccess }) {
         return;
       }
 
+      // ── Amex messages ─────────────────────────────────────────
       if (data.type === 'AMEX_CARDS_DETECTED') {
         const hasCards = data.cards?.length > 0;
         if (!cardsDiscovered.current && hasCards && cardOptionsRef.current.length === 0) {
@@ -364,20 +507,24 @@ export default function SyncWebView({ visible, bank, onClose, onSuccess }) {
       webViewRef.current?.injectJavaScript(`window.__amexJsonCaptureArmed = false; true;`);
       setSyncing(false);
       setSwitching(false);
-      console.error(`[SyncWebView] handleMessage error:`, err.message);
       Alert.alert('Sync Failed', err.message);
     }
   };
 
+  // ── Render helpers ────────────────────────────────────────────
   const { cardName } = parseCardLabel(currentCard);
   const totalCards   = cardCount || 1;
   const phaseLabel   = syncPhaseUi === 'enrolled' ? 'activated' : 'eligible';
 
-  const statusText = switching
-    ? `⏳ Switching card...`
-    : syncing
-      ? `🔄 Syncing ${phaseLabel} offers — ${cardName || 'card'} (${cardIndexUi + 1} of ${totalCards})...`
-      : `⚡ Processing...`;
+  const statusText = bank === 'capitalone'
+    ? (syncing
+        ? `☁️ Saving ${cap1OfferCount} offers...`
+        : `🔄 Fetching offers... ${cap1OfferCount} so far`)
+    : switching
+      ? `⏳ Switching card...`
+      : syncing
+        ? `🔄 Syncing ${phaseLabel} offers — ${cardName || 'card'} (${cardIndexUi + 1} of ${totalCards})...`
+        : `⚡ Processing...`;
 
   const renderFooter = () => {
     if (syncStarted) {
@@ -405,7 +552,7 @@ export default function SyncWebView({ visible, bank, onClose, onSuccess }) {
     if (!pageLoaded) return null;
     return (
       <>
-        <Text style={s.hint}>Log in above, then tap to go to your offers.</Text>
+        <Text style={s.hint}>Log in above, then navigate to your offers page.</Text>
         <TouchableOpacity style={s.goToOffersBtn} onPress={handleGoToOffers}>
           <Text style={s.syncBtnText}>Go to Offers Page →</Text>
         </TouchableOpacity>
@@ -435,6 +582,8 @@ export default function SyncWebView({ visible, bank, onClose, onSuccess }) {
             incognito={false}
             sharedCookiesEnabled={true}
             thirdPartyCookiesEnabled={true}
+            setSupportMultipleWindows={false}
+            onShouldStartLoadWithRequest={() => true}
           />
           <View style={s.footer}>
             {renderFooter()}
