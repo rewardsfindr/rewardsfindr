@@ -61,6 +61,26 @@ const SWITCH_TIMEOUT_MS    = 3500;
 const POST_SWITCH_DELAY_MS = 2500;
 const MAX_SWITCH_RETRIES   = 3;
 
+// Finds the first Capital One "View All Offers" anchor on the account page and clicks it.
+// Falls back to any link whose href points to capitaloneoffers.com.
+const CAP1_CLICK_OFFERS_LINK_JS = `
+(function() {
+  // Try text match first (most reliable)
+  const allEls = Array.from(document.querySelectorAll('a, button, [role="link"]'));
+  const byText = allEls.find(el => {
+    const t = (el.innerText || el.textContent || '').trim().toLowerCase();
+    return t === 'view all offers' || t === 'view offers' || t === 'see all offers';
+  });
+  if (byText) { byText.click(); return; }
+  // Fallback: any anchor pointing to capitaloneoffers.com
+  const byHref = document.querySelector('a[href*="capitaloneoffers.com"]');
+  if (byHref) { byHref.click(); return; }
+  // Nothing found — post a message so we can show feedback
+  window.ReactNativeWebView.postMessage(JSON.stringify({ type: 'CAP1_OFFERS_LINK_NOT_FOUND' }));
+})();
+true;
+`;
+
 export default function SyncWebView({ visible, bank, onClose, onSuccess }) {
   const webViewRef = useRef(null);
 
@@ -201,6 +221,12 @@ export default function SyncWebView({ visible, bank, onClose, onSuccess }) {
 
   // ── Go to offers ──────────────────────────────────────────────
   const handleGoToOffers = () => {
+    if (bank === 'capitalone') {
+      // Simulate a native click on Capital One's "View All Offers" link.
+      // window.location.replace() loses the session; a real anchor click preserves SSO.
+      webViewRef.current?.injectJavaScript(CAP1_CLICK_OFFERS_LINK_JS);
+      return;
+    }
     const target = config.offersUrl || config.url;
     webViewRef.current?.injectJavaScript(`window.location.replace('${target}'); true;`);
   };
@@ -352,7 +378,6 @@ export default function SyncWebView({ visible, bank, onClose, onSuccess }) {
       // ── Capital One messages ──────────────────────────────────
       if (bank === 'capitalone') {
         if (data.type === 'CAP1_INTERCEPTOR_READY') {
-          // Interceptor installed — Sync button can be shown
           return;
         }
         if (data.type === 'CAP1_PROGRESS') {
@@ -367,6 +392,13 @@ export default function SyncWebView({ visible, bank, onClose, onSuccess }) {
           setSyncing(false);
           setSyncStarted(false);
           Alert.alert('Capital One Sync Error', data.error || 'Unknown error');
+          return;
+        }
+        if (data.type === 'CAP1_OFFERS_LINK_NOT_FOUND') {
+          Alert.alert(
+            'Could not find offers link',
+            'Please scroll to your card on the Capital One homepage and tap “View All Offers” manually.'
+          );
           return;
         }
         return;
