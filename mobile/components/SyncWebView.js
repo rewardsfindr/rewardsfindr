@@ -18,6 +18,11 @@
 //   Amex fires ReadOffersHubPresentation (REPLACE) BEFORE CARD_SWITCHED
 //   comes back from the JS timeout. So we must set window.__amexJsonCaptureArmed
 //   = true IMMEDIATELY in switchToNextAmexCard, not in the CARD_SWITCHED handler.
+//
+// Fix (chase-sync-button):
+//   Chase is a SPA — the mds-select dropdown renders async after loadEnd.
+//   We now inject DETECT_CARDS_JS_POLL (polls every 500ms up to 10s) instead
+//   of the one-shot DETECT_CARDS_JS so the Sync button reliably appears.
 // ─────────────────────────────────────────────────────────────────
 import React, { useRef, useState, useEffect } from 'react';
 import {
@@ -29,7 +34,7 @@ import { getAuthInstance } from '../lib/firebaseClient.js';
 import { colors, radii } from '../shared/theme.js';
 
 import { BANK_CONFIG }                                    from './sync/bankConfig.js';
-import { DETECT_CARDS_JS, buildSwitchCardJs }             from './sync/chaseSync.js';
+import { DETECT_CARDS_JS_POLL, buildSwitchCardJs }        from './sync/chaseSync.js';
 import {
   AMEX_OPEN_AND_DETECT_JS,
   buildAmexSwitchCardJs,
@@ -141,7 +146,9 @@ export default function SyncWebView({ visible, bank, onClose, onSuccess }) {
     setPageLoaded(true);
 
     if (bank === 'chase') {
-      webViewRef.current?.injectJavaScript(DETECT_CARDS_JS);
+      // Use polling version — Chase SPA renders mds-select asynchronously
+      // after the initial page load, so a single-shot injection misses it.
+      webViewRef.current?.injectJavaScript(DETECT_CARDS_JS_POLL);
       return;
     }
 
@@ -329,7 +336,7 @@ export default function SyncWebView({ visible, bank, onClose, onSuccess }) {
         return;
       }
 
-      // ── Amex JSON capture ─────────────────────────────────────
+      // ── Amex JSON capture ───────────────────────────────────────────────
       if (data.type === 'CAPTURE_JSON' && bank === 'amex') {
         if (!captureArmed.current) return;
         captureArmed.current = false;
@@ -349,7 +356,7 @@ export default function SyncWebView({ visible, bank, onClose, onSuccess }) {
         return;
       }
 
-      // ── Chase HTML capture ────────────────────────────────────
+      // ── Chase HTML capture ────────────────────────────────────────────────
       if (data.type !== 'CAPTURE_HTML' || !captureArmed.current) return;
       captureArmed.current = false;
       await handleCaptureResult({
