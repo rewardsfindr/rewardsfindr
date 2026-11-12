@@ -1,7 +1,8 @@
 // ─────────────────────────────────────────────────────────────────────
 // OFFERS ROUTES
-// POST /api/offers/sync  — sync pre-parsed offers from Chrome extension
-// POST /api/offers/parse — parse raw data from mobile WebView + sync
+// POST /api/offers/sync     — sync pre-parsed offers from Chrome extension
+// POST /api/offers/snapshot — replace one Chase card with structured offers
+// POST /api/offers/parse    — parse raw data from mobile WebView + sync
 //
 // Parse payload by bank:
 //   Chase → { html: string,  bank: 'chase', cardName, phase? }
@@ -15,6 +16,13 @@ import { FieldValue, Timestamp } from 'firebase-admin/firestore';
 import { generateOfferId, normalizeMerchant } from '../lib/shared/offerUtils.js';
 import { parseChaseOffers } from '../lib/parsers/chase.js';
 import { parseAmexOffers }  from '../lib/parsers/amex.js';
+import {
+  SNAPSHOT_BATCH_LIMIT,
+  normalizeChaseSnapshotOffer,
+  assertSnapshotSafe,
+  planChaseSnapshot,
+  toChaseOfferFields,
+} from '../lib/offers/chaseSnapshot.js';
 
 const router = express.Router();
 
@@ -132,6 +140,109 @@ router.post('/sync', async (req, res) => {
   } catch (error) {
     console.error('❌ Offers sync error:', error);
     res.status(500).json({ error: 'Failed to sync offers' });
+  }
+});
+
+/**
+ * POST /api/offers/snapshot
+ *
+ * Chase mobile sync. Body is structured offers from the offers grid,
+ * not page HTML. Replaces that card's rows with this snapshot.
+ */
+router.post('/snapshot', async (req, res) => {
+  try {
+    const decoded = await verifyToken(req, res);
+    if (!decoded) return;
+
+    const userId = decoded.uid;
+    const { bank, cardName, gridFound, offers } = req.body;
+
+    if (bank !== 'chase') {
+      return res.status(400).json({ error: "bank must be 'chase'" });
+    }
+    if (!cardName || typeof cardName !== 'string') {
+      return res.status(400).json({ error: 'cardName is required' });
+    }
+    if (!Array.isArray(offers)) {
+      return res.status(400).json({ error: 'offers must be an array' });
+    }
+    if (offers.length > 2000) {
+      return res.status(400).json({ error: 'Too many offers in one sync' });
+    }
+
+    const now = new Date();
+    const normalized = offers
+      .map(offer => normalizeChaseSnapshotOffer(offer, now))
+      .filter(Boolean);
+    const tileCount = Number.isFinite(req.body.tileCount) ? req.body.tileCount : offers.length;
+    const blocked = assertSnapshotSafe({
+      gridFound,
+      tileCount: Math.max(tileCount, offers.length),
+      normalizedCount: normalized.length,
+    });
+    if (blocked) {
+      return res.status(422).json({ error: blocked });
+    }
+
+    const userOffersRef = db.collection('users').doc(userId).collection('offers');
+    const existingIds = new Set();
+    for (const phase of ['', 'eligible']) {
+      const existingSnap = await userOffersRef
+        .where('bank', '==', 'chase')
+        .where('cardName', '==', cardName)
+        .where('phase', '==', phase)
+        .get();
+      existingSnap.docs.forEach(doc => existingIds.add(doc.id));
+    }
+
+    const { upserts, deletes, skipped } = planChaseSnapshot({
+      existingIds,
+      offers: normalized,
+      cardName,
+    });
+
+    const ops = [
+      ...deletes.map(id => ({ type: 'delete', ref: userOffersRef.doc(id) })),
+      ...upserts.map(({ id, offer }) => {
+        const fields = toChaseOfferFields(offer, { userId, cardName });
+        return {
+          type: 'set',
+          ref: userOffersRef.doc(id),
+          data: {
+            ...fields,
+            expiresAt: offer.expiresAtMs == null ? null : Timestamp.fromMillis(offer.expiresAtMs),
+            syncedAt: FieldValue.serverTimestamp(),
+          },
+        };
+      }),
+    ];
+
+    for (let i = 0; i < ops.length; i += SNAPSHOT_BATCH_LIMIT) {
+      const batch = db.batch();
+      for (const op of ops.slice(i, i + SNAPSHOT_BATCH_LIMIT)) {
+        if (op.type === 'delete') batch.delete(op.ref);
+        else batch.set(op.ref, op.data);
+      }
+      await batch.commit();
+    }
+
+    const newCount = upserts.filter(item => !existingIds.has(item.id)).length;
+    const updatedCount = upserts.length - newCount;
+    console.log(`✅ [snapshot] chase — ${cardName}: ${newCount} new, ${updatedCount} updated, ${deletes.length} removed`);
+
+    res.json({
+      success: true,
+      synced: upserts.length,
+      newCount,
+      updatedCount,
+      deletedCount: deletes.length,
+      skippedCount: skipped + (offers.length - normalized.length),
+      bank: 'chase',
+      cardName,
+    });
+  } catch (error) {
+    console.error('❌ Chase snapshot error:', error);
+    res.status(500).json({ error: 'Failed to save Chase offers' });
   }
 });
 

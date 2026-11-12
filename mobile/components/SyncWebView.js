@@ -12,7 +12,7 @@
 //   6. Transition to enrolled page → reuse same card list → repeat cycle
 //   7. All phases done → onSuccess + onClose
 //
-// Chase is completely unchanged — still uses buildCaptureJs + CAPTURE_HTML.
+// Chase posts structured offers from the grid to /api/offers/snapshot.
 //
 // Key timing note for Amex:
 //   Amex fires ReadOffersHubPresentation (REPLACE) BEFORE CARD_SWITCHED
@@ -29,7 +29,7 @@ import { getAuthInstance } from '../lib/firebaseClient.js';
 import { colors, radii } from '../shared/theme.js';
 
 import { BANK_CONFIG }                                    from './sync/bankConfig.js';
-import { DETECT_CARDS_JS, buildSwitchCardJs }             from './sync/chaseSync.js';
+import { DETECT_CARDS_JS, buildSwitchCardJs, buildCaptureOffersJs } from './sync/chaseSync.js';
 import {
   AMEX_OPEN_AND_DETECT_JS,
   buildAmexSwitchCardJs,
@@ -37,7 +37,7 @@ import {
   buildAmexClearFiltersJs,
   amexHandleLoadEnd,
 } from './sync/amexSync.js';
-import { buildCaptureJs, parseCardLabel }                 from './sync/captureJs.js';
+import { parseCardLabel }                                 from './sync/captureJs.js';
 
 const API_BASE_URL         = process.env.EXPO_PUBLIC_API_URL || 'http://localhost:3001';
 const SWITCH_TIMEOUT_MS    = 3500;
@@ -183,10 +183,10 @@ export default function SyncWebView({ visible, bank, onClose, onSuccess }) {
     }
 
     captureArmed.current = true;
-    webViewRef.current?.injectJavaScript(buildCaptureJs(config.gridSelector, config.captureMaxBytes));
+    webViewRef.current?.injectJavaScript(buildCaptureOffersJs());
   };
 
-  const handleCaptureResult = async ({ payload, cardLabel, phase, capturedTestId }) => {
+  const handleCaptureResult = async ({ payload, cardLabel, phase, capturedTestId, tileCount }) => {
     setSyncing(true);
     const user = getAuthInstance().currentUser;
     if (!user) throw new Error('You must be signed in to sync offers.');
@@ -198,11 +198,15 @@ export default function SyncWebView({ visible, bank, onClose, onSuccess }) {
       : null;
 
     const isAmex = bank === 'amex';
+    if (!isAmex && !fullCardName) {
+      throw new Error('Could not read the Chase card name. Nothing was saved.');
+    }
     const bodyObj = isAmex
       ? { json: payload, bank, cardName: fullCardName, phase }
-      : { html: payload, bank, cardName: fullCardName, phase };
+      : { bank, cardName: fullCardName, gridFound: true, tileCount, offers: payload };
+    const endpoint = isAmex ? '/api/offers/parse' : '/api/offers/snapshot';
 
-    const response = await fetch(`${API_BASE_URL}/api/offers/parse`, {
+    const response = await fetch(`${API_BASE_URL}${endpoint}`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
       body: JSON.stringify(bodyObj),
@@ -308,7 +312,7 @@ export default function SyncWebView({ visible, bank, onClose, onSuccess }) {
         } else {
           setTimeout(() => {
             captureArmed.current = true;
-            webViewRef.current?.injectJavaScript(buildCaptureJs(config.gridSelector, config.captureMaxBytes));
+            webViewRef.current?.injectJavaScript(buildCaptureOffersJs());
           }, POST_SWITCH_DELAY_MS);
         }
         return;
@@ -349,19 +353,28 @@ export default function SyncWebView({ visible, bank, onClose, onSuccess }) {
         return;
       }
 
-      // ── Chase HTML capture ────────────────────────────────────
-      if (data.type !== 'CAPTURE_HTML' || !captureArmed.current) return;
+      // ── Chase structured capture ──────────────────────────────
+      if (data.type !== 'CAPTURE_OFFERS' || bank !== 'chase' || !captureArmed.current) return;
       captureArmed.current = false;
+      if (!data.gridFound) {
+        setSyncStarted(false);
+        setSyncing(false);
+        setSwitching(false);
+        Alert.alert('Could not read Chase offers', 'Open the offers page and try again. Nothing was changed.');
+        return;
+      }
       await handleCaptureResult({
-        payload:   data.html,
+        payload:   data.offers || [],
         cardLabel: data.cardLabel,
-        phase:     syncPhaseRef.current,
+        phase:     '',
+        tileCount: data.tileCount ?? (data.offers || []).length,
       });
 
     } catch (err) {
       captureArmed.current        = false;
       pendingCardLabelRef.current = null;
       webViewRef.current?.injectJavaScript(`window.__amexJsonCaptureArmed = false; true;`);
+      setSyncStarted(false);
       setSyncing(false);
       setSwitching(false);
       console.error(`[SyncWebView] handleMessage error:`, err.message);

@@ -3,16 +3,12 @@
 // GET /api/search?q=storename
 //
 // Queries /users/{userId}/offers scoped to the user.
-// Uses merchantNameLower for exact match + startsWith prefix.
-// Filters out expired offers (expiresAt < now).
-//
-// Required Firestore composite index:
-//   Collection: users/{userId}/offers
-//   Fields: merchantNameLower ASC, expiresAt ASC
+// Uses merchantNameLower for a prefix match.
+// Drops expired offers in process. Unknown expiry stays in the results.
 // ─────────────────────────────────────────────
 import express from 'express';
 import { db, auth } from '../config/firebase.js';
-import { normalizeMerchant } from '../lib/shared/offerUtils.js';
+import { isCurrentOffer } from '../lib/offers/offerFreshness.js';
 
 const router = express.Router();
 
@@ -46,15 +42,16 @@ router.get('/', async (req, res) => {
     // Scoped to this user only — no cross-user reads
     const userOffersRef = db.collection('users').doc(userId).collection('offers');
 
-    // Firestore prefix search: merchantNameLower >= queryLower AND < queryLower + '\uf8ff'
-    // Also filters out expired offers in the same query
+    // Prefix match on the merchant name. Expired rows are dropped here so an
+    // offer with an unknown expiry (no expiresAt) still comes back.
     const snapshot = await userOffersRef
       .where('merchantNameLower', '>=', queryLower)
       .where('merchantNameLower', '<=', queryLower + '\uf8ff')
-      .where('expiresAt', '>', now)
       .get();
 
-    const personalizedOffers = snapshot.docs.map(doc => doc.data());
+    const personalizedOffers = snapshot.docs
+      .map(doc => doc.data())
+      .filter(offer => isCurrentOffer(offer, now));
 
     if (personalizedOffers.length > 0) {
       console.log(`✅ Found ${personalizedOffers.length} offers for "${query}" (user: ${userId})`);
