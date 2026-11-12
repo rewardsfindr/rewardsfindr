@@ -6,13 +6,13 @@
 //   1. User lands on offers page → AMEX_CARDS_DETECTED fires with all cards
 //   2. User taps Sync → we switch to first non-active card
 //   3. Card switch triggers ReadOffersHubPresentation API → CAPTURE_JSON
-//   4. POST to /api/offers/parse → write to DB
+//   4. Parsed offers are saved on this phone for that card and phase
 //   5. Switch to next unvisited card → repeat until all cards captured
 //      (active card on sync press is captured last)
 //   6. Transition to enrolled page → reuse same card list → repeat cycle
 //   7. All phases done → onSuccess + onClose
 //
-// Chase posts structured offers from the grid to /api/offers/snapshot.
+// Chase and Amex both save a structured snapshot on the phone.
 //
 // Key timing note for Amex:
 //   Amex fires ReadOffersHubPresentation (REPLACE) BEFORE CARD_SWITCHED
@@ -26,6 +26,7 @@ import {
 } from 'react-native';
 import { WebView } from 'react-native-webview';
 import { getAuthInstance } from '../lib/firebaseClient.js';
+import { saveCardSnapshot } from '../lib/offerStore.js';
 import { colors, radii } from '../shared/theme.js';
 
 import { BANK_CONFIG }                                    from './sync/bankConfig.js';
@@ -39,7 +40,6 @@ import {
 } from './sync/amexSync.js';
 import { parseCardLabel }                                 from './sync/captureJs.js';
 
-const API_BASE_URL         = process.env.EXPO_PUBLIC_API_URL || 'http://localhost:3001';
 const SWITCH_TIMEOUT_MS    = 3500;
 const POST_SWITCH_DELAY_MS = 2500;
 const MAX_SWITCH_RETRIES   = 3;
@@ -190,7 +190,6 @@ export default function SyncWebView({ visible, bank, onClose, onSuccess }) {
     setSyncing(true);
     const user = getAuthInstance().currentUser;
     if (!user) throw new Error('You must be signed in to sync offers.');
-    const token = await user.getIdToken();
 
     const { cardName, cardLast4 } = parseCardLabel(cardLabel);
     const fullCardName = cardName
@@ -201,18 +200,23 @@ export default function SyncWebView({ visible, bank, onClose, onSuccess }) {
     if (!isAmex && !fullCardName) {
       throw new Error('Could not read the Chase card name. Nothing was saved.');
     }
-    const bodyObj = isAmex
-      ? { json: payload, bank, cardName: fullCardName, phase }
-      : { bank, cardName: fullCardName, gridFound: true, tileCount, offers: payload };
-    const endpoint = isAmex ? '/api/offers/parse' : '/api/offers/snapshot';
-
-    const response = await fetch(`${API_BASE_URL}${endpoint}`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-      body: JSON.stringify(bodyObj),
-    });
-    const result = await response.json();
-    if (!response.ok) throw new Error(result.error || 'Sync failed');
+    const result = await saveCardSnapshot(user.uid, isAmex
+      ? {
+          bank,
+          cardName: fullCardName || 'Amex Card',
+          cardLast4,
+          phase,
+          json: payload,
+        }
+      : {
+          bank,
+          cardName: fullCardName,
+          cardLast4,
+          phase: '',
+          gridFound: true,
+          tileCount,
+          rawOffers: payload,
+        });
 
     syncedCardsRef.current = [
       ...syncedCardsRef.current,

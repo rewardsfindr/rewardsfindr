@@ -1,9 +1,10 @@
 // ─────────────────────────────────────────────
 // useSearch — mobile
-// Calls Firebase Functions API for search results
+// Searches the offer snapshot saved on this phone
 // ─────────────────────────────────────────────
 import { useState } from 'react';
-import { searchStore } from '../lib/api.js';
+import { getAuthInstance } from '../lib/firebaseClient.js';
+import { searchStoredOffers } from '../lib/offerStore.js';
 
 export const useSearch = () => {
   const [searchTerm, setSearchTerm]       = useState('');
@@ -20,22 +21,12 @@ export const useSearch = () => {
     setError(null);
 
     try {
-      const data = await searchStore(term);
-      
-      if (!data.store) {
-        // No match found
-        setSelectedStore(term);
-        setMatchMeta(null);
-        setResults([]);
-      } else {
-        setSelectedStore(data.store);
-        setMatchMeta({
-          displayName: data.store,
-          category: data.category,
-          quality: data.quality,
-        });
-        setResults(data.cards || []);
-      }
+      const user = getAuthInstance().currentUser;
+      if (!user) throw new Error('Sign in to search the offers saved on this phone.');
+      const offers = await searchStoredOffers(user.uid, term);
+      setSelectedStore(term);
+      setMatchMeta(null);
+      setResults(offers);
     } catch (err) {
       console.error('Search error:', err);
       setError(err.message);
