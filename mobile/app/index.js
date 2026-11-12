@@ -10,7 +10,7 @@ import { signOut } from 'firebase/auth';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { getAuthInstance } from '../lib/firebaseClient.js';
 import { useSearch } from '../hooks/useSearch.js';
-import { searchStore } from '../lib/api.js';
+import { searchStoredOffers } from '../lib/offerStore.js';
 
 import HomeHeader     from '../components/HomeHeader.js';
 import SearchBar      from '../components/SearchBar.js';
@@ -73,12 +73,15 @@ export default function HomeScreen() {
     router.push({ pathname: '/results', params: { storeName: query, offers: JSON.stringify(data.offers) } });
   };
 
-  const onSearchSubmit = async () => {
-    if (!searchTerm.trim()) return;
+  const runSearch = async (query) => {
+    if (!user?.uid) {
+      Alert.alert('Sign in required', 'Sign in to search the offers saved on this phone.');
+      return;
+    }
     setLocalSearching(true);
     try {
-      const data = await searchStore(searchTerm);
-      navigateToResults(data, searchTerm);
+      const offers = await searchStoredOffers(user.uid, query);
+      navigateToResults({ offers }, query);
     } catch (err) {
       Alert.alert('Search Error', err.message);
     } finally {
@@ -86,16 +89,13 @@ export default function HomeScreen() {
     }
   };
 
+  const onSearchSubmit = async () => {
+    if (!searchTerm.trim()) return;
+    await runSearch(searchTerm);
+  };
+
   const onChipPress = async (storeName) => {
-    setLocalSearching(true);
-    try {
-      const data = await searchStore(storeName);
-      navigateToResults(data, storeName);
-    } catch (err) {
-      Alert.alert('Search Error', err.message);
-    } finally {
-      setLocalSearching(false);
-    }
+    await runSearch(storeName);
   };
 
   const handleSyncSuccess = (totalSynced, cardResults, bank) => {
