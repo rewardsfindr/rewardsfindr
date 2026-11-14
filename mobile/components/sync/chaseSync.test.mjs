@@ -2,8 +2,10 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
   buildCaptureOffersJs,
+  buildChaseOfferCaptureJs,
   buildListCardsJs,
   buildSwitchCardJs,
+  mapChaseCustomerOffers,
   mergeDetectedCards,
   nextChaseCardPosition,
 } from './chaseSync.js';
@@ -108,8 +110,28 @@ function runScript(script, document) {
       postMessage(raw) { messages.push(JSON.parse(raw)); },
     },
   };
+  messages.window = window;
   new Function('window', 'document', script)(window, document);
   return messages;
+}
+
+class FakeXHR {
+  constructor() {
+    this.status = 200;
+    this.responseText = '';
+    this.listeners = {};
+  }
+
+  open(_method, url) { this.url = url; }
+
+  send() {
+    (this.listeners.load || []).forEach(listener => listener());
+  }
+
+  addEventListener(name, listener) {
+    this.listeners[name] = this.listeners[name] || [];
+    this.listeners[name].push(listener);
+  }
 }
 
 async function waitForMessage(messages, timeoutMs = 4000) {
@@ -252,27 +274,121 @@ test('still clicks the older mds-select card menu', async () => {
   assert.equal(message.cardLabel, 'Flex (...1111)');
 });
 
-test('reads offer id, merchant, and value from the current Chase tiles', async () => {
-  const button = new El('DIV', { id: 'select-credit-card-account', text: 'Sapphire Reserve (...2222)' });
-  const tile = new El('DIV', {
-    'data-testid': 'commerce-tile',
-    id: 'carousel-FIGG:1894293',
-  }, [
-    new El('SPAN', { class: 'titleTagVariant2Container', text: 'Wander' }),
-    new El('SPAN', { class: 'subtitleTagVariant2Container', text: '$350 cash back' }),
-    new El('SPAN', { 'data-testid': 'days-left-banner', text: '22d left' }),
-  ]);
-  const grid = new El('DIV', { 'data-testid': 'grid-items-container' }, [tile]);
-  const messages = runScript(buildCaptureOffersJs(), page([button, grid]));
-  const message = await waitForMessage(messages);
+test('maps a customer-offers response and drops account fields', () => {
+  const mapped = mapChaseCustomerOffers({
+    primaryIndividualEnterprisePartyIdentifier: 'party',
+    digitalProfileAccounts: [{ digitalAccountIdentifier: 1, maskedAccountNumber: '....2222' }],
+    customerOffers: [{
+      digitalAccountIdentifier: 99,
+      customerOfferSessionTokenIdentifier: 'session',
+      partial: false,
+      offers: [{
+        offerIdentifier: 'FIGG:1894293',
+        offerStatusName: 'ACTIVATED',
+        digitalInteractionDestUrlText: 'https://example.test/track',
+        merchantDetails: { merchantName: 'Wander', merchantAddressLineText: 'hidden' },
+        offerDetails: { offerEndTimestamp: '2026-06-30T00:00:00.000Z', remainingDaysCount: 22 },
+        offerDisplayDetails: { rewardDescriptionText: '$350 cash back' },
+      }],
+    }],
+  });
 
-  assert.equal(message.type, 'CAPTURE_OFFERS');
-  assert.equal(message.gridFound, true);
-  assert.equal(message.cardLabel, 'Sapphire Reserve (...2222)');
-  assert.equal(message.offers[0].bankOfferId, 'FIGG:1894293');
-  assert.equal(message.offers[0].merchantName, 'Wander');
-  assert.equal(message.offers[0].valueText, '$350 cash back');
-  assert.equal(message.offers[0].daysLeft, '22d left');
+  assert.equal(mapped.gridFound, true);
+  assert.equal(mapped.partial, false);
+  assert.equal(mapped.offers.length, 1);
+  assert.equal(mapped.offers[0].bankOfferId, 'FIGG:1894293');
+  assert.equal(mapped.offers[0].merchantName, 'Wander');
+  assert.equal(mapped.offers[0].valueText, '$350 cash back');
+  const htmlValue = mapChaseCustomerOffers({
+    customerOffers: [{
+      partial: false,
+      offers: [{
+        offerIdentifier: 'FIGG:2',
+        merchantDetails: { merchantName: 'Store' },
+        offerDisplayDetails: {
+          rewardDescriptionText: 'Earn 40% cash back on a membership.<br><br>Includes a <b>$20 cash back</b> maximum. <a href="https://example.test">Store</a>',
+        },
+      }],
+    }],
+  });
+  assert.equal(htmlValue.offers[0].valueText, '40% cash back, up to $20');
+  assert.equal(htmlValue.offers[0].valueText.includes('<'), false);
+  const minimum = mapChaseCustomerOffers({
+    customerOffers: [{
+      offers: [{
+        offerIdentifier: 'FIGG:3',
+        merchantDetails: { merchantName: 'SeatGeek' },
+        offerDisplayDetails: {
+          rewardDescriptionText: 'Earn 5% cash back. Offer valid on $50 or more purchases.',
+        },
+      }],
+    }],
+  });
+  assert.equal(minimum.offers[0].valueText, '5% cash back on $50 or more');
+  const otherId = mapChaseCustomerOffers({
+    customerOffers: [{
+      offers: [{
+        offerIdentifier: 'CDLX:10:20-c',
+        merchantDetails: { merchantName: 'Store' },
+        offerDisplayDetails: { rewardDescriptionText: '$25 cash back' },
+      }],
+    }],
+  });
+  assert.equal(otherId.offers[0].bankOfferId, 'CDLX:10:20-c');
+  assert.equal(mapped.offers[0].expiryText, '2026-06-30T00:00:00.000Z');
+  assert.equal(mapped.offers[0].isActivated, true);
+  assert.equal(JSON.stringify(mapped).includes('session'), false);
+  assert.equal(JSON.stringify(mapped).includes('digitalAccount'), false);
+  assert.equal(JSON.stringify(mapped).includes('merchantAddress'), false);
+});
+
+test('reads the offer response for the open card and ignores the tiles', () => {
+  const button = new El('DIV', { id: 'select-credit-card-account', text: 'Sapphire Reserve (...2222)' });
+  const document = page([button]);
+  const messages = [];
+  const window = {
+    XMLHttpRequest: FakeXHR,
+    ReactNativeWebView: {
+      postMessage(raw) { messages.push(JSON.parse(raw)); },
+    },
+  };
+  new Function('window', 'document', buildChaseOfferCaptureJs())(window, document);
+
+  const xhr = new window.XMLHttpRequest();
+  xhr.open('POST', 'https://secure.chase.com/svc/customer-offers');
+  xhr.responseText = JSON.stringify({
+    customerOffers: [{
+      partial: false,
+      digitalAccountIdentifier: 5,
+      offers: [{
+        offerIdentifier: 'FIGG:1894293',
+        offerStatusName: 'AVAILABLE',
+        merchantDetails: { merchantName: 'Wander' },
+        offerDetails: { remainingDaysCount: 22, offerEndTimestamp: '2026-06-30T00:00:00.000Z' },
+        offerDisplayDetails: { rewardDescriptionText: '$350 cash back' },
+      }],
+    }],
+  });
+  xhr.send();
+  new Function('window', 'document', buildCaptureOffersJs())(window, document);
+
+  assert.equal(messages.length, 1);
+  assert.equal(messages[0].type, 'CAPTURE_OFFERS');
+  assert.equal(messages[0].cardLabel, 'Sapphire Reserve (...2222)');
+  assert.equal(messages[0].offers[0].bankOfferId, 'FIGG:1894293');
+  assert.equal(messages[0].offers[0].merchantName, 'Wander');
+  assert.equal(messages[0].offers[0].valueText, '$350 cash back');
+  assert.equal(JSON.stringify(messages[0]).includes('digitalAccount'), false);
+});
+
+test('asks for another card request when the offers response was missed', () => {
+  const button = new El('DIV', { id: 'select-credit-card-account', text: 'Sapphire Reserve (...2222)' });
+  const messages = [];
+  const window = {
+    ReactNativeWebView: { postMessage(raw) { messages.push(JSON.parse(raw)); } },
+  };
+  new Function('window', 'document', buildCaptureOffersJs())(window, page([button]));
+  assert.equal(messages[0].type, 'CHASE_CAPTURE_UNAVAILABLE');
 });
 
 test('walks every card once, starting from the card already on screen', () => {

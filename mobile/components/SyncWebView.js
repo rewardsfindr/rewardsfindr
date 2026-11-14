@@ -30,7 +30,7 @@ import { saveCardSnapshot } from '../lib/offerStore.js';
 import { colors, radii } from '../shared/theme.js';
 
 import { BANK_CONFIG }                                    from './sync/bankConfig.js';
-import { DETECT_CARDS_JS, buildPageStateJs, buildListCardsJs, buildSwitchCardJs, buildCaptureOffersJs, nextChaseCardPosition, mergeDetectedCards } from './sync/chaseSync.js';
+import { DETECT_CARDS_JS, buildPageStateJs, buildListCardsJs, buildSwitchCardJs, buildCaptureOffersJs, buildChaseOfferCaptureJs, nextChaseCardPosition, mergeDetectedCards } from './sync/chaseSync.js';
 import {
   AMEX_OPEN_AND_DETECT_JS,
   buildAmexSwitchCardJs,
@@ -55,6 +55,8 @@ export default function SyncWebView({ visible, bank, onClose, onSuccess }) {
   const cardsDiscovered     = useRef(false);
   const switchRetriesRef    = useRef(0);
   const syncedCountRef      = useRef(0);
+  const chaseRefreshRef     = useRef(false);
+  const offersRedirectRef   = useRef(false);
   const captureArmed        = useRef(false);
   const syncStartedRef      = useRef(false);
   const syncPhaseRef        = useRef('eligible');
@@ -85,6 +87,8 @@ export default function SyncWebView({ visible, bank, onClose, onSuccess }) {
       cardsDiscovered.current     = false;
       switchRetriesRef.current    = 0;
       syncedCountRef.current      = 0;
+      chaseRefreshRef.current     = false;
+      offersRedirectRef.current   = false;
       captureArmed.current        = false;
       syncStartedRef.current      = false;
       syncPhaseRef.current        = 'eligible';
@@ -147,6 +151,7 @@ export default function SyncWebView({ visible, bank, onClose, onSuccess }) {
     setPageLoaded(true);
 
     if (bank === 'chase') {
+      webViewRef.current?.injectJavaScript(buildChaseOfferCaptureJs());
       webViewRef.current?.injectJavaScript(buildPageStateJs(config.loginPaths, config.offersPaths));
       webViewRef.current?.injectJavaScript(DETECT_CARDS_JS);
       return;
@@ -162,15 +167,21 @@ export default function SyncWebView({ visible, bank, onClose, onSuccess }) {
       });
       setOnOffersPage(onOffers);
       if (onOffers) {
+        offersRedirectRef.current = false;
         setAmexCardsReady(false);
         webViewRef.current?.injectJavaScript(buildAmexJsonCaptureJs());
+      } else if (!(config.loginPaths || []).some(p => url.includes(p.toLowerCase()))) {
+        goToOffers();
       }
     }
   };
 
-  const handleGoToOffers = () => {
+  const goToOffers = () => {
+    if (offersRedirectRef.current || syncStartedRef.current) return;
     const target = config.offersUrl || config.url;
-    webViewRef.current?.injectJavaScript(`window.location.replace('${target}'); true;`);
+    if (!target) return;
+    offersRedirectRef.current = true;
+    webViewRef.current?.injectJavaScript(`window.location.replace(${JSON.stringify(target)}); true;`);
   };
 
   const handleSyncPress = () => {
@@ -192,10 +203,21 @@ export default function SyncWebView({ visible, bank, onClose, onSuccess }) {
       return;
     }
 
+    chaseRefreshRef.current = false;
+    webViewRef.current?.injectJavaScript(buildChaseOfferCaptureJs());
     webViewRef.current?.injectJavaScript(buildListCardsJs());
   };
 
-  const handleCaptureResult = async ({ payload, cardLabel, phase, capturedTestId, tileCount }) => {
+  const switchChaseCard = (position) => {
+    cardIndexRef.current = position;
+    setCardIndexUi(position);
+    setSwitching(true);
+    switchRetriesRef.current = 0;
+    webViewRef.current?.injectJavaScript(buildChaseOfferCaptureJs());
+    webViewRef.current?.injectJavaScript(buildSwitchCardJs(cardOptionsRef.current[position].index, 8000));
+  };
+
+  const handleCaptureResult = async ({ payload, cardLabel, phase, capturedTestId, tileCount, partial }) => {
     setSyncing(true);
     const user = getAuthInstance().currentUser;
     if (!user) throw new Error('You must be signed in to sync offers.');
@@ -224,6 +246,7 @@ export default function SyncWebView({ visible, bank, onClose, onSuccess }) {
           phase: '',
           gridFound: true,
           tileCount,
+          partial,
           rawOffers: payload,
         });
 
@@ -263,11 +286,7 @@ export default function SyncWebView({ visible, bank, onClose, onSuccess }) {
     const totalCards = cardOptionsRef.current.length;
     const nextPos = nextChaseCardPosition(cardIndexRef.current, totalCards, syncedCountRef.current);
     if (nextPos !== null) {
-      cardIndexRef.current = nextPos;
-      setCardIndexUi(nextPos);
-      setSwitching(true);
-      switchRetriesRef.current = 0;
-      webViewRef.current?.injectJavaScript(buildSwitchCardJs(cardOptionsRef.current[nextPos].index, 8000));
+      switchChaseCard(nextPos);
     } else {
       const total = syncedCardsRef.current.reduce((sum, c) => sum + c.count, 0);
       onSuccess(total, syncedCardsRef.current);
@@ -279,9 +298,33 @@ export default function SyncWebView({ visible, bank, onClose, onSuccess }) {
     try {
       const data = JSON.parse(event.nativeEvent.data);
 
+      if (data.type === 'CHASE_CAPTURE_UNAVAILABLE' && bank === 'chase') {
+        if (!syncStartedRef.current) return;
+        const nextPos = nextChaseCardPosition(cardIndexRef.current, cardOptionsRef.current.length, syncedCountRef.current);
+        if (!chaseRefreshRef.current && nextPos !== null && nextPos !== cardIndexRef.current) {
+          chaseRefreshRef.current = true;
+          switchChaseCard(nextPos);
+          return;
+        }
+        syncStartedRef.current = false;
+        captureArmed.current = false;
+        setSyncStarted(false);
+        setSyncing(false);
+        setSwitching(false);
+        Alert.alert(
+          'Capture Error',
+          data.hookError
+            ? 'Chase offer response was not captured. ' + data.hookError
+            : 'Chase offer response was not captured. Stay on the offers page and try again. Nothing was changed.'
+        );
+        return;
+      }
+
       if (data.type === 'PAGE_STATE') {
         setOnOffersPage(!!data.onOffers);
         setOnLoginPage(!!data.onLogin && !data.onOffers);
+        if (data.onOffers) offersRedirectRef.current = false;
+        if (!data.onOffers && !data.onLogin && !data.onOffersUrl) goToOffers();
         return;
       }
 
@@ -321,7 +364,7 @@ export default function SyncWebView({ visible, bank, onClose, onSuccess }) {
           setCardIndexUi(cardIndexRef.current);
         }
         setCurrentCard(data.selectedLabel || null);
-        if (config.useCardsDetectedAsOffersSignal) setOnOffersPage(hasCards);
+        if (config.useCardsDetectedAsOffersSignal && hasCards) setOnOffersPage(true);
         return;
       }
 
@@ -416,6 +459,7 @@ export default function SyncWebView({ visible, bank, onClose, onSuccess }) {
         cardLabel: data.cardLabel,
         phase:     '',
         tileCount: data.tileCount ?? (data.offers || []).length,
+        partial:   data.partial === true,
       });
 
     } catch (err) {
@@ -441,20 +485,11 @@ export default function SyncWebView({ visible, bank, onClose, onSuccess }) {
       ? `🔄 Syncing ${phaseLabel} offers — ${cardName || 'card'} (${cardIndexUi + 1} of ${totalCards})...`
       : `⚡ Processing...`;
 
-  const renderSyncButton = () => {
-    const ready = pageLoaded && (bank === 'amex' ? amexCardsReady : true);
-    return (
-      <TouchableOpacity
-        style={[s.syncBtn, !ready && s.syncBtnDisabled]}
-        onPress={ready ? handleSyncPress : undefined}
-        disabled={!ready}
-      >
-        <Text style={s.syncBtnText}>
-          {ready ? 'Sync Offers' : (bank === 'amex' && pageLoaded ? 'Detecting cards...' : 'Loading...')}
-        </Text>
-      </TouchableOpacity>
-    );
-  };
+  const renderSyncButton = () => (
+    <TouchableOpacity style={s.syncBtn} onPress={handleSyncPress}>
+      <Text style={s.syncBtnText}>Sync Offers</Text>
+    </TouchableOpacity>
+  );
 
   const renderFooter = () => {
     if (syncStarted) {
@@ -465,18 +500,9 @@ export default function SyncWebView({ visible, bank, onClose, onSuccess }) {
         </View>
       );
     }
-    if (onOffersPage || (bank === 'chase' && pageLoaded && !onLoginPage)) {
-      return renderSyncButton();
-    }
-    if (!pageLoaded) return null;
-    return (
-      <>
-        <Text style={s.hint}>Log in above, then tap to go to your offers.</Text>
-        <TouchableOpacity style={s.goToOffersBtn} onPress={handleGoToOffers}>
-          <Text style={s.syncBtnText}>Go to Offers Page →</Text>
-        </TouchableOpacity>
-      </>
-    );
+    const ready = onOffersPage && pageLoaded && (bank !== 'amex' || amexCardsReady);
+    if (ready) return renderSyncButton();
+    return null;
   };
 
   return (
@@ -494,9 +520,14 @@ export default function SyncWebView({ visible, bank, onClose, onSuccess }) {
           <WebView
             ref={webViewRef}
             source={{ uri: config.url }}
+            injectedJavaScriptBeforeContentLoaded={bank === 'chase' ? buildChaseOfferCaptureJs() : undefined}
             onMessage={handleMessage}
             onNavigationStateChange={handleNavigationStateChange}
-            onLoadStart={() => setPageLoaded(false)}
+            onLoadStart={() => {
+              setPageLoaded(false);
+              setOnOffersPage(false);
+              setOnLoginPage(false);
+            }}
             onLoadEnd={handleLoadEnd}
             style={s.webview}
             incognito={false}
@@ -522,10 +553,8 @@ const s = StyleSheet.create({
   headerTitle:     { fontSize: 16, fontWeight: '700', color: colors.textPrimary },
   webview:         { flex: 1 },
   footer:          { minHeight: 56, padding: 16, borderTopWidth: 1, borderTopColor: colors.border, backgroundColor: 'white' },
-  hint:            { fontSize: 12, color: colors.textMuted, textAlign: 'center', marginBottom: 10 },
   syncBtn:         { backgroundColor: colors.primary, borderRadius: radii.md, paddingVertical: 14, alignItems: 'center' },
   syncBtnDisabled: { backgroundColor: colors.disabledBg },
-  goToOffersBtn:   { backgroundColor: colors.primaryLight, borderRadius: radii.md, paddingVertical: 14, alignItems: 'center' },
   syncBtnText:     { color: 'white', fontSize: 16, fontWeight: '700' },
   statusRow:       { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', paddingVertical: 10 },
   spinner:         { marginRight: 10 },
