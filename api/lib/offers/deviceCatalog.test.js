@@ -53,6 +53,24 @@ test('stores a Chase tile under the bank offer id and drops that card on the nex
   assert.equal(catalog[0].expiryPrecision, 'unknown');
 });
 
+test('refuses a partial Chase offer response', () => {
+  assert.throws(
+    () => chaseRecords({
+      cardName: 'Freedom Flex (...1111)',
+      gridFound: true,
+      partial: true,
+      tileCount: 1,
+      rawOffers: [{
+        bankOfferId: 'FIGG:1',
+        merchantName: 'Nike',
+        valueText: '5%',
+      }],
+      now: NOW,
+    }),
+    /partial offer list/
+  );
+});
+
 test('refuses a Chase snapshot that saw tiles but no offer ids', () => {
   assert.throws(
     () => chaseRecords({

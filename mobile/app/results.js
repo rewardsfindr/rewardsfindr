@@ -11,9 +11,8 @@ import {
 import { useLocalSearchParams, useRouter, Stack } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { colors, radii, shadow } from '../shared/theme.js';
-
-const CHASE_OFFERS_URL = 'https://secure.chase.com/web/auth/dashboard#/dashboard/merchantOffers/offer-hub';
-const CHASE_APP_URL   = 'chase://offers';
+import { summarizeOfferTerms } from '../components/sync/chaseSync.js';
+import { chaseOfferUrl } from '../../api/lib/offers/chaseSnapshot.js';
 
 const BANK_COLORS = {
   chase:       '#1a3a6b',
@@ -37,11 +36,12 @@ const formatRewardLabel = (amount, type) => {
 };
 
 const formatDesc = (offer) => {
-  if (!offer.cashbackAmount) return offer.offerDescription || 'Offer available';
-  const pct = offer.cashbackType === 'percent'
+  const summary = summarizeOfferTerms(offer.offerDescription);
+  if (summary) return summary;
+  if (!offer.cashbackAmount) return 'Offer available';
+  return offer.cashbackType === 'percent'
     ? `${offer.cashbackAmount}% cash back`
     : `$${offer.cashbackAmount} cash back`;
-  return offer.offerDescription || `${pct} on ${offer.merchantName || 'purchases'}`;
 };
 
 const bankLabel = (bank) => {
@@ -54,20 +54,8 @@ const bankLabel = (bank) => {
   return map[bank] || bank.toUpperCase();
 };
 
-// Opens Chase app if installed, falls back to browser
 const openChaseOffer = (offer) => {
-  const deepLink = offer.offerDeepLink || null;
-  if (deepLink) {
-    Linking.openURL(deepLink).catch(() =>
-      Linking.openURL(CHASE_APP_URL).catch(() =>
-        Linking.openURL(CHASE_OFFERS_URL)
-      )
-    );
-  } else {
-    Linking.openURL(CHASE_APP_URL).catch(() =>
-      Linking.openURL(CHASE_OFFERS_URL)
-    );
-  }
+  Linking.openURL(chaseOfferUrl(offer?.bankOfferId));
 };
 
 export default function ResultsScreen() {
@@ -133,11 +121,12 @@ export default function ResultsScreen() {
                   <Text style={s.bankPillText}>{bankLabel(best.bank)}</Text>
                 </View>
                 {best.cardLast4 && <Text style={s.heroLast4}>•• {best.cardLast4}</Text>}
-                {best.isActivated === true ? (
+                {best.bank === 'chase' && best.isActivated === true && (
                   <View style={s.heroActivatedBadge}>
                     <Text style={s.heroActivatedText}>✓ ACTIVATED</Text>
                   </View>
-                ) : (
+                )}
+                {best.bank === 'chase' && best.isActivated !== true && (
                   <TouchableOpacity style={s.heroActivateBtn} onPress={() => openChaseOffer(best)}>
                     <Text style={s.heroActivateBtnText}>⚡ Activate</Text>
                   </TouchableOpacity>
@@ -149,9 +138,7 @@ export default function ResultsScreen() {
             {rest.length > 0 && (
               <>
                 <Text style={s.allCardsLabel}>OTHER CARDS</Text>
-                {rest.map((offer, idx) => {
-                  const isActivated = offer.isActivated === true;
-                  return (
+                {rest.map((offer, idx) => (
                     <View
                       key={offer.offerId || idx}
                       style={s.rankCard}
@@ -161,7 +148,7 @@ export default function ResultsScreen() {
                         <View style={s.rankInfo}>
                           <View style={s.rankNameRow}>
                             <Text style={s.rankCardName}>{offer.cardName}</Text>
-                            {isActivated && (
+                            {offer.bank === 'chase' && offer.isActivated === true && (
                               <View style={s.activatedBadge}>
                                 <Text style={s.activatedBadgeText}>✓ ACTIVATED</Text>
                               </View>
@@ -176,12 +163,8 @@ export default function ResultsScreen() {
                               <Text style={s.rankLast4}>•• {offer.cardLast4}</Text>
                             )}
                           </View>
-                          {!isActivated && (
-                            <TouchableOpacity
-                              style={s.activateBtn}
-                              onPress={() => openChaseOffer(offer)}
-                              activeOpacity={0.8}
-                            >
+                          {offer.bank === 'chase' && offer.isActivated !== true && (
+                            <TouchableOpacity style={s.activateBtn} onPress={() => openChaseOffer(offer)} activeOpacity={0.8}>
                               <Text style={s.activateBtnText}>⚡ Tap to Activate on Chase</Text>
                             </TouchableOpacity>
                           )}
@@ -192,8 +175,7 @@ export default function ResultsScreen() {
                         </View>
                       </View>
                     </View>
-                  );
-                })}
+                ))}
               </>
             )}
           </>

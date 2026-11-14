@@ -18,20 +18,32 @@ export const CHASE_CREDIT_CARD_KEYWORDS = [
 export const buildPageStateJs = (loginPaths = [], offerPaths = []) => `
   (function() {
     try {
-      var href = (location.href || '').toLowerCase();
+      if (window.__rfPageStateTimer) clearInterval(window.__rfPageStateTimer);
       var loginNeedles = ${JSON.stringify(loginPaths.map(p => String(p).toLowerCase()))};
       var offerNeedles = ${JSON.stringify(offerPaths.map(p => String(p).toLowerCase()))};
-      var onLogin = loginNeedles.some(function(p) { return p && href.indexOf(p) !== -1; });
-      var onOffers = !onLogin && (
-        offerNeedles.some(function(p) { return p && href.indexOf(p) !== -1; })
-        || document.querySelectorAll('[data-testid="commerce-tile"]').length > 0
-        || !!document.querySelector('[data-testid="grid-items-container"]')
-      );
-      window.ReactNativeWebView.postMessage(JSON.stringify({
-        type: 'PAGE_STATE',
-        onOffers: onOffers,
-        onLogin: onLogin && !onOffers,
-      }));
+      function report() {
+        var href = (location.href || '').toLowerCase();
+        var onLogin = loginNeedles.some(function(p) { return p && href.indexOf(p) !== -1; });
+        var onOffersUrl = offerNeedles.some(function(p) { return p && href.indexOf(p) !== -1; });
+        var offersVisible = document.querySelectorAll('[data-testid="commerce-tile"]').length > 0
+          || !!document.querySelector('[data-testid="grid-items-container"]')
+          || !!document.querySelector('#select-credit-card-account');
+        var onOffers = !onLogin && offersVisible;
+        window.ReactNativeWebView.postMessage(JSON.stringify({
+          type: 'PAGE_STATE',
+          onOffers: onOffers,
+          onLogin: onLogin && !onOffers,
+          onOffersUrl: onOffersUrl,
+        }));
+        return onOffers;
+      }
+      if (!report()) {
+        var tries = 0;
+        window.__rfPageStateTimer = setInterval(function() {
+          tries += 1;
+          if (report() || tries >= 15) clearInterval(window.__rfPageStateTimer);
+        }, 400);
+      }
     } catch (e) {}
   })();
   true;
@@ -80,56 +92,236 @@ export const DETECT_CARDS_JS = `
   true;
 `;
 
-// Reads the offers grid and posts structured tiles. The full document is
-// never sent. bankOfferId prefers the stable FIGG id over the carousel prefix.
+// Source stays a string so the WebView receives JavaScript. Hermes toString()
+// would inject "[bytecode]", which the page then reads as an undefined name.
+const readChaseCardLabelSource = `function readChaseCardLabel() {
+  var sel = document.querySelector('mds-select[id="select-credit-card-account"]');
+  if (sel) {
+    var selectedOpt = sel.querySelector('mds-select-option[selected="true"]');
+    if (selectedOpt) return selectedOpt.getAttribute('label') || '';
+  }
+  var current = document.querySelector('#select-credit-card-account');
+  return current ? (current.innerText || '').replace(/\\s+/g, ' ').trim() : '';
+}`;
+
+const summarizeOfferTermsSource = `function summarizeOfferTerms(text) {
+  var plain = String(text || '')
+    .replace(/<[^>]*>/g, ' ')
+    .replace(/&nbsp;/gi, ' ')
+    .replace(/&amp;/gi, '&')
+    .replace(/&#39;|&apos;/gi, "'")
+    .replace(/&quot;/gi, '"')
+    .replace(/\\s+/g, ' ')
+    .trim();
+  if (!plain) return '';
+
+  function amount(value) {
+    var number = String(value).replace(/\\.0+$/, '').replace(/(\\.[1-9]*)0+$/, '$1');
+    return number;
+  }
+
+  var percent = plain.match(/(\\d+(?:\\.\\d+)?)\\s*%\\s*cash\\s*back/i);
+  var fixed = plain.match(/\\$(\\d+(?:\\.\\d+)?)\\s*cash\\s*back(?!\\s*max)/i);
+  var cap = plain.match(/\\$(\\d+(?:\\.\\d+)?)\\s*cash\\s*back\\s*max(?:imum)?/i)
+    || plain.match(/(?:up to|maximum of|capped at|cannot exceed)\\s*\\$(\\d+(?:\\.\\d+)?)/i);
+  var minimum = plain.match(/\\$(\\d+(?:\\.\\d+)?)\\s*(?:or more|\\+)/i)
+    || plain.match(/(?:minimum(?:\\s+purchase)?(?:\\s+of)?|spend|purchases?(?:\\s+of)?|orders?(?:\\s+of)?)\\s*\\$(\\d+(?:\\.\\d+)?)/i);
+
+  var reward = '';
+  if (percent) reward = amount(percent[1]) + '% cash back';
+  else if (fixed) reward = '$' + amount(fixed[1]) + ' cash back';
+  else if (cap) reward = '$' + amount(cap[1]) + ' cash back';
+  if (!reward) return plain.length <= 80 ? plain : '';
+
+  var line = reward;
+  if (minimum) line += ' on $' + amount(minimum[1]) + ' or more';
+  if (percent && cap) line += ', up to $' + amount(cap[1]);
+  return line;
+}`;
+
+export const summarizeOfferTerms = new Function(`return (${summarizeOfferTermsSource})`)();
+
+const mapChaseCustomerOffersSource = `function mapChaseCustomerOffers(payload) {
+  function plainText(value) {
+    if (value && typeof value === 'object') {
+      value = value.messageText || value.text || value.value || value.displayText || '';
+    }
+    return String(value == null ? '' : value)
+      .replace(/<[^>]*>/g, ' ')
+      .replace(/&nbsp;/gi, ' ')
+      .replace(/&amp;/gi, '&')
+      .replace(/&#39;|&apos;/gi, "'")
+      .replace(/&quot;/gi, '"')
+      .replace(/\\s+/g, ' ')
+      .trim();
+  }
+
+  function rewardValue(display) {
+    var fields = [
+      plainText(display.shortMessageText),
+      plainText(display.offerHeaderText),
+      plainText(display.preMessageText),
+      plainText(display.rewardDescriptionText),
+      plainText(display.termsAndConditionsText),
+    ];
+    return summarizeOfferTerms(fields.filter(Boolean).join(' '));
+  }
+
+  var account = payload && Array.isArray(payload.customerOffers) ? payload.customerOffers[0] : null;
+  if (!account || !Array.isArray(account.offers)) {
+    return { gridFound: false, partial: false, offers: [] };
+  }
+
+  var offers = account.offers.map(function(offer) {
+    var details = offer.offerDetails || {};
+    var display = offer.offerDisplayDetails || {};
+    var merchant = offer.merchantDetails || {};
+    var offerId = String(offer.offerIdentifier || '').trim();
+    var idSource = offerId + ' ' + String(offer.digitalInteractionDestUrlText || '');
+    var figg = idSource.match(/FIGG:\\d+/i);
+    var bankOfferId = figg ? figg[0].toUpperCase() : (/https?:/i.test(offerId) || offerId.length > 120 ? '' : offerId);
+    var days = details.remainingDaysCount;
+    return {
+      bankOfferId: bankOfferId,
+      merchantName: plainText(merchant.merchantName),
+      valueText: rewardValue(display),
+      daysLeft: days == null || days === '' ? '' : String(days) + ' days',
+      expiryText: details.offerEndTimestamp || '',
+      isActivated: /activat|added|enrolled/i.test(String(offer.offerStatusName || '')),
+    };
+  });
+
+  return {
+    gridFound: true,
+    partial: account.partial === true,
+    offers: offers,
+  };
+}`;
+
+export const readChaseCardLabel = new Function(`return (${readChaseCardLabelSource})`)();
+export const mapChaseCustomerOffers = new Function(`
+  ${summarizeOfferTermsSource}
+  return (${mapChaseCustomerOffersSource});
+`)();
+
+// Installed before the offers page runs so the customer-offers response is
+// stored as offer fields only. Sync posts that stash; it does not read tiles.
+export const buildChaseOfferCaptureJs = () => `
+  (function() {
+    try {
+      if (window.__chaseOfferHookVersion === 6) return;
+      var summarizeOfferTerms = ${summarizeOfferTermsSource};
+      var mapChaseCustomerOffers = ${mapChaseCustomerOffersSource};
+
+      function remember(text) {
+        var parsed = JSON.parse(text);
+        var mapped = mapChaseCustomerOffers(parsed);
+        window.__chaseLastOfferCapture = {
+          gridFound: mapped.gridFound,
+          partial: mapped.partial,
+          tileCount: mapped.offers.length,
+          offers: mapped.offers,
+        };
+        window.__chaseHookError = '';
+      }
+
+      function watchUrl(url) {
+        return String(url || '').indexOf('customer-offers') !== -1;
+      }
+
+      function watchSend(xhr, url) {
+        if (!watchUrl(url)) return;
+        xhr.addEventListener('load', function() {
+          if (xhr.status < 200 || xhr.status >= 300) return;
+          try { remember(xhr.responseText); }
+          catch (e) { window.__chaseHookError = String(e && e.message || e); }
+        });
+      }
+
+      var OrigXHR = window.XMLHttpRequest;
+      var proto = OrigXHR && OrigXHR.prototype;
+      if (proto && proto.open && proto.send && !proto.__chaseOfferHooked) {
+        var protoOpen = proto.open;
+        var protoSend = proto.send;
+        proto.open = function(method, url) {
+          try { this.__chaseUrl = url || ''; } catch (e) {}
+          return protoOpen.apply(this, arguments);
+        };
+        proto.send = function() {
+          try { watchSend(this, this.__chaseUrl); } catch (e) {}
+          return protoSend.apply(this, arguments);
+        };
+        proto.__chaseOfferHooked = true;
+      }
+
+      function PatchedXHR() {
+        var xhr = new OrigXHR();
+        var url = '';
+        var origOpen = xhr.open;
+        var origSend = xhr.send;
+        if (origOpen) {
+          xhr.open = function(method, nextUrl) {
+            url = nextUrl || '';
+            return origOpen.apply(xhr, arguments);
+          };
+        }
+        if (origSend) {
+          xhr.send = function() {
+            try { watchSend(xhr, url); } catch (e) {}
+            return origSend.apply(xhr, arguments);
+          };
+        }
+        return xhr;
+      }
+      if (OrigXHR) {
+        PatchedXHR.prototype = OrigXHR.prototype;
+        window.XMLHttpRequest = PatchedXHR;
+      }
+
+      if (window.fetch) {
+        var origFetch = window.fetch;
+        window.fetch = function(input, init) {
+          var url = (typeof input === 'string' ? input : (input && input.url)) || '';
+          var pending = origFetch.apply(window, arguments);
+          if (!watchUrl(url)) return pending;
+          return pending.then(function(response) {
+            if (response.ok) {
+              response.clone().text().then(function(text) {
+                try { remember(text); } catch (e) {}
+              });
+            }
+            return response;
+          });
+        };
+      }
+      window.__chaseOfferHookVersion = 6;
+    } catch (e) {
+      window.__chaseHookError = String(e && e.message || e);
+    }
+  })();
+  true;
+`;
+
+// Posts the last customer-offers response. The raw response never leaves the page.
 export const buildCaptureOffersJs = () => `
   (function() {
     try {
-      function cardLabel() {
-        var sel = document.querySelector('mds-select[id="select-credit-card-account"]');
-        if (sel) {
-          var selectedOpt = sel.querySelector('mds-select-option[selected="true"]');
-          if (selectedOpt) return selectedOpt.getAttribute('label') || '';
-        }
-        var current = document.querySelector('#select-credit-card-account');
-        return current ? (current.innerText || '').replace(/\\s+/g, ' ').trim() : '';
+      var readChaseCardLabel = ${readChaseCardLabelSource};
+      var stash = window.__chaseLastOfferCapture;
+      if (!stash || !stash.gridFound) {
+        window.ReactNativeWebView.postMessage(JSON.stringify({
+          type: 'CHASE_CAPTURE_UNAVAILABLE',
+          hookError: window.__chaseHookError || '',
+        }));
+        return;
       }
-
-      function offerId(el) {
-        var id = el.getAttribute('id') || '';
-        var match = id.match(/FIGG:\\d+/i);
-        if (match) return match[0].toUpperCase();
-        return id;
-      }
-
-      var tiles = document.querySelectorAll('[data-testid="commerce-tile"]');
-      var grid = document.querySelector('[data-testid="grid-items-container"]');
-      var offers = [];
-
-      tiles.forEach(function(el) {
-        var merchantEl = el.querySelector('.titleTagVariant2Container') || el.querySelector('span.r9jbijk');
-        var valueEl = el.querySelector('.subtitleTagVariant2Container') || el.querySelector('span.r9jbijj');
-        var daysEl = el.querySelector('[data-testid="days-left-banner"]');
-        var text = (el.innerText || '').toLowerCase();
-        var hasOnline = text.indexOf('online') !== -1;
-        var hasInStore = text.indexOf('in-store') !== -1 || text.indexOf('in store') !== -1;
-        offers.push({
-          bankOfferId: offerId(el),
-          tileId: el.getAttribute('id') || '',
-          merchantName: merchantEl ? merchantEl.textContent.trim() : '',
-          valueText: valueEl ? valueEl.textContent.trim() : '',
-          daysLeft: daysEl ? daysEl.textContent.trim() : '',
-          isActivated: !!el.querySelector('[data-testid="offer-tile-alert-container-success"]'),
-          purchaseType: hasOnline && hasInStore ? 'both' : hasOnline ? 'online' : hasInStore ? 'in-store' : null,
-        });
-      });
-
       window.ReactNativeWebView.postMessage(JSON.stringify({
         type: 'CAPTURE_OFFERS',
-        gridFound: !!grid || tiles.length > 0,
-        tileCount: tiles.length,
-        offers: offers,
-        cardLabel: cardLabel(),
+        gridFound: true,
+        partial: stash.partial === true,
+        tileCount: stash.tileCount,
+        offers: stash.offers,
+        cardLabel: readChaseCardLabel() || stash.cardLabel,
       }));
     } catch (e) {
       window.ReactNativeWebView.postMessage(JSON.stringify({ type: 'ERROR', message: e.message }));

@@ -1,11 +1,17 @@
 // Chase sync snapshot.
-// Identity is the bank offer id (FIGG:…) plus the card, not a hash of
+// Identity is the bank offer id plus the card, not a hash of
 // label text. Expiry comes from the tile. Missing expiry stays unknown
 // instead of being stored as a made-up 90-day date.
 
 import { normalizeMerchant } from '../shared/offerUtils.js';
 
 export const CHASE_OFFERS_BASE_URL = 'https://secure.chase.com/web/auth/dashboard#/dashboard/merchantOffers/offer-hub';
+
+export function chaseOfferUrl(bankOfferId) {
+  const id = String(bankOfferId || '').trim();
+  if (!id || /[\s?#/\\]/.test(id)) return CHASE_OFFERS_BASE_URL;
+  return `https://secure.chase.com/web/auth/dashboard#/dashboard/merchantOffers/offer-activated/${encodeURI(id)}`;
+}
 export const SNAPSHOT_BATCH_LIMIT = 450;
 const DAY_MS = 24 * 60 * 60 * 1000;
 
@@ -16,6 +22,18 @@ function unknownExpiry() {
 export function resolveChaseExpiry(daysLeftText, now = new Date()) {
   const text = String(daysLeftText || '').trim();
   if (!text) return unknownExpiry();
+
+  const isoMatch = text.match(/^\d{4}-\d{2}-\d{2}/);
+  if (isoMatch) {
+    const parsed = new Date(text);
+    if (!Number.isNaN(parsed.getTime())) {
+      return {
+        expiryDate: parsed.toISOString(),
+        expiryPrecision: 'date',
+        expiresAtMs: parsed.getTime(),
+      };
+    }
+  }
 
   const daysMatch = text.match(/(\d+)\s*d(?:ay|ays)?\b/i);
   if (daysMatch) {
@@ -81,28 +99,29 @@ export function normalizeChaseSnapshotOffer(raw, now = new Date()) {
 
   const valueText = String(raw.valueText || raw.offerDescription || '').trim();
   const reward = parseReward(valueText);
-  const expiry = resolveChaseExpiry(raw.daysLeft || raw.expiryText || '', now);
-  const tileId = String(raw.tileId || bankOfferId).trim();
-
+  const minimumMatch = valueText.match(/on \$(\d+(?:\.\d+)?) or more/i);
+  const expiry = resolveChaseExpiry(raw.expiryText || raw.daysLeft || '', now);
   return {
     bankOfferId,
     merchantName,
     offerDescription: valueText,
     cashbackAmount: reward.cashbackAmount,
     cashbackType: reward.cashbackType,
-    minimumSpend: 0,
+    minimumSpend: minimumMatch ? parseFloat(minimumMatch[1]) : 0,
     purchaseType: raw.purchaseType || null,
     category: 'other',
     isActivated: raw.isActivated === true,
-    tileId,
-    offerDeepLink: `${CHASE_OFFERS_BASE_URL}?offerId=${encodeURIComponent(tileId)}`,
+    offerDeepLink: chaseOfferUrl(bankOfferId),
     ...expiry,
   };
 }
 
 // Refuse a write that would erase a card when the page clearly had tiles
 // we failed to identify. An empty grid is a real snapshot and may delete.
-export function assertSnapshotSafe({ gridFound, tileCount, normalizedCount }) {
+export function assertSnapshotSafe({ gridFound, tileCount, normalizedCount, partial }) {
+  if (partial === true) {
+    return 'Chase returned a partial offer list. Nothing was changed.';
+  }
   if (gridFound !== true) {
     return 'Chase offers grid was not found. Nothing was changed.';
   }

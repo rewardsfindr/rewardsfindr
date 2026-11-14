@@ -19,6 +19,12 @@ test('converts a days-left banner into a timestamp', () => {
   assert.equal(expiry.expiryDate, new Date(expiry.expiresAtMs).toISOString());
 });
 
+test('parses an offer end timestamp from the offers response', () => {
+  const expiry = resolveChaseExpiry('2026-06-30T00:00:00.000Z', NOW);
+  assert.equal(expiry.expiryPrecision, 'date');
+  assert.equal(expiry.expiresAtMs, Date.parse('2026-06-30T00:00:00.000Z'));
+});
+
 test('parses an explicit calendar date without shifting the month', () => {
   const expiry = resolveChaseExpiry('Expires 06/30/2026', NOW);
   assert.equal(expiry.expiryPrecision, 'date');
@@ -58,11 +64,21 @@ test('normalizes a structured tile and keeps unknown expiry off the clock', () =
   assert.equal(offer.cashbackType, 'percent');
   assert.equal(offer.expiryPrecision, 'unknown');
   assert.equal(offer.expiresAtMs, null);
-  assert.match(offer.offerDeepLink, /offerId=carousel_0_FIGG%3A1894293/);
+  assert.equal(
+    offer.offerDeepLink,
+    'https://secure.chase.com/web/auth/dashboard#/dashboard/merchantOffers/offer-activated/FIGG:1894293'
+  );
 });
 
 test('drops tiles that have no Chase offer id', () => {
   assert.equal(normalizeChaseSnapshotOffer({ merchantName: 'Nike', valueText: '5%' }, NOW), null);
+});
+
+test('refuses a partial offer response', () => {
+  assert.equal(
+    assertSnapshotSafe({ gridFound: true, tileCount: 20, normalizedCount: 20, partial: true }),
+    'Chase returned a partial offer list. Nothing was changed.'
+  );
 });
 
 test('refuses to snapshot when tiles were seen but none were identifiable', () => {

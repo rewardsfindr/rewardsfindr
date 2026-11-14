@@ -37,11 +37,12 @@ function slug(value) {
     .slice(0, 60);
 }
 
-export function chaseRecords({ cardName, cardLast4, rawOffers, tileCount, gridFound, now = new Date() }) {
+export function chaseRecords({ cardName, cardLast4, rawOffers, tileCount, gridFound, partial, now = new Date() }) {
   const rows = Array.isArray(rawOffers) ? rawOffers : [];
   const normalized = rows.map(offer => normalizeChaseSnapshotOffer(offer, now)).filter(Boolean);
   const blocked = assertSnapshotSafe({
     gridFound,
+    partial,
     tileCount: Math.max(Number(tileCount) || 0, rows.length),
     normalizedCount: normalized.length,
   });
