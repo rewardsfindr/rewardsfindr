@@ -61,7 +61,7 @@ export function parseAmexEnrolledOffers(json) {
 }
 
 /**
- * Auto-routes by phase. Called from api/routes/offers.js.
+ * Auto-routes by phase. Called from the on-device offer catalog.
  * @param {object} json  — parsed ReadOffersHubPresentation response
  * @param {string} phase — 'eligible' | 'enrolled'
  */

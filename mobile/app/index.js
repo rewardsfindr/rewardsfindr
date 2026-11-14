@@ -103,6 +103,15 @@ export default function HomeScreen() {
       ...prev,
       [bank]: { cards: cardResults.length, lastSyncedAt: Date.now() },
     }));
+    const lines = (cardResults || [])
+      .map(card => `${card.cardName}: ${card.count} offers`)
+      .join('\n');
+    Alert.alert(
+      totalSynced > 0 ? 'Offers saved on this phone' : 'No offers saved',
+      totalSynced > 0
+        ? `${lines}\n\nSearch a store name from that card. The sample rewards on the home screen stay as examples.`
+        : 'The sheet closed without storing offers. Open the bank again and tap Sync Offers.',
+    );
   };
 
   const isSearching = searching || localSearching;

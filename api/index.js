@@ -5,7 +5,6 @@
 import express from 'express';
 import cors from 'cors';
 import searchRoutes from './routes/search.js';
-import offersRoutes from './routes/offers.js';
 import debugRoutes from './routes/debug.js';
 
 const app = express();
@@ -24,7 +23,6 @@ app.use((req, res, next) => {
 
 // Routes
 app.use('/api/search', searchRoutes);
-app.use('/api/offers', offersRoutes);
 app.use('/api/debug', debugRoutes);
 
 // Health check

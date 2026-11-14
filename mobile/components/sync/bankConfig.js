@@ -22,8 +22,6 @@ export const BANK_CONFIG = {
     color: '#1a3a6b',
     offersPaths: ['/cardmember-offers', 'merchantOffers'],
     loginPaths: ['/sign-in', '/logon', '/login', '/sso', '/identify', '/challenge'],
-    gridSelector: '[data-testid="grid-items-container"]',
-    captureMaxBytes: 200000,
     useCardsDetectedAsOffersSignal: true,
   },
   amex: {
@@ -43,9 +41,6 @@ export const BANK_CONFIG = {
     enrolledPath: 'global.americanexpress.com/offers/enrolled',
     offersPaths: ['global.americanexpress.com/offers'],
     loginPaths: ['/account/login', '/login', '/sign-in', '/identity', '/auth', '/challenge', 'two-step-verification'],
-    // Real offer rows are direct DIV children of this container
-    gridSelector: '[data-testid="listViewContainer"]',
-    captureMaxBytes: 500000,
     useAmexCardSwitcher: true,
   },
 };

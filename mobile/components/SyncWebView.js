@@ -30,7 +30,7 @@ import { saveCardSnapshot } from '../lib/offerStore.js';
 import { colors, radii } from '../shared/theme.js';
 
 import { BANK_CONFIG }                                    from './sync/bankConfig.js';
-import { DETECT_CARDS_JS, buildSwitchCardJs, buildCaptureOffersJs } from './sync/chaseSync.js';
+import { DETECT_CARDS_JS, buildPageStateJs, buildListCardsJs, buildSwitchCardJs, buildCaptureOffersJs, nextChaseCardPosition, mergeDetectedCards } from './sync/chaseSync.js';
 import {
   AMEX_OPEN_AND_DETECT_JS,
   buildAmexSwitchCardJs,
@@ -38,7 +38,7 @@ import {
   buildAmexClearFiltersJs,
   amexHandleLoadEnd,
 } from './sync/amexSync.js';
-import { parseCardLabel }                                 from './sync/captureJs.js';
+import { parseCardLabel }                                 from './sync/cardLabel.js';
 
 const SWITCH_TIMEOUT_MS    = 3500;
 const POST_SWITCH_DELAY_MS = 2500;
@@ -56,6 +56,7 @@ export default function SyncWebView({ visible, bank, onClose, onSuccess }) {
   const switchRetriesRef    = useRef(0);
   const syncedCountRef      = useRef(0);
   const captureArmed        = useRef(false);
+  const syncStartedRef      = useRef(false);
   const syncPhaseRef        = useRef('eligible');
   const pendingCardLabelRef = useRef(null);
 
@@ -64,6 +65,7 @@ export default function SyncWebView({ visible, bank, onClose, onSuccess }) {
   const [syncStarted, setSyncStarted]       = useState(false);
   const [pageLoaded, setPageLoaded]         = useState(false);
   const [onOffersPage, setOnOffersPage]     = useState(false);
+  const [onLoginPage, setOnLoginPage]       = useState(false);
   const [amexCardsReady, setAmexCardsReady] = useState(false);
   const [currentCard, setCurrentCard]       = useState(null);
   const [currentUrl, setCurrentUrl]         = useState('');
@@ -84,6 +86,7 @@ export default function SyncWebView({ visible, bank, onClose, onSuccess }) {
       switchRetriesRef.current    = 0;
       syncedCountRef.current      = 0;
       captureArmed.current        = false;
+      syncStartedRef.current      = false;
       syncPhaseRef.current        = 'eligible';
       pendingCardLabelRef.current = null;
       setCurrentCard(null);
@@ -93,6 +96,7 @@ export default function SyncWebView({ visible, bank, onClose, onSuccess }) {
       setSyncStarted(false);
       setPageLoaded(false);
       setOnOffersPage(false);
+      setOnLoginPage(false);
       setAmexCardsReady(false);
       setCardCount(0);
       setCardIndexUi(0);
@@ -126,13 +130,15 @@ export default function SyncWebView({ visible, bank, onClose, onSuccess }) {
     if (!navState.url) return;
     setCurrentUrl(navState.url);
     if (config.useAmexCardSwitcher) return;
-    setPageLoaded(false);
-    setOnOffersPage(false);
-    if (!config.useCardsDetectedAsOffersSignal) {
-      const url      = navState.url.toLowerCase();
-      const onLogin  = (config.loginPaths  || []).some(p => url.includes(p.toLowerCase()));
-      const onOffers = !onLogin && (config.offersPaths || []).some(p => url.includes(p.toLowerCase()));
+    const url      = navState.url.toLowerCase();
+    const onLogin  = (config.loginPaths  || []).some(p => url.includes(p.toLowerCase()));
+    const onOffers = !onLogin && (config.offersPaths || []).some(p => url.includes(p.toLowerCase()));
+    if (bank === 'chase') {
+      webViewRef.current?.injectJavaScript(buildPageStateJs(config.loginPaths, config.offersPaths));
+    }
+    if (onOffers || onLogin || !config.useCardsDetectedAsOffersSignal) {
       setOnOffersPage(onOffers);
+      setOnLoginPage(onLogin && !onOffers);
     }
   };
 
@@ -141,6 +147,7 @@ export default function SyncWebView({ visible, bank, onClose, onSuccess }) {
     setPageLoaded(true);
 
     if (bank === 'chase') {
+      webViewRef.current?.injectJavaScript(buildPageStateJs(config.loginPaths, config.offersPaths));
       webViewRef.current?.injectJavaScript(DETECT_CARDS_JS);
       return;
     }
@@ -168,10 +175,13 @@ export default function SyncWebView({ visible, bank, onClose, onSuccess }) {
 
   const handleSyncPress = () => {
     setSyncStarted(true);
+    syncStartedRef.current = true;
 
     if (bank === 'amex') {
       const cards = cardOptionsRef.current;
       if (cards.length === 0) {
+        syncStartedRef.current = false;
+        setSyncStarted(false);
         Alert.alert('No cards found', 'Please wait for the page to fully load.');
         return;
       }
@@ -182,8 +192,7 @@ export default function SyncWebView({ visible, bank, onClose, onSuccess }) {
       return;
     }
 
-    captureArmed.current = true;
-    webViewRef.current?.injectJavaScript(buildCaptureOffersJs());
+    webViewRef.current?.injectJavaScript(buildListCardsJs());
   };
 
   const handleCaptureResult = async ({ payload, cardLabel, phase, capturedTestId, tileCount }) => {
@@ -252,14 +261,13 @@ export default function SyncWebView({ visible, bank, onClose, onSuccess }) {
 
     syncedCountRef.current += 1;
     const totalCards = cardOptionsRef.current.length;
-    if (syncedCountRef.current < totalCards) {
-      const nextPos = (cardIndexRef.current + 1) % totalCards;
+    const nextPos = nextChaseCardPosition(cardIndexRef.current, totalCards, syncedCountRef.current);
+    if (nextPos !== null) {
       cardIndexRef.current = nextPos;
       setCardIndexUi(nextPos);
       setSwitching(true);
       switchRetriesRef.current = 0;
-      cardsDiscovered.current  = false;
-      webViewRef.current?.injectJavaScript(buildSwitchCardJs(cardOptionsRef.current[nextPos].index, SWITCH_TIMEOUT_MS));
+      webViewRef.current?.injectJavaScript(buildSwitchCardJs(cardOptionsRef.current[nextPos].index, 8000));
     } else {
       const total = syncedCardsRef.current.reduce((sum, c) => sum + c.count, 0);
       onSuccess(total, syncedCardsRef.current);
@@ -271,10 +279,41 @@ export default function SyncWebView({ visible, bank, onClose, onSuccess }) {
     try {
       const data = JSON.parse(event.nativeEvent.data);
 
+      if (data.type === 'PAGE_STATE') {
+        setOnOffersPage(!!data.onOffers);
+        setOnLoginPage(!!data.onLogin && !data.onOffers);
+        return;
+      }
+
+      if (data.type === 'CARDS_LISTED') {
+        if (!syncStartedRef.current) return;
+        const cards = Array.isArray(data.cards) ? data.cards : [];
+        if (data.error || cards.length === 0) {
+          syncStartedRef.current = false;
+          captureArmed.current = false;
+          setSyncStarted(false);
+          setSyncing(false);
+          setSwitching(false);
+          Alert.alert('Could not read Chase cards', data.error || 'Open the offers page and try again. Nothing was changed.');
+          return;
+        }
+        cardOptionsRef.current = cards;
+        cardsDiscovered.current = true;
+        setCardCount(cards.length);
+        const activeIdx = cards.findIndex(card => card.selected || card.label === data.selectedLabel);
+        cardIndexRef.current = activeIdx >= 0 ? activeIdx : 0;
+        setCardIndexUi(cardIndexRef.current);
+        setCurrentCard(data.selectedLabel || cards[cardIndexRef.current].label);
+        captureArmed.current = true;
+        webViewRef.current?.injectJavaScript(buildCaptureOffersJs());
+        return;
+      }
+
       if (data.type === 'CARDS_DETECTED') {
         const hasCards = data.cards?.length > 0;
-        if (!cardsDiscovered.current && hasCards) {
-          cardOptionsRef.current  = data.cards;
+        const merged = mergeDetectedCards(cardOptionsRef.current, data.cards);
+        if (hasCards && merged !== cardOptionsRef.current) {
+          cardOptionsRef.current  = merged;
           cardsDiscovered.current = true;
           setCardCount(data.cards.length);
           const activeIdx = data.cards.findIndex(c => c.label === data.selectedLabel);
@@ -323,6 +362,8 @@ export default function SyncWebView({ visible, bank, onClose, onSuccess }) {
       }
 
       if (data.type === 'CARD_SWITCH_ERROR') {
+        syncStartedRef.current = false;
+        setSyncStarted(false);
         setSwitching(false);
         captureArmed.current = false;
         webViewRef.current?.injectJavaScript(`window.__amexJsonCaptureArmed = false; true;`);
@@ -331,6 +372,8 @@ export default function SyncWebView({ visible, bank, onClose, onSuccess }) {
       }
 
       if (data.type === 'ERROR') {
+        syncStartedRef.current = false;
+        setSyncStarted(false);
         captureArmed.current = false;
         webViewRef.current?.injectJavaScript(`window.__amexJsonCaptureArmed = false; true;`);
         Alert.alert('Capture Error', data.message);
@@ -361,6 +404,7 @@ export default function SyncWebView({ visible, bank, onClose, onSuccess }) {
       if (data.type !== 'CAPTURE_OFFERS' || bank !== 'chase' || !captureArmed.current) return;
       captureArmed.current = false;
       if (!data.gridFound) {
+        syncStartedRef.current = false;
         setSyncStarted(false);
         setSyncing(false);
         setSwitching(false);
@@ -376,6 +420,7 @@ export default function SyncWebView({ visible, bank, onClose, onSuccess }) {
 
     } catch (err) {
       captureArmed.current        = false;
+      syncStartedRef.current      = false;
       pendingCardLabelRef.current = null;
       webViewRef.current?.injectJavaScript(`window.__amexJsonCaptureArmed = false; true;`);
       setSyncStarted(false);
@@ -396,6 +441,21 @@ export default function SyncWebView({ visible, bank, onClose, onSuccess }) {
       ? `🔄 Syncing ${phaseLabel} offers — ${cardName || 'card'} (${cardIndexUi + 1} of ${totalCards})...`
       : `⚡ Processing...`;
 
+  const renderSyncButton = () => {
+    const ready = pageLoaded && (bank === 'amex' ? amexCardsReady : true);
+    return (
+      <TouchableOpacity
+        style={[s.syncBtn, !ready && s.syncBtnDisabled]}
+        onPress={ready ? handleSyncPress : undefined}
+        disabled={!ready}
+      >
+        <Text style={s.syncBtnText}>
+          {ready ? 'Sync Offers' : (bank === 'amex' && pageLoaded ? 'Detecting cards...' : 'Loading...')}
+        </Text>
+      </TouchableOpacity>
+    );
+  };
+
   const renderFooter = () => {
     if (syncStarted) {
       return (
@@ -405,19 +465,8 @@ export default function SyncWebView({ visible, bank, onClose, onSuccess }) {
         </View>
       );
     }
-    if (onOffersPage) {
-      const ready = pageLoaded && (bank === 'amex' ? amexCardsReady : true);
-      return (
-        <TouchableOpacity
-          style={[s.syncBtn, !ready && s.syncBtnDisabled]}
-          onPress={ready ? handleSyncPress : undefined}
-          disabled={!ready}
-        >
-          <Text style={s.syncBtnText}>
-            {ready ? 'Sync Offers' : (bank === 'amex' && pageLoaded ? 'Detecting cards...' : 'Loading...')}
-          </Text>
-        </TouchableOpacity>
-      );
+    if (onOffersPage || (bank === 'chase' && pageLoaded && !onLoginPage)) {
+      return renderSyncButton();
     }
     if (!pageLoaded) return null;
     return (
@@ -447,6 +496,7 @@ export default function SyncWebView({ visible, bank, onClose, onSuccess }) {
             source={{ uri: config.url }}
             onMessage={handleMessage}
             onNavigationStateChange={handleNavigationStateChange}
+            onLoadStart={() => setPageLoaded(false)}
             onLoadEnd={handleLoadEnd}
             style={s.webview}
             incognito={false}

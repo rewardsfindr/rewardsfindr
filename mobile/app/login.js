@@ -4,36 +4,58 @@
 // Apple and Email buttons are UI placeholders for future implementation.
 // On Google success, _layout.js auth listener redirects to home.
 // ─────────────────────────────────────────────
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import {
   View, Text, TouchableOpacity, ActivityIndicator,
   StyleSheet, SafeAreaView, Platform,
 } from 'react-native';
 import { Stack } from 'expo-router';
 import { GoogleSignin, statusCodes } from '@react-native-google-signin/google-signin';
-import { GoogleAuthProvider, signInWithCredential } from 'firebase/auth';
+import { GoogleAuthProvider, getRedirectResult, signInWithCredential, signInWithPopup, signInWithRedirect } from 'firebase/auth';
 import { getAuthInstance } from '../lib/firebaseClient.js';
 import { colors, radii, shadow } from '../shared/theme.js';
 
-GoogleSignin.configure({
-  webClientId: process.env.EXPO_PUBLIC_GOOGLE_CLIENT_ID,
-  scopes: ['profile', 'email'],
-  offlineAccess: false,
-});
+if (Platform.OS !== 'web') {
+  GoogleSignin.configure({
+    webClientId: process.env.EXPO_PUBLIC_GOOGLE_CLIENT_ID,
+    scopes: ['profile', 'email'],
+    offlineAccess: false,
+  });
+}
 
 export default function LoginScreen() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
 
+  useEffect(() => {
+    if (Platform.OS !== 'web') return;
+    getRedirectResult(getAuthInstance()).catch((err) => {
+      if (err?.code === 'auth/popup-closed-by-user' || err?.code === 'auth/cancelled-popup-request') return;
+      setError(`Sign-in failed: ${err.message}`);
+      setLoading(false);
+    });
+  }, []);
+
   const handleGoogleSignIn = async () => {
     setError(null);
     setLoading(true);
     try {
+      const auth = getAuthInstance();
+      if (Platform.OS === 'web') {
+        const provider = new GoogleAuthProvider();
+        provider.setCustomParameters({ prompt: 'select_account' });
+        try {
+          await signInWithPopup(auth, provider);
+        } catch (popupError) {
+          if (popupError?.code !== 'auth/popup-blocked') throw popupError;
+          await signInWithRedirect(auth, provider);
+        }
+        return;
+      }
       await GoogleSignin.hasPlayServices({ showPlayServicesUpdateDialog: true });
       const userInfo = await GoogleSignin.signIn();
       const idToken = userInfo.data?.idToken ?? userInfo.idToken;
       if (!idToken) throw new Error('No idToken returned from Google Sign-In');
-      const auth = getAuthInstance();
       const credential = GoogleAuthProvider.credential(idToken);
       await signInWithCredential(auth, credential);
     } catch (err) {
@@ -56,7 +78,9 @@ export default function LoginScreen() {
   const handleAppleSignIn = () => {};
 
   // TODO: wire up Email/Password auth
-  const handleEmailSignIn = () => {};
+  const handleEmailSignIn = () => {
+    setError('Email sign-in is not available yet. Continue with Google.');
+  };
 
   return (
     <SafeAreaView style={s.safe}>
@@ -79,6 +103,7 @@ export default function LoginScreen() {
 
         {/* Google */}
         <TouchableOpacity
+          accessibilityRole="button"
           style={[s.authBtn, loading && s.disabled]}
           onPress={handleGoogleSignIn}
           disabled={loading}
