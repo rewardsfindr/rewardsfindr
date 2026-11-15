@@ -31,6 +31,9 @@ A pull request is merged only after `/reviewer` writes `Approved`. The reviewer 
 - Offers for a signed-in user live on the phone, keyed by that user's id. Firebase is for sign-in.
 - A sync replaces one card. Amex also replaces one phase, eligible or enrolled. The id is the bank's offer id.
 - A read that fails does not wipe the card already saved.
+- A partial Chase response must not wipe a saved card.
 - The logged-in bank page is not uploaded. Chase sends structured tiles. Amex sends the offers payload, parsed into the same snapshot.
 - An offer with no expiry stays searchable and is not "expiring soon."
+- Search passes only the store name. The results screen reads offers from the phone. The catalog is not placed in a route param.
+- A message shown to the user does not include a bank option id, account id, cookie, session token, or response body.
 - One pull request per slice.
