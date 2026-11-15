@@ -27,12 +27,16 @@ const BANK_COLORS = {
 
 const formatReward = (amount, type) => {
   if (!amount) return 'Offer';
-  return type === 'percent' ? `${amount}%` : `$${amount}`;
+  if (type === 'percent') return `${amount}%`;
+  if (type === 'points') return `${amount}X`;
+  return `$${amount}`;
 };
 
 const formatRewardLabel = (amount, type) => {
   if (!amount) return 'available';
-  return type === 'percent' ? 'back' : 'cash back';
+  if (type === 'points') return 'points';
+  if (type === 'percent') return 'back';
+  return 'cash back';
 };
 
 const formatDesc = (offer) => {
