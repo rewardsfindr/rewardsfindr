@@ -12,7 +12,11 @@ import { Stack, useRouter } from 'expo-router';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { getAuthInstance } from '../lib/firebaseClient.js';
 import { setOnboardingComplete } from '../lib/onboardingStore.js';
-import { CONNECT_BANK_COPY, buildSyncedBanksUpdate } from '../lib/onboardingContent.js';
+import {
+  CONNECT_BANK_COPY,
+  buildSyncedBanksUpdate,
+  formatConnectSyncMessage,
+} from '../lib/onboardingContent.js';
 import SyncWebView from '../components/SyncWebView.js';
 import { colors, radii, shadow } from '../shared/theme.js';
 
@@ -38,28 +42,33 @@ export default function ConnectBankScreen() {
   const persistSyncedBank = async (bank, cardResults) => {
     const uid = getAuthInstance().currentUser?.uid;
     if (!uid || !bank) return;
-    try {
-      const key = getSyncKey(uid);
-      const raw = await AsyncStorage.getItem(key);
-      const prev = raw ? JSON.parse(raw) : {};
-      const next = buildSyncedBanksUpdate(prev, bank, cardResults);
-      await AsyncStorage.setItem(key, JSON.stringify(next));
-    } catch {
-      // Home can still sync later
-    }
+    const key = getSyncKey(uid);
+    const raw = await AsyncStorage.getItem(key);
+    const prev = raw ? JSON.parse(raw) : {};
+    const next = buildSyncedBanksUpdate(prev, bank, cardResults);
+    await AsyncStorage.setItem(key, JSON.stringify(next));
   };
 
-  const handleSyncSuccess = (totalSynced, cardResults) => {
-    persistSyncedBank(syncBank, cardResults);
-    const lines = (cardResults || [])
-      .map((card) => `${card.cardName}: ${card.count} offers`)
-      .join('\n');
+  const handleSyncSuccess = async (totalSynced, cardResults) => {
+    const bank = syncBank;
+    try {
+      await persistSyncedBank(bank, cardResults);
+    } catch {
+      // Home can still sync later; do not block Continue
+    }
+    const lines = formatConnectSyncMessage(cardResults);
     Alert.alert(
       totalSynced > 0 ? 'Offers saved on this phone' : 'No offers saved',
       totalSynced > 0
         ? `${lines}\n\nYou’re ready to search any store.`
         : 'You can sync again anytime from Home.',
-      [{ text: 'Continue', onPress: () => { setSyncBank(null); finish(); } }],
+      [{
+        text: 'Continue',
+        onPress: () => {
+          setSyncBank(null);
+          finish();
+        },
+      }],
     );
   };
 

@@ -4,6 +4,7 @@ import {
   CONNECT_BANK_COPY,
   ONBOARDING_PAGES,
   buildSyncedBanksUpdate,
+  formatConnectSyncMessage,
   getOnboardingCta,
   nextOnboardingIndex,
 } from './onboardingContent.js';
@@ -32,14 +33,42 @@ test('nextOnboardingIndex advances then finishes', () => {
 });
 
 test('buildSyncedBanksUpdate merges bank snapshot metadata', () => {
-  const before = Date.now();
   const next = buildSyncedBanksUpdate(
     { chase: { cards: 1, lastSyncedAt: 1 } },
     'amex',
-    [{ cardName: 'Blue Cash' }, { cardName: 'Gold' }],
+    [
+      { cardName: 'Blue Cash', count: 10, phase: 'eligible' },
+      { cardName: 'Gold', count: 4, phase: 'eligible' },
+    ],
+    12345,
   );
   assert.equal(next.chase.cards, 1);
   assert.equal(next.amex.cards, 2);
-  assert.ok(next.amex.lastSyncedAt >= before);
-  assert.equal(buildSyncedBanksUpdate(null, 'chase', null).chase.cards, 0);
+  assert.equal(next.amex.lastSyncedAt, 12345);
+  assert.equal(buildSyncedBanksUpdate(null, 'chase', null, 1).chase.cards, 0);
+});
+
+test('buildSyncedBanksUpdate collapses Amex eligible and enrolled into one card', () => {
+  const next = buildSyncedBanksUpdate(
+    {},
+    'amex',
+    [
+      { cardName: 'Blue Cash', count: 88, phase: 'eligible' },
+      { cardName: 'Blue Cash', count: 3, phase: 'enrolled' },
+      { cardName: 'Platinum', count: 95, phase: 'eligible' },
+    ],
+    99,
+  );
+  assert.equal(next.amex.cards, 2);
+  assert.equal(next.amex.lastSyncedAt, 99);
+});
+
+test('formatConnectSyncMessage matches Home summary lines for two phases', () => {
+  assert.equal(
+    formatConnectSyncMessage([
+      { cardName: 'Blue Cash', count: 88, phase: 'eligible' },
+      { cardName: 'Blue Cash', count: 3, phase: 'enrolled' },
+    ]),
+    'Blue Cash: 91 offers',
+  );
 });

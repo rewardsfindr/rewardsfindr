@@ -1,6 +1,7 @@
 // ─────────────────────────────────────────────
 // FIRST-RUN ONBOARDING COPY (pure — unit tested)
 // ─────────────────────────────────────────────
+import { summarizeSyncCards } from './savedOffers.js';
 
 export const ONBOARDING_PAGES = [
   {
@@ -45,11 +46,19 @@ export function nextOnboardingIndex(index, pages = ONBOARDING_PAGES) {
   return index + 1;
 }
 
-export function buildSyncedBanksUpdate(prev, bank, cardResults) {
+/**
+ * Persist synced-bank metadata using the same Amex phase collapse as Home.
+ */
+export function buildSyncedBanksUpdate(prev, bank, cardResults, now = Date.now()) {
+  const summary = summarizeSyncCards(cardResults);
   const next = { ...(prev || {}) };
   next[bank] = {
-    cards: Array.isArray(cardResults) ? cardResults.length : 0,
-    lastSyncedAt: Date.now(),
+    cards: summary.cardCount,
+    lastSyncedAt: now,
   };
   return next;
+}
+
+export function formatConnectSyncMessage(cardResults) {
+  return summarizeSyncCards(cardResults).lines;
 }

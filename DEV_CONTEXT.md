@@ -1,8 +1,41 @@
-# RewardsFindr — Dev Context (Mar 12, 2026)
+# RewardsFindr — Dev Context
+
+Handoff updated Nov 14, 2026. The March sections below are historical. Start from this handoff.
+
+## Where we left off (Nov 14, 2026)
+
+Offers for Chase and Amex are stored only on the phone, keyed by Firebase uid (`rewardsfindr_offers_v1_{uid}`). Sync does not store bank HTML, credentials, account ids, cookies, or session tokens. A failed or partial read must not wipe a card. `.cursor/agent-workflow.md` and `.cursor/agents/` may be committed. Do not commit lockfile noise, screenshots, `.env`, or line-ending-only `google-services.json`. Do not change `main` directly. Work on a branch, then open a PR. Merge only after `/reviewer` writes `Approved`. The reviewer checks the diff and the PR description against `.cursor/agents/review-guidelines.md`.
+
+### Chase (on main, PR #62)
+- Sync reads the `customer-offers` response. One complete response is one card. `partial === true` refuses the snapshot. FIGG and CDLX offer ids are both saved.
+- Sync does not activate offers. Result cards show Activate for an unactivated Chase offer and Activated when Chase already marked it added. Activate opens `https://secure.chase.com/web/auth/dashboard#/dashboard/merchantOffers/offer-activated/{bankOfferId}` in a signed-in Chase browser. That route also adds the offer.
+- The Sync Offers button appears only when the offers page is ready. After login, the sheet opens the offers page once. There is no "Go to Offers" button.
+
+### Amex (this session)
+- Reward text is parsed into percent, fixed cash back, or Membership Rewards points, including the spend minimum. Search can rank those offers. Points render as `NX` on the result card.
+- Eligible (`/offers`) and enrolled (`/offers/enrolled`) are separate passes. Enrolled is checked first because that path contains the eligible path.
+- Repeated `ReadOffersHubPresentation` responses for one card are debounced: keep the fullest REPLACE or UPDATE payload and save it once. A second pass for the same card and phase replaces the earlier count. A card already visited in that phase is not saved again.
+- The card menu is not clicked when it is already open. A missing card reports "Could not open the next Amex card. Nothing else was changed." and does not include the option id.
+- If a switch produces no new offers response within 5 seconds, the walk continues. That can skip a card's enrolled offers.
+- The success summary is one line per card: `Card name: N offers`. The home badge counts unique cards.
+- Search passes only the store name to the results screen. The results screen reads matches from the phone. A known expiry renders as `Expires Mon D, YYYY`. An offer with no date shows no expiry line.
+
+### Tests
+- `mobile`: `npm test` covers Chase sync, Amex menu/capture, search route params, expiry text, and the sync summary.
+- `api`: `npm test` covers Chase snapshots, freshness, the device catalog, and the Amex parser.
+
+### Next session
+1. The enrolled pass can still skip a card when Amex does not send a new offers response after the switch. The summary then counts only the eligible offers for that card.
+2. `cashbackType: 'points'` displays as `5X`. A flat bonus such as "2,000 Membership Rewards points" should not look like a rate.
+3. The WebView cookie jar is still shared across RewardsFindr accounts. Offer lists are per uid.
+4. The Activate link was not verified by a tap on the phone. It needs a signed-in Chase browser.
+5. Capital One is not started.
+
+---
 
 ## Project Overview
 - **App name:** RewardsFindr
-- **Purpose:** Rewards credit card finder — mobile app + Chrome extension that auto-syncs bank offers and recommends best card at any store
+- **Purpose:** Rewards credit card finder — mobile app that syncs bank offers on the phone and recommends the best card at a store
 - **Developer:** Rakesh Balasubramani
 - **Location:** San Diego, CA
 - **Live domain:** rewardsfindr.com
@@ -245,9 +278,11 @@ The mobile app uses an **in-app WebView** (not a Chrome extension) to sync bank 
 
 ---
 
-## Next Steps (Priority Order)
+## Next Steps
 
-### Immediate
+The current list is in **Where we left off** at the top of this file. The March checklist below is historical and is not the queue for the next session.
+
+### Historical (Mar 12, 2026)
 1. ✅ Node.js API backend — Merged
 2. ✅ Mobile Firebase + API client — Merged
 3. ✅ Repo splits (web + extension) — Done
@@ -304,5 +339,4 @@ npm start          # production
 ---
 
 ## How to Resume
-Paste this file into a new chat and say:
-**"Here is my DEV_CONTEXT.md, continue from Next Steps"**
+Read **Where we left off** at the top of this file. Do not follow the March sync flow or the March next-step list. Those describe the old server HTML parse path.

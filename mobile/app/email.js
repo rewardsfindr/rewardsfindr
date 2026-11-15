@@ -222,6 +222,17 @@ export default function EmailAuthScreen() {
                   <Text style={s.primaryBtnText}>Sign in</Text>
                 )}
               </TouchableOpacity>
+              <TouchableOpacity
+                onPress={() => {
+                  setError(null);
+                  setPassword('');
+                  setConfirm('');
+                  setStep(EMAIL_STEPS.SIGN_UP);
+                }}
+                style={s.altWrap}
+              >
+                <Text style={s.altText}>New here? Create account</Text>
+              </TouchableOpacity>
             </>
           )}
 
@@ -262,6 +273,17 @@ export default function EmailAuthScreen() {
                 ) : (
                   <Text style={s.primaryBtnText}>Create account</Text>
                 )}
+              </TouchableOpacity>
+              <TouchableOpacity
+                onPress={() => {
+                  setError(null);
+                  setPassword('');
+                  setConfirm('');
+                  setStep(EMAIL_STEPS.SIGN_IN);
+                }}
+                style={s.altWrap}
+              >
+                <Text style={s.altText}>Already have an account? Sign in</Text>
               </TouchableOpacity>
             </>
           )}
@@ -339,6 +361,8 @@ const s = StyleSheet.create({
   },
   primaryBtnText: { color: colors.textOnDark, fontSize: 16, fontWeight: '700' },
   link:      { color: colors.accent, fontSize: 14, fontWeight: '600', marginBottom: 12 },
+  altWrap:   { alignItems: 'center', marginTop: 20 },
+  altText:   { color: colors.accent, fontSize: 14, fontWeight: '600' },
   disabled:  { opacity: 0.5 },
   errorBox:  {
     backgroundColor: colors.errorBg,

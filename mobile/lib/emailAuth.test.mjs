@@ -52,19 +52,24 @@ test('mapAuthError maps known Firebase codes', () => {
   assert.equal(mapAuthError({}), 'Something went wrong. Please try again.');
 });
 
-test('resolveEmailContinue routes password, social, or new users', () => {
+test('resolveEmailContinue trusts password/social signals but treats empty as sign-in', () => {
+  // Enumeration protection returns [] for existing and new accounts — never assume sign-up
+  assert.deepEqual(resolveEmailContinue([]), { step: EMAIL_STEPS.SIGN_IN });
+  assert.deepEqual(resolveEmailContinue(null), { step: EMAIL_STEPS.SIGN_IN });
   assert.deepEqual(resolveEmailContinue(['password']), { step: EMAIL_STEPS.SIGN_IN });
+  assert.deepEqual(resolveEmailContinue(['password', 'google.com']), { step: EMAIL_STEPS.SIGN_IN });
   assert.deepEqual(resolveEmailContinue(['google.com']), {
     error: 'This email uses Google or Apple sign-in. Go back and continue with that provider.',
   });
-  assert.deepEqual(resolveEmailContinue([]), { step: EMAIL_STEPS.SIGN_UP });
-  assert.deepEqual(resolveEmailContinue(null), { step: EMAIL_STEPS.SIGN_UP });
+  assert.deepEqual(resolveEmailContinue(['apple.com']), {
+    error: 'This email uses Google or Apple sign-in. Go back and continue with that provider.',
+  });
 });
 
-test('resolveEmailBack exits or returns prior step', () => {
+test('resolveEmailBack keeps forgot and sign-up reachable from sign-in', () => {
   assert.deepEqual(resolveEmailBack(EMAIL_STEPS.EMAIL), { exit: true });
   assert.deepEqual(resolveEmailBack(EMAIL_STEPS.FORGOT), { step: EMAIL_STEPS.SIGN_IN });
   assert.deepEqual(resolveEmailBack(EMAIL_STEPS.FORGOT_SENT), { step: EMAIL_STEPS.SIGN_IN });
-  assert.deepEqual(resolveEmailBack(EMAIL_STEPS.SIGN_UP), { step: EMAIL_STEPS.EMAIL });
+  assert.deepEqual(resolveEmailBack(EMAIL_STEPS.SIGN_UP), { step: EMAIL_STEPS.SIGN_IN });
   assert.deepEqual(resolveEmailBack(EMAIL_STEPS.SIGN_IN), { step: EMAIL_STEPS.EMAIL });
 });

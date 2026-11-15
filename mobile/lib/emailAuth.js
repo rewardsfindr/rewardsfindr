@@ -47,7 +47,12 @@ export function mapAuthError(err) {
 }
 
 /**
- * Decide next email-flow step from Firebase fetchSignInMethodsForEmail result.
+ * Decide next email-flow step from Firebase fetchSignInMethodsForEmail.
+ *
+ * Firebase email enumeration protection returns [] for both new and existing
+ * accounts, so an empty list must NOT mean "sign up". Only trust positive
+ * signals; otherwise land on sign-in (create-account is linked from there).
+ *
  * @returns {{ step?: string, error?: string }}
  */
 export function resolveEmailContinue(methods) {
@@ -60,12 +65,16 @@ export function resolveEmailContinue(methods) {
       error: 'This email uses Google or Apple sign-in. Go back and continue with that provider.',
     };
   }
-  return { step: EMAIL_STEPS.SIGN_UP };
+  // Empty (incl. enumeration protection) → sign-in; users create accounts via link
+  return { step: EMAIL_STEPS.SIGN_IN };
 }
 
 export function resolveEmailBack(step) {
   if (step === EMAIL_STEPS.EMAIL) return { exit: true };
   if (step === EMAIL_STEPS.FORGOT || step === EMAIL_STEPS.FORGOT_SENT) {
+    return { step: EMAIL_STEPS.SIGN_IN };
+  }
+  if (step === EMAIL_STEPS.SIGN_UP) {
     return { step: EMAIL_STEPS.SIGN_IN };
   }
   return { step: EMAIL_STEPS.EMAIL };

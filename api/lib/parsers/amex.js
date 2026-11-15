@@ -14,6 +14,40 @@ function parseExpiryDate(expirationText) {
   return isNaN(parsed.getTime()) ? null : parsed.toISOString();
 }
 
+export function parseAmexValue(text) {
+  const plain = String(text || '').replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim();
+  const spend = plain.match(/spend\s+\$(\d+(?:\.\d+)?)/i);
+  const orMore = plain.match(/\$(\d+(?:\.\d+)?)\s+or more/i);
+  const minimumSpend = spend ? parseFloat(spend[1]) : (orMore ? parseFloat(orMore[1]) : 0);
+
+  const percent = plain.match(/(\d+(?:\.\d+)?)\s*%/);
+  if (percent) {
+    return { cashbackAmount: parseFloat(percent[1]), cashbackType: 'percent', minimumSpend };
+  }
+
+  const earned = plain.match(/(?:earn|get|receive)\s+\$(\d+(?:\.\d+)?)/i)
+    || plain.match(/\$(\d+(?:\.\d+)?)\s+back\b/i);
+  if (earned) {
+    const cashbackAmount = parseFloat(earned[1]);
+    return {
+      cashbackAmount,
+      cashbackType: 'fixed',
+      minimumSpend: minimumSpend === cashbackAmount ? 0 : minimumSpend,
+    };
+  }
+
+  const points = plain.match(/(\d[\d,]*(?:\.\d+)?)\s*x?\s*membership rewards/i);
+  if (points) {
+    return {
+      cashbackAmount: parseFloat(points[1].replace(/,/g, '')),
+      cashbackType: 'points',
+      minimumSpend: 0,
+    };
+  }
+
+  return { cashbackAmount: 0, cashbackType: 'percent', minimumSpend: 0 };
+}
+
 function mapOffer(offer, isActivated) {
   if (offer.offerType !== 'MERCHANT') return null;
 
@@ -21,6 +55,7 @@ function mapOffer(offer, isActivated) {
   if (!merchantName) return null;
 
   const offerDescription = offer.shortDescription || '';
+  const reward = parseAmexValue(offerDescription);
   const category = (offer.applicableCategories?.[0]?.optionType || 'OTHER').toLowerCase();
   const expiryDate = parseExpiryDate(offer.expiration?.text);
   const activated = isActivated ?? (offer.enrollmentDetails?.status === 'ENROLLED');
@@ -28,9 +63,9 @@ function mapOffer(offer, isActivated) {
   return {
     merchantName,
     offerDescription,
-    cashbackAmount: null,
-    cashbackType:   null,
-    minimumSpend:   null,
+    cashbackAmount: reward.cashbackAmount,
+    cashbackType:   reward.cashbackType,
+    minimumSpend:   reward.minimumSpend,
     category,
     expiryDate,
     isActivated:    activated,
