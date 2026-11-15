@@ -43,4 +43,12 @@ export const BANK_CONFIG = {
     loginPaths: ['/account/login', '/login', '/sign-in', '/identity', '/auth', '/challenge', 'two-step-verification'],
     useAmexCardSwitcher: true,
   },
+  wells_fargo: {
+    url: 'https://web.secure.wellsfargo.com/auth/deals-portal',
+    offersUrl: 'https://web.secure.wellsfargo.com/auth/deals-portal',
+    label: 'Wells Fargo Offers',
+    color: '#c0392b',
+    offersPaths: ['/auth/deals-portal'],
+    loginPaths: [],
+  },
 };

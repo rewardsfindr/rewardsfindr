@@ -109,10 +109,150 @@ export function amexRecords({ cardName, cardLast4, json, phase, now = new Date()
   return records;
 }
 
+const WELLS_CARD_NAME = 'Wells Fargo';
+
+function refuseSnapshot(message) {
+  const error = new Error(message);
+  error.code = 'SNAPSHOT_REFUSED';
+  throw error;
+}
+
+function wellsDealsReady(json) {
+  if (!json || typeof json !== 'object' || Array.isArray(json)) return false;
+  const available = json.availableDeals;
+  if (!available || typeof available !== 'object' || Array.isArray(available)) return false;
+  if (!Array.isArray(available.cardlyticsEligibleDeals)) return false;
+  if (available.activatedDeals != null && !Array.isArray(available.activatedDeals)) return false;
+  if (json.earnedDeals != null) {
+    if (typeof json.earnedDeals !== 'object' || Array.isArray(json.earnedDeals)) return false;
+    if (json.earnedDeals.deals != null && !Array.isArray(json.earnedDeals.deals)) return false;
+  }
+  return true;
+}
+
+function mapWellsReward(details) {
+  const amountType = String(details?.amountType ?? '').trim();
+  const raw = details?.dealAmount;
+  let amount = NaN;
+  if (typeof raw === 'number') amount = raw;
+  else if (raw != null && String(raw).trim() !== '') {
+    amount = parseFloat(String(raw).replace(/[$,\s]/g, ''));
+  }
+  const hasAmount = Number.isFinite(amount);
+  const offerDescription = String(details?.shortDescription ?? '').trim();
+  return {
+    hasReward: hasAmount || offerDescription !== '',
+    cashbackAmount: hasAmount ? amount : 0,
+    cashbackType: amountType === '$' ? 'fixed' : 'percent',
+    offerDescription,
+  };
+}
+
+function mapWellsExpiry(value) {
+  const unknown = { expiryDate: null, expiryPrecision: 'unknown', expiresAt: null };
+  if (value == null) return unknown;
+  const text = String(value).trim();
+  if (!text) return unknown;
+
+  if (/^\d{4}-\d{2}-\d{2}/.test(text)) {
+    const parsed = new Date(text);
+    if (!Number.isNaN(parsed.getTime())) {
+      return {
+        expiryDate: parsed.toISOString(),
+        expiryPrecision: 'date',
+        expiresAt: parsed.getTime(),
+      };
+    }
+  }
+
+  const match = text.match(/^(\d{1,2})\/(\d{1,2})\/(\d{2,4})$/);
+  if (match) {
+    const month = Number(match[1]);
+    const day = Number(match[2]);
+    let year = Number(match[3]);
+    if (year < 100) year += 2000;
+    const expiresAt = Date.UTC(year, month - 1, day);
+    const parsed = new Date(expiresAt);
+    if (!Number.isNaN(parsed.getTime()) && parsed.getUTCMonth() === month - 1 && parsed.getUTCDate() === day) {
+      return {
+        expiryDate: parsed.toISOString(),
+        expiryPrecision: 'date',
+        expiresAt,
+      };
+    }
+  }
+
+  return unknown;
+}
+
+export function wellsFargoRecords({ json, now = new Date() }) {
+  if (!wellsDealsReady(json)) {
+    refuseSnapshot('Wells Fargo deals were not recognized. Nothing was changed.');
+  }
+
+  const eligible = json.availableDeals.cardlyticsEligibleDeals;
+  const activated = json.availableDeals.activatedDeals || [];
+  const earned = json.earnedDeals?.deals || [];
+  const seen = new Set();
+  const records = [];
+  let considered = 0;
+  let sawOfferId = false;
+
+  const take = (list, { forceActivated, requireReward }) => {
+    for (const item of list) {
+      considered += 1;
+      const details = item?.merchantDealDetails;
+      const bankOfferId = String(details?.merchantOfferId ?? '').trim();
+      if (bankOfferId) sawOfferId = true;
+      const reward = mapWellsReward(details);
+      if (requireReward && !reward.hasReward) continue;
+      const merchantName = String(details?.merchantName ?? '').trim();
+      if (!bankOfferId || !merchantName || seen.has(bankOfferId)) continue;
+      seen.add(bankOfferId);
+      const expiry = mapWellsExpiry(details?.expirationDate);
+      const offerToken = bankOfferId.replace(/[/\s]/g, '');
+      records.push({
+        id: `wells_fargo_${slug(WELLS_CARD_NAME)}_${offerToken}`.slice(0, 700),
+        bankOfferId,
+        userId: null,
+        merchantName,
+        merchantNameLower: merchantName.toLowerCase().trim(),
+        offerDescription: reward.offerDescription,
+        cashbackAmount: reward.cashbackAmount,
+        cashbackType: reward.cashbackType,
+        minimumSpend: 0,
+        category: 'other',
+        expiryDate: expiry.expiryDate,
+        expiryPrecision: expiry.expiryPrecision,
+        expiresAt: expiry.expiresAt,
+        isActivated: forceActivated ? true : item?.isActivated === true,
+        offerDeepLink: null,
+        bank: 'wells_fargo',
+        cardName: WELLS_CARD_NAME,
+        cardLast4: null,
+        phase: '',
+        syncedAt: now.toISOString(),
+      });
+    }
+  };
+
+  take(eligible, { forceActivated: false, requireReward: false });
+  take(activated, { forceActivated: true, requireReward: false });
+  take(earned, { forceActivated: true, requireReward: true });
+
+  if (considered > 0 && records.length === 0) {
+    refuseSnapshot(sawOfferId
+      ? 'Wells Fargo deals were incomplete. Nothing was changed.'
+      : 'Wells Fargo deals had no offer id. Nothing was changed.');
+  }
+  return records;
+}
+
 export function buildSnapshotRecords(input) {
   if (input.bank === 'chase') return chaseRecords(input);
   if (input.bank === 'amex') return amexRecords(input);
-  throw new Error('bank must be chase or amex');
+  if (input.bank === 'wells_fargo') return wellsFargoRecords(input);
+  throw new Error('bank must be chase, amex, or wells_fargo');
 }
 
 export function replaceCardOffers(existing, { bank, cardName, phase, records }) {
