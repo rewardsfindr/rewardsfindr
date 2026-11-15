@@ -19,6 +19,33 @@ test('reads a percent reward and a membership rewards rate', () => {
   assert.equal(parseAmexValue('Earn +5 Membership Rewards points').cashbackAmount, 5);
 });
 
+test('stores a calendar expiry and leaves a missing expiry empty', () => {
+  const dated = parseAmexOffers({
+    recommendedOffers: {
+      offersList: {
+        page1: [{
+          offerType: 'MERCHANT',
+          title: 'Bose',
+          shortDescription: 'Spend $300 or more, earn $75 back',
+          offerId: 'B1',
+          expiration: { text: 'Expires 12/31/2026' },
+        }],
+      },
+    },
+  }, 'eligible');
+  assert.equal(dated[0].expiryDate, '2026-12-31T00:00:00.000Z');
+  assert.equal(dated[0].cashbackAmount, 75);
+
+  const undated = parseAmexOffers({
+    recommendedOffers: {
+      offersList: {
+        page1: [{ offerType: 'MERCHANT', title: 'Nike', shortDescription: '$10 back', offerId: 'N1' }],
+      },
+    },
+  }, 'eligible');
+  assert.equal(undated[0].expiryDate, null);
+});
+
 test('eligible merchant offers stay unactivated and enrolled offers are activated', () => {
   const eligible = parseAmexOffers({
     recommendedOffers: {

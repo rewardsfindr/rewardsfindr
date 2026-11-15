@@ -35,6 +35,7 @@
 const DETECT_CARDS_INNER = `
   (function detectAmexCards() {
     var options = document.querySelectorAll('[role="option"][data-testid*="CARD_PRODUCT"]');
+    if (!options.length) options = document.querySelectorAll('[role="option"]');
     var cards = [];
     options.forEach(function(opt, i) {
       var nameEl   = opt.querySelector('[data-testid="simple_switcher_display_name"]');
@@ -84,15 +85,19 @@ export const buildAmexSwitchCardJs = (testId, timeoutMs = 3500) => `
     try {
       var combobox = document.querySelector('[data-testid="simple_switcher_combobox"]');
       if (!combobox) {
-        window.ReactNativeWebView.postMessage(JSON.stringify({ type: 'CARD_SWITCH_ERROR', message: 'Amex combobox not found' }));
+        window.ReactNativeWebView.postMessage(JSON.stringify({ type: 'CARD_SWITCH_ERROR', message: 'Amex card menu was not found.' }));
         return;
       }
-      combobox.click();
-      setTimeout(function() {
-        var option = document.querySelector('[data-testid="${testId}"]');
-        if (!option) option = document.querySelector('[role="option"]');
+      var requested = ${JSON.stringify(testId)};
+      function choose(attempt) {
+        var option = document.querySelector('[data-testid="' + requested + '"]');
         if (!option) {
-          window.ReactNativeWebView.postMessage(JSON.stringify({ type: 'CARD_SWITCH_ERROR', message: 'No switchable option found for: ${testId}' }));
+          if (attempt === 0) {
+            combobox.click();
+            setTimeout(function() { choose(1); }, 600);
+            return;
+          }
+          window.ReactNativeWebView.postMessage(JSON.stringify({ type: 'CARD_SWITCH_ERROR', message: 'Could not open the next Amex card. Nothing else was changed.' }));
           return;
         }
         option.click();
@@ -107,10 +112,15 @@ export const buildAmexSwitchCardJs = (testId, timeoutMs = 3500) => `
           window.ReactNativeWebView.postMessage(JSON.stringify({
             type: 'CARD_SWITCHED',
             cardLabel: cardLabel,
-            expectedTestId: '${testId}',
+            expectedTestId: requested,
           }));
         }, ${timeoutMs});
-      }, 600);
+      }
+      if (combobox.getAttribute('aria-expanded') === 'true') choose(1);
+      else {
+        combobox.click();
+        setTimeout(function() { choose(0); }, 600);
+      }
     } catch(e) {
       window.ReactNativeWebView.postMessage(JSON.stringify({ type: 'CARD_SWITCH_ERROR', message: e.message }));
     }
@@ -148,7 +158,8 @@ export const buildAmexClearFiltersJs = () => `
 `;
 
 // Intercepts ReadOffersHubPresentation XHR/fetch.
-// Only forwards REPLACE responses when window.__amexJsonCaptureArmed = true.
+// Forwards REPLACE and UPDATE while window.__amexJsonCaptureArmed is true,
+// keeps the fullest payload, and posts it once after the responses go quiet.
 // Arming is done externally by SyncWebView — this function never auto-arms.
 export const buildAmexJsonCaptureJs = () => `
   (function() {
@@ -165,21 +176,47 @@ export const buildAmexJsonCaptureJs = () => `
         return name + (last4 ? ' (...' + last4 + ')' : '');
       }
 
-      function fireCapture(jsonText, source) {
+      function countOffers(parsed) {
+        function count(container) {
+          if (!container || !container.offersList) return 0;
+          return Object.keys(container.offersList).reduce(function(sum, key) {
+            var list = container.offersList[key];
+            return sum + (Array.isArray(list) ? list.length : 0);
+          }, 0);
+        }
+        return count(parsed && parsed.recommendedOffers)
+          + count(parsed && parsed.addedToCardViewAll)
+          + count(parsed && parsed.addedToCard);
+      }
+
+      function postBest() {
+        if (!window.__amexJsonCaptureArmed || !window.__amexBest) return;
+        window.__amexJsonCaptureArmed = false;
+        var best = window.__amexBest;
+        window.__amexBest = null;
+        window.ReactNativeWebView.postMessage(JSON.stringify({
+          type: 'CAPTURE_JSON',
+          json: best.json,
+          cardLabel: readCardLabel(),
+        }));
+      }
+
+      // Amex can send the same card more than once while a page of offers
+      // arrives or a filter refresh finishes. Keep the fullest payload and
+      // post it once, after the responses go quiet.
+      function fireCapture(jsonText) {
         ++window.__amexCallCounter;
         try {
           var parsed = JSON.parse(jsonText);
           var responseType = parsed && parsed.responseType;
-          // Only process full REPLACE responses — skip partial UPDATEs.
-          if (responseType !== 'REPLACE') return;
-          if (window.__amexJsonCaptureArmed) {
-            window.__amexJsonCaptureArmed = false;
-            window.ReactNativeWebView.postMessage(JSON.stringify({
-              type: 'CAPTURE_JSON',
-              json: parsed,
-              cardLabel: readCardLabel(),
-            }));
+          if (responseType !== 'REPLACE' && responseType !== 'UPDATE') return;
+          if (!window.__amexJsonCaptureArmed) return;
+          var count = countOffers(parsed);
+          if (!window.__amexBest || count >= window.__amexBest.count) {
+            window.__amexBest = { json: parsed, count: count };
           }
+          clearTimeout(window.__amexQuietTimer);
+          window.__amexQuietTimer = setTimeout(postBest, 800);
         } catch(e) {
           window.ReactNativeWebView.postMessage(JSON.stringify({
             type: 'ERROR',

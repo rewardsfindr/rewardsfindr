@@ -11,6 +11,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { getAuthInstance } from '../lib/firebaseClient.js';
 import { useSearch } from '../hooks/useSearch.js';
 import { searchStoredOffers } from '../lib/offerStore.js';
+import { resultsRouteParams, summarizeSyncCards } from '../lib/savedOffers.js';
 
 import HomeHeader     from '../components/HomeHeader.js';
 import SearchBar      from '../components/SearchBar.js';
@@ -66,11 +67,7 @@ export default function HomeScreen() {
   };
 
   const navigateToResults = (data, query) => {
-    if (!data.offers || data.offers.length === 0) {
-      router.push({ pathname: '/results', params: { notFound: query } });
-      return;
-    }
-    router.push({ pathname: '/results', params: { storeName: query, offers: JSON.stringify(data.offers) } });
+    router.push(resultsRouteParams(query, data.offers));
   };
 
   const runSearch = async (query) => {
@@ -99,13 +96,12 @@ export default function HomeScreen() {
   };
 
   const handleSyncSuccess = (totalSynced, cardResults, bank) => {
+    const summary = summarizeSyncCards(cardResults);
     setSyncedBanks(prev => ({
       ...prev,
-      [bank]: { cards: cardResults.length, lastSyncedAt: Date.now() },
+      [bank]: { cards: summary.cardCount, lastSyncedAt: Date.now() },
     }));
-    const lines = (cardResults || [])
-      .map(card => `${card.cardName}: ${card.count} offers`)
-      .join('\n');
+    const lines = summary.lines;
     Alert.alert(
       totalSynced > 0 ? 'Offers saved on this phone' : 'No offers saved',
       totalSynced > 0
