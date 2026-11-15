@@ -12,6 +12,7 @@ import { Stack, useRouter } from 'expo-router';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { getAuthInstance } from '../lib/firebaseClient.js';
 import { setOnboardingComplete } from '../lib/onboardingStore.js';
+import { CONNECT_BANK_COPY, buildSyncedBanksUpdate } from '../lib/onboardingContent.js';
 import SyncWebView from '../components/SyncWebView.js';
 import { colors, radii, shadow } from '../shared/theme.js';
 
@@ -41,8 +42,8 @@ export default function ConnectBankScreen() {
       const key = getSyncKey(uid);
       const raw = await AsyncStorage.getItem(key);
       const prev = raw ? JSON.parse(raw) : {};
-      prev[bank] = { cards: (cardResults || []).length, lastSyncedAt: Date.now() };
-      await AsyncStorage.setItem(key, JSON.stringify(prev));
+      const next = buildSyncedBanksUpdate(prev, bank, cardResults);
+      await AsyncStorage.setItem(key, JSON.stringify(next));
     } catch {
       // Home can still sync later
     }
@@ -66,17 +67,15 @@ export default function ConnectBankScreen() {
     <SafeAreaView style={s.safe}>
       <Stack.Screen options={{ headerShown: false }} />
       <View style={s.container}>
-        <Text style={s.title}>Connect a bank to start</Text>
-        <Text style={s.subtitle}>
-          Your home screen gets useful once offers are synced. Takes about a minute.
-        </Text>
+        <Text style={s.title}>{CONNECT_BANK_COPY.title}</Text>
+        <Text style={s.subtitle}>{CONNECT_BANK_COPY.subtitle}</Text>
 
         <TouchableOpacity
           style={s.primaryBtn}
           onPress={() => setSyncBank('chase')}
           accessibilityRole="button"
         >
-          <Text style={s.primaryBtnText}>Sync Chase</Text>
+          <Text style={s.primaryBtnText}>{CONNECT_BANK_COPY.chaseCta}</Text>
         </TouchableOpacity>
 
         <TouchableOpacity
@@ -84,7 +83,7 @@ export default function ConnectBankScreen() {
           onPress={() => setSyncBank('amex')}
           accessibilityRole="button"
         >
-          <Text style={s.secondaryBtnText}>Sync Amex</Text>
+          <Text style={s.secondaryBtnText}>{CONNECT_BANK_COPY.amexCta}</Text>
         </TouchableOpacity>
 
         <TouchableOpacity
@@ -93,10 +92,10 @@ export default function ConnectBankScreen() {
           accessibilityRole="button"
           style={s.skipWrap}
         >
-          <Text style={s.skip}>Skip for now →</Text>
+          <Text style={s.skip}>{CONNECT_BANK_COPY.skip}</Text>
         </TouchableOpacity>
 
-        <Text style={s.footnote}>Capital One, Citi & more coming soon</Text>
+        <Text style={s.footnote}>{CONNECT_BANK_COPY.footnote}</Text>
       </View>
 
       <SyncWebView

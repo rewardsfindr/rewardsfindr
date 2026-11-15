@@ -9,30 +9,11 @@ import {
   Dimensions, ScrollView,
 } from 'react-native';
 import { Stack, useRouter } from 'expo-router';
+import { ONBOARDING_PAGES, nextOnboardingIndex } from '../lib/onboardingContent.js';
 import { colors, radii, shadow } from '../shared/theme.js';
 
 const { width } = Dimensions.get('window');
-
-const PAGES = [
-  {
-    key: 'value',
-    title: 'Never miss the best reward again',
-    body: 'RewardsFindr tracks your bank offers and shows which card to use at any store.',
-    visual: 'cards',
-  },
-  {
-    key: 'sync',
-    title: 'Sync your bank offers',
-    body: 'Securely pull Chase and Amex offers in the app. No manual entry. We never store your bank password.',
-    visual: 'banks',
-  },
-  {
-    key: 'search',
-    title: 'Search any store',
-    body: 'Before you shop, search Target, Amazon, gas, or dining — see your best card in seconds.',
-    visual: 'search',
-  },
-];
+const PAGES = ONBOARDING_PAGES;
 
 function Visual({ type }) {
   if (type === 'cards') {
@@ -143,11 +124,11 @@ export default function OnboardingScreen() {
   };
 
   const onNext = () => {
-    if (index >= PAGES.length - 1) {
+    const next = nextOnboardingIndex(index);
+    if (next == null) {
       goConnect();
       return;
     }
-    const next = index + 1;
     scrollRef.current?.scrollTo({ x: next * width, animated: true });
     setIndex(next);
   };

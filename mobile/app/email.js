@@ -16,33 +16,20 @@ import {
   signInWithEmailAndPassword,
 } from 'firebase/auth';
 import { getAuthInstance } from '../lib/firebaseClient.js';
+import {
+  EMAIL_STEPS,
+  isValidEmail,
+  mapAuthError,
+  normalizeEmail,
+  resolveEmailBack,
+  resolveEmailContinue,
+  validateNewPassword,
+} from '../lib/emailAuth.js';
 import { colors, radii, shadow } from '../shared/theme.js';
-
-const STEPS = {
-  EMAIL: 'email',
-  SIGN_IN: 'sign_in',
-  SIGN_UP: 'sign_up',
-  FORGOT: 'forgot',
-  FORGOT_SENT: 'forgot_sent',
-};
-
-function mapAuthError(err) {
-  const code = err?.code || '';
-  if (code === 'auth/invalid-email') return 'Enter a valid email address.';
-  if (code === 'auth/user-disabled') return 'This account has been disabled.';
-  if (code === 'auth/user-not-found' || code === 'auth/wrong-password' || code === 'auth/invalid-credential') {
-    return 'Incorrect email or password.';
-  }
-  if (code === 'auth/email-already-in-use') return 'An account already exists with this email. Try signing in.';
-  if (code === 'auth/weak-password') return 'Password must be at least 6 characters.';
-  if (code === 'auth/too-many-requests') return 'Too many attempts. Try again later.';
-  if (code === 'auth/network-request-failed') return 'Network error. Check your connection.';
-  return err?.message || 'Something went wrong. Please try again.';
-}
 
 export default function EmailAuthScreen() {
   const router = useRouter();
-  const [step, setStep] = useState(STEPS.EMAIL);
+  const [step, setStep] = useState(EMAIL_STEPS.EMAIL);
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [confirm, setConfirm] = useState('');
@@ -51,37 +38,32 @@ export default function EmailAuthScreen() {
 
   const goBack = () => {
     setError(null);
-    if (step === STEPS.EMAIL) {
+    const result = resolveEmailBack(step);
+    if (result.exit) {
       router.back();
       return;
     }
-    if (step === STEPS.FORGOT || step === STEPS.FORGOT_SENT) {
-      setStep(STEPS.SIGN_IN);
-      setPassword('');
-      return;
-    }
-    setStep(STEPS.EMAIL);
+    setStep(result.step);
     setPassword('');
     setConfirm('');
   };
 
   const continueWithEmail = async () => {
-    const trimmed = email.trim().toLowerCase();
-    if (!trimmed || !trimmed.includes('@')) {
+    if (!isValidEmail(email)) {
       setError('Enter a valid email address.');
       return;
     }
+    const trimmed = normalizeEmail(email);
     setError(null);
     setLoading(true);
     try {
       const methods = await fetchSignInMethodsForEmail(getAuthInstance(), trimmed);
       setEmail(trimmed);
-      if (methods.includes('password')) {
-        setStep(STEPS.SIGN_IN);
-      } else if (methods.length > 0) {
-        setError('This email uses Google or Apple sign-in. Go back and continue with that provider.');
+      const next = resolveEmailContinue(methods);
+      if (next.error) {
+        setError(next.error);
       } else {
-        setStep(STEPS.SIGN_UP);
+        setStep(next.step);
       }
     } catch (err) {
       setError(mapAuthError(err));
@@ -106,12 +88,9 @@ export default function EmailAuthScreen() {
   };
 
   const handleSignUp = async () => {
-    if (password.length < 8) {
-      setError('Password must be at least 8 characters.');
-      return;
-    }
-    if (password !== confirm) {
-      setError('Passwords do not match.');
+    const check = validateNewPassword(password, confirm);
+    if (!check.ok) {
+      setError(check.error);
       return;
     }
     setError(null);
@@ -125,17 +104,17 @@ export default function EmailAuthScreen() {
   };
 
   const handleForgot = async () => {
-    const trimmed = email.trim().toLowerCase();
-    if (!trimmed) {
+    if (!isValidEmail(email)) {
       setError('Enter your email address.');
       return;
     }
+    const trimmed = normalizeEmail(email);
     setError(null);
     setLoading(true);
     try {
       await sendPasswordResetEmail(getAuthInstance(), trimmed);
       setEmail(trimmed);
-      setStep(STEPS.FORGOT_SENT);
+      setStep(EMAIL_STEPS.FORGOT_SENT);
     } catch (err) {
       setError(mapAuthError(err));
     } finally {
@@ -144,19 +123,19 @@ export default function EmailAuthScreen() {
   };
 
   const title = {
-    [STEPS.EMAIL]: 'Continue with email',
-    [STEPS.SIGN_IN]: 'Welcome back',
-    [STEPS.SIGN_UP]: 'Create your account',
-    [STEPS.FORGOT]: 'Reset password',
-    [STEPS.FORGOT_SENT]: 'Check your inbox',
+    [EMAIL_STEPS.EMAIL]: 'Continue with email',
+    [EMAIL_STEPS.SIGN_IN]: 'Welcome back',
+    [EMAIL_STEPS.SIGN_UP]: 'Create your account',
+    [EMAIL_STEPS.FORGOT]: 'Reset password',
+    [EMAIL_STEPS.FORGOT_SENT]: 'Check your inbox',
   }[step];
 
   const subtitle = {
-    [STEPS.EMAIL]: 'We’ll use this to save your offers on this device.',
-    [STEPS.SIGN_IN]: email,
-    [STEPS.SIGN_UP]: email,
-    [STEPS.FORGOT]: 'We’ll send a reset link to your email.',
-    [STEPS.FORGOT_SENT]: `We sent a reset link to ${email}.`,
+    [EMAIL_STEPS.EMAIL]: 'We’ll use this to save your offers on this device.',
+    [EMAIL_STEPS.SIGN_IN]: email,
+    [EMAIL_STEPS.SIGN_UP]: email,
+    [EMAIL_STEPS.FORGOT]: 'We’ll send a reset link to your email.',
+    [EMAIL_STEPS.FORGOT_SENT]: `We sent a reset link to ${email}.`,
   }[step];
 
   return (
@@ -183,7 +162,7 @@ export default function EmailAuthScreen() {
             </View>
           )}
 
-          {step === STEPS.EMAIL && (
+          {step === EMAIL_STEPS.EMAIL && (
             <>
               <Text style={s.label}>Email</Text>
               <TextInput
@@ -214,7 +193,7 @@ export default function EmailAuthScreen() {
             </>
           )}
 
-          {step === STEPS.SIGN_IN && (
+          {step === EMAIL_STEPS.SIGN_IN && (
             <>
               <Text style={s.label}>Password</Text>
               <TextInput
@@ -228,7 +207,7 @@ export default function EmailAuthScreen() {
                 onChangeText={setPassword}
                 editable={!loading}
               />
-              <TouchableOpacity onPress={() => { setError(null); setStep(STEPS.FORGOT); }}>
+              <TouchableOpacity onPress={() => { setError(null); setStep(EMAIL_STEPS.FORGOT); }}>
                 <Text style={s.link}>Forgot password?</Text>
               </TouchableOpacity>
               <TouchableOpacity
@@ -246,7 +225,7 @@ export default function EmailAuthScreen() {
             </>
           )}
 
-          {step === STEPS.SIGN_UP && (
+          {step === EMAIL_STEPS.SIGN_UP && (
             <>
               <Text style={s.label}>Password</Text>
               <TextInput
@@ -287,7 +266,7 @@ export default function EmailAuthScreen() {
             </>
           )}
 
-          {step === STEPS.FORGOT && (
+          {step === EMAIL_STEPS.FORGOT && (
             <>
               <Text style={s.label}>Email</Text>
               <TextInput
@@ -315,10 +294,10 @@ export default function EmailAuthScreen() {
             </>
           )}
 
-          {step === STEPS.FORGOT_SENT && (
+          {step === EMAIL_STEPS.FORGOT_SENT && (
             <TouchableOpacity
               style={s.primaryBtn}
-              onPress={() => setStep(STEPS.SIGN_IN)}
+              onPress={() => setStep(EMAIL_STEPS.SIGN_IN)}
               accessibilityRole="button"
             >
               <Text style={s.primaryBtnText}>Back to sign in</Text>

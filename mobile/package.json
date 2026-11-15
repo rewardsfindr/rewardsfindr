@@ -4,7 +4,7 @@
   "main": "expo-router/entry",
   "scripts": {
     "start": "expo start",
-    "test": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --test components/sync/chaseSync.test.mjs",
+    "test": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --test components/sync/chaseSync.test.mjs lib/*.test.mjs",
     "android": "expo start --android",
     "ios": "expo start --ios",
     "build:android": "eas build --platform android",

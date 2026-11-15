@@ -11,11 +11,9 @@ import { Stack, useRouter, useSegments } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import { onAuthStateChanged } from 'firebase/auth';
 import { getAuthInstance } from '../lib/firebaseClient.js';
+import { resolveAuthGate } from '../lib/authGate.js';
 import { getOnboardingComplete, subscribeOnboarding } from '../lib/onboardingStore.js';
 import { colors } from '../shared/theme.js';
-
-const AUTH_SCREENS = new Set(['login', 'email']);
-const ONBOARDING_SCREENS = new Set(['onboarding', 'connect-bank']);
 
 export default function RootLayout() {
   const [user, setUser] = useState(undefined);
@@ -56,30 +54,13 @@ export default function RootLayout() {
   }, [user?.uid]);
 
   useEffect(() => {
-    if (user === undefined) return;
-
-    const root = segments[0];
-    const onAuthScreen = AUTH_SCREENS.has(root);
-    const onOnboardingScreen = ONBOARDING_SCREENS.has(root);
-
-    if (!user) {
-      if (!onAuthScreen) {
-        router.replace('/login');
-      }
-      return;
-    }
-
-    if (onboardingDone === undefined) return;
-
-    if (!onboardingDone) {
-      if (!onOnboardingScreen) {
-        router.replace('/onboarding');
-      }
-      return;
-    }
-
-    if (onAuthScreen || onOnboardingScreen) {
-      router.replace('/');
+    const decision = resolveAuthGate({
+      user,
+      onboardingDone,
+      segment: segments[0],
+    });
+    if (decision.action === 'replace' && decision.path) {
+      router.replace(decision.path);
     }
   }, [user, onboardingDone, segments, router]);
 
