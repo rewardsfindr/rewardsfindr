@@ -220,6 +220,123 @@ test('does not capture activateCLDeal, a failed getDeals response, or an unrecog
   assert.equal(JSON.stringify(afterUnrecognized).includes('SECRET-BODY'), false);
 });
 
+test('a wrapped getDeals body becomes WELLS_DEALS with the merchant offer id', () => {
+  const { window, messages } = installHook();
+  const xhr = new window.XMLHttpRequest();
+  xhr.open('POST', '/deals-portal/as/getDeals');
+  xhr.responseText = JSON.stringify({
+    checkSum: 'CHECKSUM-SECRET',
+    metadata: {
+      deals: {
+        availableDeals: {
+          cardlyticsEligibleDeals: [{
+            isActivated: false,
+            merchantDealDetails: {
+              merchantOfferId: 'WRAPOFFER1',
+              merchantName: 'Target',
+              dealAmount: 5,
+              amountType: '$',
+              shortDescription: '$5 cash back',
+              imageUrl: 'https://images.example/secret.png',
+            },
+          }],
+        },
+      },
+    },
+  });
+  xhr.send();
+  const message = readDeals(window, messages);
+  assert.equal(message.type, 'WELLS_DEALS');
+  assert.equal(
+    message.deals.availableDeals.cardlyticsEligibleDeals[0].merchantDealDetails.merchantOfferId,
+    'WRAPOFFER1'
+  );
+  assert.equal(message.deals.availableDeals.cardlyticsEligibleDeals[0].merchantDealDetails.merchantName, 'Target');
+  const posted = JSON.stringify(message);
+  assert.equal(posted.includes('CHECKSUM-SECRET'), false);
+  assert.equal(posted.includes('secret.png'), false);
+});
+
+test('finds a deals object that is not initialState.metadata.deals', () => {
+  const messages = [];
+  const window = {
+    ReactNativeWebView: {
+      postMessage(raw) { messages.push(JSON.parse(raw)); },
+    },
+    frames: [{
+      pageModel: {
+        deals: {
+          checkSum: 'CHECKSUM-SECRET',
+          availableDeals: {
+            cardlyticsEligibleDeals: [{
+              isActivated: false,
+              merchantDealDetails: {
+                merchantOfferId: 'FRAMEOFFER1',
+                merchantName: 'Nike',
+                dealAmount: 15,
+                amountType: '%',
+                shortDescription: '15% cash back',
+              },
+            }],
+          },
+        },
+      },
+    }],
+  };
+  new Function('window', 'document', buildWellsFargoReadJs())(window, {});
+  assert.equal(messages.length, 1);
+  assert.equal(messages[0].type, 'WELLS_DEALS');
+  assert.equal(
+    messages[0].deals.availableDeals.cardlyticsEligibleDeals[0].merchantDealDetails.merchantOfferId,
+    'FRAMEOFFER1'
+  );
+  assert.equal(JSON.stringify(messages[0]).includes('CHECKSUM-SECRET'), false);
+});
+
+test('reads a rendered deal tile and skips a tile with no id', () => {
+  const messages = [];
+  function card(id, text) {
+    const button = {
+      innerText: 'Activate',
+      parentElement: null,
+      getAttribute() { return null; },
+      querySelectorAll() { return []; },
+    };
+    const tile = {
+      innerText: text,
+      attrs: id ? { 'data-merchant-offer-id': id } : {},
+      parentElement: null,
+      getAttribute(name) { return this.attrs[name] || null; },
+      querySelectorAll() { return []; },
+    };
+    button.parentElement = tile;
+    tile.button = button;
+    return tile;
+  }
+  const withId = card('FLOORD0001', 'Floor & Decor 10% cash back Expires 11/25/26 Activate');
+  const noId = card('', 'Tommy John 20% cash back Expires 12/31/26 Activate');
+  const document = {
+    querySelectorAll(selector) {
+      if (String(selector).includes('button')) return [withId.button, noId.button];
+      return [];
+    },
+  };
+  const window = {
+    ReactNativeWebView: {
+      postMessage(raw) { messages.push(JSON.parse(raw)); },
+    },
+  };
+  new Function('window', 'document', buildWellsFargoReadJs())(window, document);
+  assert.equal(messages[0].type, 'WELLS_DEALS');
+  const offers = messages[0].deals.availableDeals.cardlyticsEligibleDeals;
+  assert.equal(offers.length, 1);
+  assert.equal(offers[0].merchantDealDetails.merchantOfferId, 'FLOORD0001');
+  assert.equal(offers[0].merchantDealDetails.merchantName, 'Floor & Decor');
+  assert.equal(offers[0].merchantDealDetails.dealAmount, 10);
+  assert.equal(offers[0].merchantDealDetails.amountType, '%');
+  assert.equal(offers[0].merchantDealDetails.expirationDate, '11/25/26');
+});
+
 test('hooks getDeals on fetch and ignores a non-2xx response', async () => {
   const messages = [];
   let ok = false;
