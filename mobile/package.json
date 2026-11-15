@@ -4,7 +4,7 @@
   "main": "expo-router/entry",
   "scripts": {
     "start": "expo start",
-    "test": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --test components/sync/chaseSync.test.mjs components/sync/amexSync.test.mjs lib/savedOffers.test.mjs",
+    "test": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --test components/sync/chaseSync.test.mjs components/sync/amexSync.test.mjs lib/*.test.mjs",
     "android": "expo start --android",
     "ios": "expo start --ios",
     "build:android": "eas build --platform android",
@@ -17,6 +17,7 @@
     "@react-native-google-signin/google-signin": "^13.1.0",
     "@react-navigation/native": "^6.1.0",
     "expo": "~52.0.0",
+    "expo-apple-authentication": "~7.1.3",
     "expo-auth-session": "~6.0.0",
     "expo-build-properties": "~0.13.0",
     "expo-router": "~4.0.0",

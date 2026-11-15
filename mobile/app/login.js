@@ -1,19 +1,30 @@
 // ─────────────────────────────────────────────
 // LOGIN SCREEN
-// Google Sign-In is wired up.
-// Apple and Email buttons are UI placeholders for future implementation.
-// On Google success, _layout.js auth listener redirects to home.
+// Google, Apple (iOS), and Email sign-in.
+// On success, _layout.js routes to onboarding or home.
 // ─────────────────────────────────────────────
 import React, { useEffect, useState } from 'react';
 import {
   View, Text, TouchableOpacity, ActivityIndicator,
   StyleSheet, SafeAreaView, Platform,
 } from 'react-native';
-import { Stack } from 'expo-router';
+import { Stack, useRouter } from 'expo-router';
 import { GoogleSignin, statusCodes } from '@react-native-google-signin/google-signin';
-import { GoogleAuthProvider, getRedirectResult, signInWithCredential, signInWithPopup, signInWithRedirect } from 'firebase/auth';
+import {
+  GoogleAuthProvider, OAuthProvider, getRedirectResult,
+  signInWithCredential, signInWithPopup, signInWithRedirect,
+} from 'firebase/auth';
 import { getAuthInstance } from '../lib/firebaseClient.js';
 import { colors, radii, shadow } from '../shared/theme.js';
+
+let AppleAuthentication = null;
+if (Platform.OS === 'ios') {
+  try {
+    AppleAuthentication = require('expo-apple-authentication');
+  } catch {
+    AppleAuthentication = null;
+  }
+}
 
 if (Platform.OS !== 'web') {
   GoogleSignin.configure({
@@ -24,8 +35,10 @@ if (Platform.OS !== 'web') {
 }
 
 export default function LoginScreen() {
+  const router = useRouter();
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
+  const [appleAvailable, setAppleAvailable] = useState(false);
 
   useEffect(() => {
     if (Platform.OS !== 'web') return;
@@ -34,6 +47,23 @@ export default function LoginScreen() {
       setError(`Sign-in failed: ${err.message}`);
       setLoading(false);
     });
+  }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      if (Platform.OS !== 'ios' || !AppleAuthentication?.isAvailableAsync) {
+        if (!cancelled) setAppleAvailable(false);
+        return;
+      }
+      try {
+        const available = await AppleAuthentication.isAvailableAsync();
+        if (!cancelled) setAppleAvailable(available);
+      } catch {
+        if (!cancelled) setAppleAvailable(false);
+      }
+    })();
+    return () => { cancelled = true; };
   }, []);
 
   const handleGoogleSignIn = async () => {
@@ -74,12 +104,41 @@ export default function LoginScreen() {
     }
   };
 
-  // TODO: wire up Apple Sign-In (expo-apple-authentication)
-  const handleAppleSignIn = () => {};
+  const handleAppleSignIn = async () => {
+    if (!AppleAuthentication) {
+      setError('Apple Sign-In is not available on this device.');
+      return;
+    }
+    setError(null);
+    setLoading(true);
+    try {
+      const appleCredential = await AppleAuthentication.signInAsync({
+        requestedScopes: [
+          AppleAuthentication.AppleAuthenticationScope.FULL_NAME,
+          AppleAuthentication.AppleAuthenticationScope.EMAIL,
+        ],
+      });
+      if (!appleCredential.identityToken) {
+        throw new Error('No identity token returned from Apple');
+      }
+      const provider = new OAuthProvider('apple.com');
+      const credential = provider.credential({
+        idToken: appleCredential.identityToken,
+      });
+      await signInWithCredential(getAuthInstance(), credential);
+    } catch (err) {
+      if (err?.code === 'ERR_REQUEST_CANCELED' || err?.code === 'ERR_CANCELED') {
+        setLoading(false);
+        return;
+      }
+      setError(`Apple sign-in failed: ${err.message || err}`);
+      setLoading(false);
+    }
+  };
 
-  // TODO: wire up Email/Password auth
   const handleEmailSignIn = () => {
-    setError('Email sign-in is not available yet. Continue with Google.');
+    setError(null);
+    router.push('/email');
   };
 
   return (
@@ -87,7 +146,6 @@ export default function LoginScreen() {
       <Stack.Screen options={{ headerShown: false }} />
       <View style={s.container}>
 
-        {/* Logo */}
         <View style={s.iconWrap}>
           <Text style={s.icon}>💳</Text>
         </View>
@@ -97,11 +155,10 @@ export default function LoginScreen() {
 
         {error && (
           <View style={s.errorBox}>
-            <Text style={s.errorText}>⚠️ {error}</Text>
+            <Text style={s.errorText}>{error}</Text>
           </View>
         )}
 
-        {/* Google */}
         <TouchableOpacity
           accessibilityRole="button"
           style={[s.authBtn, loading && s.disabled]}
@@ -118,27 +175,35 @@ export default function LoginScreen() {
           )}
         </TouchableOpacity>
 
-        {/* Apple — iOS only, placeholder */}
-        {Platform.OS === 'ios' && (
-          <TouchableOpacity style={[s.authBtn, s.appleBtn]} onPress={handleAppleSignIn}>
+        {appleAvailable && (
+          <TouchableOpacity
+            style={[s.authBtn, s.appleBtn, loading && s.disabled]}
+            onPress={handleAppleSignIn}
+            disabled={loading}
+            accessibilityRole="button"
+          >
             <Text style={[s.authBtnIcon, s.appleBtnText]}></Text>
             <Text style={[s.authBtnText, s.appleBtnText]}>Continue with Apple</Text>
           </TouchableOpacity>
         )}
 
-        {/* Divider */}
         <View style={s.divider}>
           <View style={s.dividerLine} />
           <Text style={s.dividerText}>or</Text>
           <View style={s.dividerLine} />
         </View>
 
-        {/* Email — placeholder */}
-        <TouchableOpacity style={[s.authBtn, s.emailBtn]} onPress={handleEmailSignIn}>
+        <TouchableOpacity
+          style={[s.authBtn, s.emailBtn, loading && s.disabled]}
+          onPress={handleEmailSignIn}
+          disabled={loading}
+          accessibilityRole="button"
+        >
           <Text style={s.authBtnIcon}>✉️</Text>
           <Text style={[s.authBtnText, s.emailBtnText]}>Continue with Email</Text>
         </TouchableOpacity>
 
+        <Text style={s.trust}>We never store your bank passwords.</Text>
         <Text style={s.terms}>
           By continuing, you agree to our Terms of Service and Privacy Policy.
         </Text>
@@ -178,6 +243,7 @@ const s = StyleSheet.create({
   dividerLine:   { flex: 1, height: 1, backgroundColor: colors.border },
   dividerText:   { marginHorizontal: 12, fontSize: 13, color: colors.textMuted },
 
+  trust:         { fontSize: 12, color: colors.textMuted, textAlign: 'center', marginTop: 16 },
   terms:         { fontSize: 11, color: colors.textMuted, textAlign: 'center',
-                   lineHeight: 18, marginTop: 20, paddingHorizontal: 8 },
+                   lineHeight: 18, marginTop: 8, paddingHorizontal: 8 },
 });

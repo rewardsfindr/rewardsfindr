@@ -1,8 +1,9 @@
 // ─────────────────────────────────────────────
 // ROOT LAYOUT
-// Auth gate: redirects to /login if not signed in
-// Listens to Firebase auth state changes and routes accordingly
-// Index screen uses its own HomeHeader — Expo header hidden.
+// Auth + onboarding gate:
+//   unsigned → /login (or /email)
+//   signed-in, first run → /onboarding → /connect-bank
+//   signed-in, done → /
 // ─────────────────────────────────────────────
 import { useEffect, useState } from 'react';
 import { View, ActivityIndicator } from 'react-native';
@@ -10,10 +11,13 @@ import { Stack, useRouter, useSegments } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import { onAuthStateChanged } from 'firebase/auth';
 import { getAuthInstance } from '../lib/firebaseClient.js';
+import { resolveAuthGate } from '../lib/authGate.js';
+import { getOnboardingComplete, subscribeOnboarding } from '../lib/onboardingStore.js';
 import { colors } from '../shared/theme.js';
 
 export default function RootLayout() {
   const [user, setUser] = useState(undefined);
+  const [onboardingDone, setOnboardingDone] = useState(undefined);
   const router = useRouter();
   const segments = useSegments();
 
@@ -21,21 +25,46 @@ export default function RootLayout() {
     const auth = getAuthInstance();
     const unsubscribe = onAuthStateChanged(auth, (firebaseUser) => {
       setUser(firebaseUser ?? null);
+      if (!firebaseUser) {
+        setOnboardingDone(undefined);
+      }
     });
     return unsubscribe;
   }, []);
 
   useEffect(() => {
-    if (user === undefined) return;
-    const onLoginScreen = segments[0] === 'login';
-    if (!user && !onLoginScreen) {
-      router.replace('/login');
-    } else if (user && onLoginScreen) {
-      router.replace('/');
+    let cancelled = false;
+    if (!user?.uid) {
+      setOnboardingDone(undefined);
+      return undefined;
     }
-  }, [user, segments]);
+    setOnboardingDone(undefined);
+    getOnboardingComplete(user.uid).then((done) => {
+      if (!cancelled) setOnboardingDone(done);
+    });
+    return () => { cancelled = true; };
+  }, [user?.uid]);
 
-  if (user === undefined) {
+  useEffect(() => {
+    return subscribeOnboarding((uid, done) => {
+      if (uid && uid === user?.uid) {
+        setOnboardingDone(done);
+      }
+    });
+  }, [user?.uid]);
+
+  useEffect(() => {
+    const decision = resolveAuthGate({
+      user,
+      onboardingDone,
+      segment: segments[0],
+    });
+    if (decision.action === 'replace' && decision.path) {
+      router.replace(decision.path);
+    }
+  }, [user, onboardingDone, segments, router]);
+
+  if (user === undefined || (user && onboardingDone === undefined)) {
     return (
       <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: colors.bgPage }}>
         <ActivityIndicator size="large" color={colors.primary} />
@@ -54,10 +83,12 @@ export default function RootLayout() {
           contentStyle: { backgroundColor: colors.bgPage },
         }}
       >
-        {/* Home screen uses its own custom header */}
         <Stack.Screen name="index" options={{ headerShown: false }} />
         <Stack.Screen name="results" options={{ title: 'Results' }} />
         <Stack.Screen name="login" options={{ headerShown: false }} />
+        <Stack.Screen name="email" options={{ headerShown: false }} />
+        <Stack.Screen name="onboarding" options={{ headerShown: false }} />
+        <Stack.Screen name="connect-bank" options={{ headerShown: false }} />
       </Stack>
     </>
   );

@@ -10,7 +10,8 @@
       "supportsTablet": false,
       "bundleIdentifier": "com.rewardsfindr.app",
       "buildNumber": "1",
-      "googleServicesFile": "./GoogleService-Info.plist"
+      "googleServicesFile": "./GoogleService-Info.plist",
+      "usesAppleSignIn": true
     },
     "android": {
       "package": "com.rewardsfindr.app",
@@ -26,7 +27,8 @@
           }
         }
       ],
-      "@react-native-google-signin/google-signin"
+      "@react-native-google-signin/google-signin",
+      "expo-apple-authentication"
     ],
     "web": {
       "bundler": "metro"
