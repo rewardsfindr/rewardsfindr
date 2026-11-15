@@ -144,11 +144,20 @@ export const buildWellsFargoOfferCaptureJs = () => `
   true;
 `;
 
-// Posts the last getDeals offer fields. The raw response never leaves the page.
+// Posts the last getDeals offer fields. If that response was missed, the
+// deals already on the page (initialState.metadata.deals) are used instead.
+// The raw response never leaves the page.
 export const buildWellsFargoReadJs = () => `
   (function() {
     try {
+      var stripWellsDeals = ${stripWellsDealsSource};
       var stash = window.__wellsLastDeals;
+      if (!stash || !stash.availableDeals) {
+        var initial = window.initialState && window.initialState.metadata
+          ? window.initialState.metadata.deals
+          : null;
+        stash = stripWellsDeals(initial);
+      }
       if (!stash || !stash.availableDeals) {
         window.ReactNativeWebView.postMessage(JSON.stringify({
           type: 'WELLS_CAPTURE_UNAVAILABLE',

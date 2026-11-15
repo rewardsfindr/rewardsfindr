@@ -80,18 +80,24 @@ function samplePayload() {
   };
 }
 
-test('Wells Fargo is tappable and the sync page is the deals portal', () => {
+test('Wells Fargo opens the sign-on page and syncs from the deals portal', () => {
   const wells = BANK_LIST.find(bank => bank.id === 'wells_fargo');
   assert.equal(wells.supported, true);
   assert.equal(wells.label, 'Wells Fargo');
   for (const id of ['capital_one', 'citi', 'discover', 'bofa', 'bilt']) {
     assert.equal(BANK_LIST.find(bank => bank.id === id).supported, false);
   }
+  const config = BANK_CONFIG.wells_fargo;
   assert.equal(
-    BANK_CONFIG.wells_fargo.url,
-    'https://web.secure.wellsfargo.com/auth/deals-portal'
+    config.url,
+    'https://connect.secure.wellsfargo.com/auth/login/present?origin=cob&LOB=CONS'
   );
-  assert.deepEqual(BANK_CONFIG.wells_fargo.offersPaths, ['/auth/deals-portal']);
+  assert.equal(config.url.includes('/auth/deals-portal'), false);
+  assert.equal(config.offersUrl, 'https://web.secure.wellsfargo.com/auth/deals-portal');
+  assert.ok(config.loginPaths.length > 0);
+  assert.equal(config.loginPaths.some(path => config.url.toLowerCase().includes(path.toLowerCase())), true);
+  assert.equal(config.offersUrl.toLowerCase().includes(config.loginPaths[0].toLowerCase()), false);
+  assert.deepEqual(config.offersPaths, ['/auth/deals-portal']);
 
   const faq = FAQ_ITEMS.find(item => item.q === 'Which banks are supported?');
   const [supported, comingSoon] = faq.a.split('coming soon');
@@ -121,6 +127,49 @@ test('a missing Wells Fargo expiration is not labeled expiring soon', () => {
   });
   assert.equal(offer.expiryPrecision, 'unknown');
   assert.equal(formatOfferExpiry(offer), '');
+});
+
+test('reads deals from initialState when the getDeals stash is empty', () => {
+  const messages = [];
+  const window = {
+    ReactNativeWebView: {
+      postMessage(raw) { messages.push(JSON.parse(raw)); },
+    },
+    initialState: {
+      metadata: {
+        deals: {
+          checkSum: 'CHECKSUM-SECRET',
+          availableDeals: {
+            cardlyticsEligibleDeals: [{
+              vendorName: 'VENDOR-SECRET',
+              isActivated: false,
+              merchantDealDetails: {
+                merchantOfferId: 'UBEROFFER1',
+                merchantName: 'Uber',
+                dealAmount: 10,
+                amountType: '%',
+                shortDescription: '10% cash back',
+                expirationDate: '11/30/2026',
+                imageUrl: 'https://images.example/secret.png',
+              },
+            }],
+          },
+        },
+      },
+    },
+  };
+  new Function('window', 'document', buildWellsFargoReadJs())(window, {});
+  assert.equal(messages.length, 1);
+  assert.equal(messages[0].type, 'WELLS_DEALS');
+  const deal = messages[0].deals.availableDeals.cardlyticsEligibleDeals[0];
+  assert.equal(deal.merchantDealDetails.merchantOfferId, 'UBEROFFER1');
+  assert.equal(deal.merchantDealDetails.merchantName, 'Uber');
+  assert.equal(deal.merchantDealDetails.dealAmount, 10);
+  const posted = JSON.stringify(messages[0]);
+  assert.equal(posted.includes('CHECKSUM-SECRET'), false);
+  assert.equal(posted.includes('VENDOR-SECRET'), false);
+  assert.equal(posted.includes('secret.png'), false);
+  assert.equal(posted.includes('activateCLDeal'), false);
 });
 
 test('hooks getDeals on XHR and posts offer fields without the raw payload', () => {

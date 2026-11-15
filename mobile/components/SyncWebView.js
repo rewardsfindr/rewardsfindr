@@ -191,10 +191,16 @@ export default function SyncWebView({ visible, bank, onClose, onSuccess }) {
 
     if (bank === 'wells_fargo') {
       webViewRef.current?.injectJavaScript(buildWellsFargoOfferCaptureJs());
+      if (!url) return;
       const onLogin = (config.loginPaths || []).some(p => url.includes(p.toLowerCase()));
       const onOffers = !onLogin && (config.offersPaths || []).some(p => url.includes(p.toLowerCase()));
       setOnOffersPage(onOffers);
       setOnLoginPage(onLogin && !onOffers);
+      if (onOffers) {
+        offersRedirectRef.current = false;
+      } else if (!onLogin) {
+        goToOffers();
+      }
       return;
     }
 
