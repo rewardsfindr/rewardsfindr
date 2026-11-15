@@ -4,7 +4,7 @@ Handoff updated Nov 14, 2026. The March sections below are historical. Start fro
 
 ## Where we left off (Nov 14, 2026)
 
-Offers for Chase and Amex are stored only on the phone, keyed by Firebase uid (`rewardsfindr_offers_v1_{uid}`). Sync does not store bank HTML, credentials, account ids, cookies, or session tokens. A failed or partial read must not wipe a card. Do not commit `.cursor/`, lockfile noise, screenshots, `.env`, or line-ending-only `google-services.json`. Do not change `main` directly. Work on a branch, then open a PR.
+Offers for Chase and Amex are stored only on the phone, keyed by Firebase uid (`rewardsfindr_offers_v1_{uid}`). Sync does not store bank HTML, credentials, account ids, cookies, or session tokens. A failed or partial read must not wipe a card. Do not commit `.cursor/`, lockfile noise, screenshots, `.env`, or line-ending-only `google-services.json`. Do not change `main` directly. Work on a branch, then open a PR. Merge only after `/reviewer` writes `Approved`. The reviewer checks the diff and the PR description against `.cursor/agents/review-guidelines.md`.
 
 ### Chase (on main, PR #62)
 - Sync reads the `customer-offers` response. One complete response is one card. `partial === true` refuses the snapshot. FIGG and CDLX offer ids are both saved.
