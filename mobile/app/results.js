@@ -1,9 +1,9 @@
 // ─────────────────────────────────────────────
 // RESULTS SCREEN
 // Layout: hero best-choice card + ranked list of remaining cards.
-// Params: storeName (string), offers (JSON string)
+// Params: storeName (string). Offers are read from the phone, not the route.
 // ─────────────────────────────────────────────
-import React from 'react';
+import React, { useEffect, useState } from 'react';
 import {
   View, Text, ScrollView, TouchableOpacity,
   StyleSheet, SafeAreaView, Linking,
@@ -13,6 +13,9 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { colors, radii, shadow } from '../shared/theme.js';
 import { summarizeOfferTerms } from '../components/sync/chaseSync.js';
 import { chaseOfferUrl } from '../../api/lib/offers/chaseSnapshot.js';
+import { getAuthInstance } from '../lib/firebaseClient.js';
+import { searchStoredOffers } from '../lib/offerStore.js';
+import { formatOfferExpiry } from '../lib/savedOffers.js';
 
 const BANK_COLORS = {
   chase:       '#1a3a6b',
@@ -27,12 +30,16 @@ const BANK_COLORS = {
 
 const formatReward = (amount, type) => {
   if (!amount) return 'Offer';
-  return type === 'percent' ? `${amount}%` : `$${amount}`;
+  if (type === 'percent') return `${amount}%`;
+  if (type === 'points') return `${amount}X`;
+  return `$${amount}`;
 };
 
 const formatRewardLabel = (amount, type) => {
   if (!amount) return 'available';
-  return type === 'percent' ? 'back' : 'cash back';
+  if (type === 'points') return 'points';
+  if (type === 'percent') return 'back';
+  return 'cash back';
 };
 
 const formatDesc = (offer) => {
@@ -61,9 +68,27 @@ const openChaseOffer = (offer) => {
 export default function ResultsScreen() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
-  const { storeName, offers, notFound } = useLocalSearchParams();
+  const { storeName, notFound } = useLocalSearchParams();
+  const query = typeof storeName === 'string' ? storeName : '';
+  const [myOffers, setMyOffers] = useState([]);
+  const [loadError, setLoadError] = useState('');
+  const [ready, setReady] = useState(!query || !!notFound);
 
-  const myOffers = offers ? JSON.parse(offers) : [];
+  useEffect(() => {
+    if (!query || notFound) return undefined;
+    let cancelled = false;
+    const user = getAuthInstance().currentUser;
+    if (!user) {
+      setLoadError('Sign in to search the offers saved on this phone.');
+      setReady(true);
+      return undefined;
+    }
+    searchStoredOffers(user.uid, query)
+      .then(offers => { if (!cancelled) setMyOffers(offers); })
+      .catch(err => { if (!cancelled) setLoadError(err.message || 'Could not read saved offers.'); })
+      .finally(() => { if (!cancelled) setReady(true); });
+    return () => { cancelled = true; };
+  }, [query, notFound]);
   const sorted = [...myOffers].sort(
     (a, b) => (parseFloat(b.cashbackAmount) || 0) - (parseFloat(a.cashbackAmount) || 0)
   );
@@ -93,10 +118,10 @@ export default function ResultsScreen() {
             : 'Best cards ranked by rewards'}
         </Text>
 
-        {!hasOffers && (
+        {!hasOffers && ready && (
           <View style={s.emptyBox}>
             <Text style={s.emptyText}>
-              No offers found. Sync your Chase or Amex cards from the home screen to see personalized results.
+              {loadError || 'No offers found. Sync your Chase or Amex cards from the home screen to see personalized results.'}
             </Text>
           </View>
         )}
@@ -110,6 +135,7 @@ export default function ResultsScreen() {
                   <Text style={s.bestChoiceLabel}>BEST CHOICE</Text>
                   <Text style={s.heroCardName}>{best.cardName}</Text>
                   <Text style={s.heroDesc}>{formatDesc(best)}</Text>
+                  {formatOfferExpiry(best) ? <Text style={s.heroExpiry}>{formatOfferExpiry(best)}</Text> : null}
                 </View>
                 <View style={s.heroRight}>
                   <Text style={s.heroRewardPct}>{formatReward(best.cashbackAmount, best.cashbackType)}</Text>
@@ -155,6 +181,7 @@ export default function ResultsScreen() {
                             )}
                           </View>
                           <Text style={s.rankDesc}>{formatDesc(offer)}</Text>
+                          {formatOfferExpiry(offer) ? <Text style={s.rankExpiry}>{formatOfferExpiry(offer)}</Text> : null}
                           <View style={s.rankMeta}>
                             <View style={[s.bankPillSm, { backgroundColor: BANK_COLORS[offer.bank] || colors.primary }]}>
                               <Text style={s.bankPillSmText}>{bankLabel(offer.bank)}</Text>
@@ -210,6 +237,7 @@ const s = StyleSheet.create({
                       letterSpacing: 1.2, marginBottom: 6 },
   heroCardName:     { fontSize: 20, fontWeight: '900', color: colors.textOnDark, marginBottom: 4 },
   heroDesc:         { fontSize: 13, color: colors.textOnDarkSub, lineHeight: 18 },
+  heroExpiry:       { fontSize: 12, color: colors.textOnDarkSub, marginTop: 6, fontWeight: '600' },
   heroRight:        { alignItems: 'flex-end' },
   heroRewardPct:    { fontSize: 36, fontWeight: '900', color: colors.primaryLight, lineHeight: 40 },
   heroRewardLabel:  { fontSize: 12, color: colors.textOnDarkSub, fontWeight: '600' },
@@ -240,7 +268,8 @@ const s = StyleSheet.create({
   activatedBadge:   { backgroundColor: '#2ecc71', borderRadius: radii.sm,
                       paddingHorizontal: 7, paddingVertical: 2 },
   activatedBadgeText: { fontSize: 10, fontWeight: '900', color: '#fff' },
-  rankDesc:         { fontSize: 12, color: colors.textMuted, marginBottom: 6, lineHeight: 16 },
+  rankDesc:         { fontSize: 12, color: colors.textMuted, marginBottom: 4, lineHeight: 16 },
+  rankExpiry:       { fontSize: 12, color: colors.textMuted, marginBottom: 6, fontWeight: '600' },
   rankMeta:         { flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 8 },
   rankLast4:        { fontSize: 12, color: colors.textMuted },
   rankReward:       { alignItems: 'flex-end', minWidth: 48 },

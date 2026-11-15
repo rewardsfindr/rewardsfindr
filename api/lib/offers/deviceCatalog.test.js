@@ -140,6 +140,8 @@ test('Amex eligible and enrolled rows for one card stay separate', () => {
   assert.equal(catalog[0].bankOfferId, 'AX1');
   assert.equal(catalog[0].phase, 'eligible');
   assert.equal(catalog[0].expiryPrecision, 'date');
+  assert.equal(catalog[0].cashbackAmount, 10);
+  assert.equal(catalog[0].cashbackType, 'fixed');
 });
 
 test('search returns a current prefix match and hides an expired offer', () => {

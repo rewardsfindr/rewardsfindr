@@ -27,6 +27,7 @@ import {
 import { WebView } from 'react-native-webview';
 import { getAuthInstance } from '../lib/firebaseClient.js';
 import { saveCardSnapshot } from '../lib/offerStore.js';
+import { replaceCardPass } from '../lib/savedOffers.js';
 import { colors, radii } from '../shared/theme.js';
 
 import { BANK_CONFIG }                                    from './sync/bankConfig.js';
@@ -61,6 +62,8 @@ export default function SyncWebView({ visible, bank, onClose, onSuccess }) {
   const syncStartedRef      = useRef(false);
   const syncPhaseRef        = useRef('eligible');
   const pendingCardLabelRef = useRef(null);
+  const amexWaitRef         = useRef(null);
+  const amexExpectedRef     = useRef(null);
 
   const [syncing, setSyncing]               = useState(false);
   const [switching, setSwitching]           = useState(false);
@@ -93,6 +96,8 @@ export default function SyncWebView({ visible, bank, onClose, onSuccess }) {
       syncStartedRef.current      = false;
       syncPhaseRef.current        = 'eligible';
       pendingCardLabelRef.current = null;
+      if (amexWaitRef.current) clearTimeout(amexWaitRef.current);
+      amexWaitRef.current         = null;
       setCurrentCard(null);
       setCurrentUrl('');
       setSyncing(false);
@@ -124,10 +129,36 @@ export default function SyncWebView({ visible, bank, onClose, onSuccess }) {
     // Amex fires ReadOffersHubPresentation (REPLACE) immediately when the card
     // switches — well before the CARD_SWITCHED message comes back.
     captureArmed.current = true;
-    webViewRef.current?.injectJavaScript(`window.__amexJsonCaptureArmed = true; true;`);
+    webViewRef.current?.injectJavaScript(`clearTimeout(window.__amexQuietTimer); window.__amexBest = null; window.__amexJsonCaptureArmed = true; true;`);
     webViewRef.current?.injectJavaScript(buildAmexClearFiltersJs());
     webViewRef.current?.injectJavaScript(buildAmexSwitchCardJs(next.testId, SWITCH_TIMEOUT_MS));
     return true;
+  };
+
+  const clearAmexWait = () => {
+    if (amexWaitRef.current) clearTimeout(amexWaitRef.current);
+    amexWaitRef.current = null;
+  };
+
+  const advanceAmexSync = (capturedTestId) => {
+    if (capturedTestId) visitedCardsRef.current.add(capturedTestId);
+    if (visitedCardsRef.current.size < cardOptionsRef.current.length) {
+      switchToNextAmexCard();
+      return;
+    }
+    if (syncPhaseRef.current === 'eligible') {
+      visitedCardsRef.current  = new Set();
+      initialActiveRef.current = null;
+      cardOptionsRef.current   = [];
+      syncPhaseRef.current     = 'enrolled';
+      setSyncPhaseUi('enrolled');
+      cardsDiscovered.current  = false;
+      webViewRef.current?.injectJavaScript(`window.location.replace(${JSON.stringify(config.enrolledUrl)}); true;`);
+      return;
+    }
+    const total = syncedCardsRef.current.reduce((sum, card) => sum + card.count, 0);
+    onSuccess(total, syncedCardsRef.current);
+    onClose();
   };
 
   const handleNavigationStateChange = (navState) => {
@@ -250,35 +281,12 @@ export default function SyncWebView({ visible, bank, onClose, onSuccess }) {
           rawOffers: payload,
         });
 
-    syncedCardsRef.current = [
-      ...syncedCardsRef.current,
-      { cardName: fullCardName || 'Unknown Card', count: result.synced ?? 0, phase },
-    ];
+    const savedCard = { cardName: fullCardName || 'Unknown Card', count: result.synced ?? 0, phase };
+    syncedCardsRef.current = replaceCardPass(syncedCardsRef.current, savedCard);
     setSyncing(false);
 
     if (bank === 'amex') {
-      if (capturedTestId) visitedCardsRef.current.add(capturedTestId);
-      const totalCards = cardOptionsRef.current.length;
-      const visited    = visitedCardsRef.current.size;
-
-      if (visited < totalCards) {
-        switchToNextAmexCard();
-        return;
-      }
-
-      if (phase === 'eligible') {
-        visitedCardsRef.current  = new Set();
-        initialActiveRef.current = null;
-        syncPhaseRef.current     = 'enrolled';
-        setSyncPhaseUi('enrolled');
-        cardsDiscovered.current  = false;
-        webViewRef.current?.injectJavaScript(`window.location.replace('${config.enrolledUrl}'); true;`);
-        return;
-      }
-
-      const total = syncedCardsRef.current.reduce((sum, c) => sum + c.count, 0);
-      onSuccess(total, syncedCardsRef.current);
-      onClose();
+      advanceAmexSync(capturedTestId);
       return;
     }
 
@@ -395,6 +403,15 @@ export default function SyncWebView({ visible, bank, onClose, onSuccess }) {
         setCurrentCard(data.cardLabel || null);
         if (bank === 'amex') {
           pendingCardLabelRef.current = data.cardLabel || null;
+          amexExpectedRef.current = data.expectedTestId || null;
+          setSyncing(true);
+          clearAmexWait();
+          amexWaitRef.current = setTimeout(() => {
+            if (!syncStartedRef.current || !captureArmed.current) return;
+            captureArmed.current = false;
+            webViewRef.current?.injectJavaScript(`clearTimeout(window.__amexQuietTimer); window.__amexBest = null; window.__amexJsonCaptureArmed = false; true;`);
+            advanceAmexSync(amexExpectedRef.current);
+          }, 5000);
         } else {
           setTimeout(() => {
             captureArmed.current = true;
@@ -433,6 +450,11 @@ export default function SyncWebView({ visible, bank, onClose, onSuccess }) {
           data.cardLabel && (c.label + (c.last4 ? ` (...${c.last4})` : '')) === data.cardLabel
         );
         const capturedTestId = capturedCard?.testId ?? null;
+        clearAmexWait();
+        if (capturedTestId && visitedCardsRef.current.has(capturedTestId)) {
+          if (visitedCardsRef.current.size < cardOptionsRef.current.length) switchToNextAmexCard();
+          return;
+        }
 
         await handleCaptureResult({
           payload:         data.json,
