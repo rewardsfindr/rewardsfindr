@@ -248,11 +248,131 @@ export function wellsFargoRecords({ json, now = new Date() }) {
   return records;
 }
 
+function citiOffersReady(json) {
+  if (!json || typeof json !== 'object' || Array.isArray(json)) return false;
+  if (!Array.isArray(json.merchantOffers)) return false;
+  for (const group of json.merchantOffers) {
+    if (!group || typeof group !== 'object' || Array.isArray(group)) return false;
+    if (!Array.isArray(group.offers)) return false;
+  }
+  return true;
+}
+
+function mapCitiReward(offer) {
+  const title = String(offer?.offerTitle ?? '').trim();
+  const discountType = String(offer?.offerDiscountType ?? '').trim().toUpperCase();
+  const dollar = title.match(/\$\s*(\d+(?:\.\d+)?)/);
+  const percent = title.match(/(\d+(?:\.\d+)?)\s*%/);
+  let amount = NaN;
+  if (discountType === 'ABSOLUTE' && dollar) amount = parseFloat(dollar[1]);
+  else if (discountType === 'PERCENTAGE' && percent) amount = parseFloat(percent[1]);
+  else if (dollar) amount = parseFloat(dollar[1]);
+  else if (percent) amount = parseFloat(percent[1]);
+  const hasAmount = Number.isFinite(amount);
+  const cashbackType = discountType === 'ABSOLUTE' || (dollar && discountType !== 'PERCENTAGE')
+    ? 'fixed'
+    : 'percent';
+  return {
+    hasReward: hasAmount || title !== '',
+    cashbackAmount: hasAmount ? amount : 0,
+    cashbackType,
+    offerDescription: title,
+  };
+}
+
+function mapCitiExpiry(value) {
+  const fromWells = mapWellsExpiry(value);
+  if (fromWells.expiryPrecision !== 'unknown') return fromWells;
+  if (value == null) return fromWells;
+  const text = String(value).trim();
+  if (!text) return fromWells;
+  const match = text.match(/^([A-Za-z]+)\s+(\d{1,2}),\s*(\d{4})$/);
+  if (!match) return fromWells;
+  const months = {
+    jan: 0, january: 0, feb: 1, february: 1, mar: 2, march: 2,
+    apr: 3, april: 3, may: 4, jun: 5, june: 5, jul: 6, july: 6,
+    aug: 7, august: 7, sep: 8, sept: 8, september: 8,
+    oct: 9, october: 9, nov: 10, november: 10, dec: 11, december: 11,
+  };
+  const month = months[match[1].toLowerCase()];
+  if (month == null) return fromWells;
+  const day = Number(match[2]);
+  const year = Number(match[3]);
+  const expiresAt = Date.UTC(year, month, day);
+  const parsed = new Date(expiresAt);
+  if (Number.isNaN(parsed.getTime()) || parsed.getUTCMonth() !== month || parsed.getUTCDate() !== day) {
+    return fromWells;
+  }
+  return {
+    expiryDate: parsed.toISOString(),
+    expiryPrecision: 'date',
+    expiresAt,
+  };
+}
+
+export function citiRecords({ cardName, cardLast4, json, now = new Date() }) {
+  if (!citiOffersReady(json)) {
+    refuseSnapshot('Citi offers were not recognized. Nothing was changed.');
+  }
+
+  const resolvedName = String(cardName || '').trim() || 'Citi Card';
+  const seen = new Set();
+  const records = [];
+  let considered = 0;
+  let sawOfferId = false;
+
+  for (const group of json.merchantOffers) {
+    for (const item of group.offers || []) {
+      considered += 1;
+      const bankOfferId = String(item?.offerId ?? '').trim();
+      if (bankOfferId) sawOfferId = true;
+      const status = String(item?.offerStatus ?? '').trim().toUpperCase();
+      if (status && status !== 'AVAILABLE' && status !== 'ENROLLED') continue;
+      const merchantName = String(item?.merchantName ?? '').trim();
+      if (!bankOfferId || !merchantName || seen.has(bankOfferId)) continue;
+      seen.add(bankOfferId);
+      const reward = mapCitiReward(item);
+      const expiry = mapCitiExpiry(item?.offerEndDate);
+      const offerToken = bankOfferId.replace(/[/\s]/g, '');
+      records.push({
+        id: `citi_${slug(resolvedName)}_${offerToken}`.slice(0, 700),
+        bankOfferId,
+        userId: null,
+        merchantName,
+        merchantNameLower: merchantName.toLowerCase().trim(),
+        offerDescription: reward.offerDescription,
+        cashbackAmount: reward.cashbackAmount,
+        cashbackType: reward.cashbackType,
+        minimumSpend: 0,
+        category: 'other',
+        expiryDate: expiry.expiryDate,
+        expiryPrecision: expiry.expiryPrecision,
+        expiresAt: expiry.expiresAt,
+        isActivated: status === 'ENROLLED',
+        offerDeepLink: null,
+        bank: 'citi',
+        cardName: resolvedName,
+        cardLast4: cardLast4 || null,
+        phase: '',
+        syncedAt: now.toISOString(),
+      });
+    }
+  }
+
+  if (considered > 0 && records.length === 0) {
+    refuseSnapshot(sawOfferId
+      ? 'Citi offers were incomplete. Nothing was changed.'
+      : 'Citi offers had no offer id. Nothing was changed.');
+  }
+  return records;
+}
+
 export function buildSnapshotRecords(input) {
   if (input.bank === 'chase') return chaseRecords(input);
   if (input.bank === 'amex') return amexRecords(input);
   if (input.bank === 'wells_fargo') return wellsFargoRecords(input);
-  throw new Error('bank must be chase, amex, or wells_fargo');
+  if (input.bank === 'citi') return citiRecords(input);
+  throw new Error('bank must be chase, amex, wells_fargo, or citi');
 }
 
 export function replaceCardOffers(existing, { bank, cardName, phase, records }) {
