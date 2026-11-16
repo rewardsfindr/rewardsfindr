@@ -52,6 +52,8 @@ export const stripWellsDeals = new Function(`return (${stripWellsDealsSource})`)
 // merchantDealDetails is found, then hand that object to stripWellsDeals.
 // allowEmpty is only for the network response: a real empty list may replace
 // the card. A search of the page ignores empty shells so visible tiles remain.
+// An empty available array is still that host when activated or earned deals
+// have bank offer ids. Those deals stay on their own lists.
 const unwrapWellsPayloadSource = `function unwrapWellsPayload(parsed, allowEmpty) {
   var skipKey = {
     checkSum: 1, checksum: 1, expiredDeals: 1, longDescription: 1,
@@ -60,21 +62,36 @@ const unwrapWellsPayloadSource = `function unwrapWellsPayload(parsed, allowEmpty
     location: 1, navigator: 1, history: 1, localStorage: 1, sessionStorage: 1,
   };
 
+  function hasBankOfferId(item) {
+    var details = item && item.merchantDealDetails;
+    if (!details || details.merchantOfferId == null) return false;
+    return String(details.merchantOfferId).trim() !== '';
+  }
+
+  function listHasBankOfferId(list) {
+    if (!Array.isArray(list)) return false;
+    for (var i = 0; i < list.length; i++) {
+      if (hasBankOfferId(list[i])) return true;
+    }
+    return false;
+  }
+
   function hostOf(value) {
     if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
     var available = value.availableDeals && typeof value.availableDeals === 'object' && !Array.isArray(value.availableDeals)
       ? value.availableDeals
       : value;
     if (!Array.isArray(available.cardlyticsEligibleDeals)) return null;
-    if (!allowEmpty && available.cardlyticsEligibleDeals.length === 0) return null;
+    var activated = Array.isArray(available.activatedDeals) ? available.activatedDeals : [];
+    var earnedList = value.earnedDeals && Array.isArray(value.earnedDeals.deals) ? value.earnedDeals.deals : [];
+    if (!allowEmpty && available.cardlyticsEligibleDeals.length === 0
+        && !listHasBankOfferId(activated) && !listHasBankOfferId(earnedList)) return null;
     return {
       availableDeals: {
         cardlyticsEligibleDeals: available.cardlyticsEligibleDeals,
-        activatedDeals: Array.isArray(available.activatedDeals) ? available.activatedDeals : [],
+        activatedDeals: activated,
       },
-      earnedDeals: value.earnedDeals && Array.isArray(value.earnedDeals.deals)
-        ? { deals: value.earnedDeals.deals }
-        : { deals: [] },
+      earnedDeals: { deals: earnedList },
     };
   }
 
@@ -353,12 +370,19 @@ export const buildWellsFargoReadJs = () => `
       var unwrapWellsPayload = ${unwrapWellsPayloadSource};
       var readRenderedDeals = ${readRenderedDealsSource};
 
+      function hasListedDeals(payload) {
+        if (!payload || !payload.availableDeals) return false;
+        var earned = payload.earnedDeals && payload.earnedDeals.deals;
+        return payload.availableDeals.cardlyticsEligibleDeals.length > 0
+          || (payload.availableDeals.activatedDeals || []).length > 0
+          || (earned || []).length > 0;
+      }
+
       function usable(value) {
         var stripped = value && value.availableDeals && Array.isArray(value.availableDeals.cardlyticsEligibleDeals)
           ? stripWellsDeals(value)
           : stripWellsDeals(unwrapWellsPayload(value, false));
-        if (!stripped || !stripped.availableDeals) return null;
-        if (!stripped.availableDeals.cardlyticsEligibleDeals.length) return null;
+        if (!hasListedDeals(stripped)) return null;
         return stripped;
       }
 
@@ -392,7 +416,9 @@ export const buildWellsFargoReadJs = () => `
         && Array.isArray(window.__wellsLastDeals.availableDeals.cardlyticsEligibleDeals)
         ? stripWellsDeals(window.__wellsLastDeals)
         : null;
-      var stash = saved && saved.availableDeals.cardlyticsEligibleDeals.length ? saved : null;
+      // Keep the getDeals lists when available is empty. A later walk must not
+      // replace activated or earned deals with a flattened available list.
+      var stash = hasListedDeals(saved) ? saved : null;
       if (!stash) {
         try { stash = usable(window); } catch (e) { stash = null; }
       }
@@ -428,9 +454,11 @@ export const buildWellsFargoReadJs = () => `
         var baseAvailable = (stash && stash.availableDeals && stash.availableDeals.cardlyticsEligibleDeals) || [];
         var baseActivated = (stash && stash.availableDeals && stash.availableDeals.activatedDeals) || [];
         var baseEarned = (stash && stash.earnedDeals && stash.earnedDeals.deals) || [];
+        var bankHasClassifiedDeals = baseActivated.length > 0 || baseEarned.length > 0;
         var available = baseAvailable.length ? baseAvailable : (domAvailable || []);
         var activated = baseActivated.length ? baseActivated : (domActivated || []);
         var earned = baseEarned.length ? baseEarned : (domEarned || []);
+        if (bankHasClassifiedDeals && !baseAvailable.length) available = [];
         var payload = stripWellsDeals({
           availableDeals: { cardlyticsEligibleDeals: available, activatedDeals: activated },
           earnedDeals: { deals: earned },

@@ -546,6 +546,128 @@ test('reads the activated and earned tabs and does not click a deal', async () =
   assert.deepEqual(clicked, ['Activated', 'Earned', 'Available']);
 });
 
+test('an empty available list keeps activated and earned deals on their lists', async () => {
+  const activatedDeal = {
+    isActivated: false,
+    merchantDealDetails: {
+      merchantOfferId: 'ACTIVATED1',
+      merchantName: 'Nike',
+      dealAmount: 15,
+      amountType: '%',
+      shortDescription: '15% back',
+      expirationDate: '2026-08-15T00:00:00.000Z',
+    },
+  };
+  const messages = [];
+  const state = { tab: 'available' };
+  const activatedCard = {
+    innerText: 'Nike 15% cash back Expires 08/15/26 Activated',
+    attrs: { id: 'nikeTile12345678' },
+    parentElement: null,
+    getAttribute(name) { return this.attrs[name] || null; },
+    querySelectorAll() { return []; },
+    click() { throw new Error('deal clicked'); },
+  };
+  function tab(name) {
+    const el = {
+      innerText: name,
+      attrs: { 'aria-selected': name === 'Available' ? 'true' : 'false' },
+      parentElement: null,
+      getAttribute(attr) { return this.attrs[attr] || null; },
+      querySelectorAll() { return []; },
+      click() {
+        state.tab = name.toLowerCase();
+        for (const other of tabs) other.attrs['aria-selected'] = other === el ? 'true' : 'false';
+      },
+    };
+    return el;
+  }
+  const tabs = [tab('Available'), tab('Activated'), tab('Earned')];
+  const cards = {
+    available: [],
+    activated: [activatedCard],
+    earned: [],
+  };
+  const document = {
+    body: { get innerText() { return state.tab; } },
+    querySelectorAll(selector) {
+      const sel = String(selector);
+      if (sel.includes('role="tab"')) return tabs;
+      if (sel.includes('button')) return cards[state.tab] || [];
+      return [];
+    },
+  };
+  const window = {
+    ReactNativeWebView: {
+      postMessage(raw) { messages.push(JSON.parse(raw)); },
+    },
+    initialState: {
+      metadata: {
+        deals: {
+          checkSum: 'CHECKSUM-SECRET',
+          availableDeals: {
+            cardlyticsEligibleDeals: [],
+            activatedDeals: [activatedDeal],
+          },
+          earnedDeals: { deals: [] },
+        },
+      },
+    },
+  };
+  new Function('window', 'document', buildWellsFargoReadJs())(window, document);
+  await new Promise(resolve => setTimeout(resolve, 1200));
+  assert.equal(messages.length, 1);
+  assert.equal(messages[0].type, 'WELLS_DEALS');
+  const deals = messages[0].deals;
+  assert.deepEqual(deals.availableDeals.cardlyticsEligibleDeals, []);
+  assert.deepEqual(deals.earnedDeals.deals, []);
+  assert.equal(deals.availableDeals.activatedDeals[0].merchantDealDetails.merchantOfferId, 'ACTIVATED1');
+  assert.equal(deals.availableDeals.activatedDeals[0].isActivated, false);
+  const [stored] = wellsFargoRecords({ json: deals, now: NOW });
+  assert.equal(stored.bankOfferId, 'ACTIVATED1');
+  assert.equal(stored.isActivated, true);
+  const posted = JSON.stringify(messages[0]);
+  assert.equal(posted.includes('CHECKSUM-SECRET'), false);
+  assert.equal(posted.includes('nikeTile12345678'), false);
+
+  const earnedMessages = [];
+  const earnedWindow = {
+    ReactNativeWebView: {
+      postMessage(raw) { earnedMessages.push(JSON.parse(raw)); },
+    },
+    pageModel: {
+      deals: {
+        availableDeals: {
+          cardlyticsEligibleDeals: [],
+          activatedDeals: [],
+        },
+        earnedDeals: {
+          deals: [{
+            isActivated: false,
+            merchantDealDetails: {
+              merchantOfferId: 'EARNED0001',
+              merchantName: 'Lyft',
+              dealAmount: 4,
+              amountType: '$',
+              shortDescription: '$4 back',
+            },
+          }],
+        },
+      },
+    },
+  };
+  new Function('window', 'document', buildWellsFargoReadJs())(earnedWindow, {});
+  assert.equal(earnedMessages.length, 1);
+  assert.equal(earnedMessages[0].type, 'WELLS_DEALS');
+  const earnedDeals = earnedMessages[0].deals;
+  assert.deepEqual(earnedDeals.availableDeals.cardlyticsEligibleDeals, []);
+  assert.deepEqual(earnedDeals.availableDeals.activatedDeals, []);
+  assert.equal(earnedDeals.earnedDeals.deals[0].merchantDealDetails.merchantOfferId, 'EARNED0001');
+  const [earnedStored] = wellsFargoRecords({ json: earnedDeals, now: NOW });
+  assert.equal(earnedStored.bankOfferId, 'EARNED0001');
+  assert.equal(earnedStored.isActivated, true);
+});
+
 test('hooks getDeals on fetch and ignores a non-2xx response', async () => {
   const messages = [];
   let ok = false;
