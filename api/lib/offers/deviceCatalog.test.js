@@ -1,10 +1,13 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import { isCurrentOffer } from './offerFreshness.js';
 import {
   amexRecords,
+  buildSnapshotRecords,
   chaseRecords,
   filterOffers,
   replaceCardOffers,
+  wellsFargoRecords,
 } from './deviceCatalog.js';
 
 const NOW = new Date('2026-01-01T00:00:00.000Z');
@@ -167,4 +170,306 @@ test('search returns a current prefix match and hides an expired offer', () => {
   ];
   const found = filterOffers(offers, 'star', NOW);
   assert.deepEqual(found.map(offer => offer.merchantName), ['Starbucks']);
+});
+
+function wellsDealsFixture() {
+  return {
+    checkSum: 'CHECKSUM-SECRET',
+    availableDeals: {
+      cardlyticsEligibleDeals: [
+        {
+          vendorName: 'VENDOR-SECRET',
+          multiCardFlag: true,
+          isActivated: false,
+          merchantDealDetails: {
+            merchantOfferId: 'PCTOFFER01',
+            merchantName: 'Starbucks',
+            dealAmount: 10,
+            amountType: '%',
+            shortDescription: 'Special offer',
+            expirationDate: '2026-06-30',
+            endDate: '2026-06-30',
+            daysLeft: 20,
+            status: 'AVAILABLE',
+            longDescription: 'LONG-SECRET',
+            imageUrl: 'https://images.example/secret.png',
+            checkSum: 'DETAIL-CHECKSUM',
+          },
+        },
+        {
+          isActivated: false,
+          merchantDealDetails: {
+            merchantOfferId: 'DOLLAR0001',
+            merchantName: 'Target',
+            dealAmount: 5,
+            amountType: '$',
+            shortDescription: 'Statement credit',
+            expirationDate: '04/01/2026',
+          },
+        },
+        {
+          isActivated: false,
+          merchantDealDetails: {
+            merchantOfferId: 'NODATE0001',
+            merchantName: 'Uber',
+            dealAmount: 2,
+            amountType: '$',
+            shortDescription: '$2 back',
+          },
+        },
+        {
+          isActivated: false,
+          merchantDealDetails: {
+            merchantName: 'Missing Id',
+            dealAmount: 9,
+            amountType: '%',
+            checkSum: 'NOTANOFFER',
+          },
+        },
+      ],
+      activatedDeals: [
+        {
+          isActivated: false,
+          merchantDealDetails: {
+            merchantOfferId: 'ACTIVATED1',
+            merchantName: 'Nike',
+            dealAmount: 15,
+            amountType: '%',
+            shortDescription: '15% back',
+            expirationDate: '2026-08-15T00:00:00.000Z',
+          },
+        },
+        {
+          merchantDealDetails: {
+            merchantOfferId: 'PCTOFFER01',
+            merchantName: 'Starbucks Duplicate',
+            dealAmount: 1,
+            amountType: '%',
+          },
+        },
+      ],
+    },
+    earnedDeals: {
+      deals: [
+        {
+          merchantDealDetails: {
+            merchantOfferId: 'EARNED0001',
+            merchantName: 'Lyft',
+            dealAmount: 4,
+            amountType: '$',
+            shortDescription: '$4 back',
+          },
+        },
+        {
+          merchantDealDetails: {
+            merchantOfferId: 'NOREWARD01',
+            merchantName: 'No Reward Shop',
+          },
+        },
+      ],
+    },
+    expiredDeals: {
+      deals: [
+        {
+          merchantDealDetails: {
+            merchantOfferId: 'EXPIRED001',
+            merchantName: 'Old Navy',
+            dealAmount: 40,
+            amountType: '%',
+            shortDescription: 'expired',
+          },
+        },
+      ],
+    },
+  };
+}
+
+test('maps a Wells Fargo getDeals list into one card snapshot', () => {
+  const records = wellsFargoRecords({ json: wellsDealsFixture(), now: NOW });
+  assert.deepEqual(records.map(offer => offer.merchantName), [
+    'Starbucks', 'Target', 'Uber', 'Nike', 'Lyft',
+  ]);
+  assert.equal(records[0].bank, 'wells_fargo');
+  assert.equal(records[0].cardName, 'Wells Fargo');
+  assert.equal(records[0].phase, '');
+  assert.equal(records[0].bankOfferId, 'PCTOFFER01');
+  assert.equal(records[0].id, 'wells_fargo_wells-fargo_PCTOFFER01');
+  assert.equal(records[0].offerDescription, 'Special offer');
+  assert.equal(records[0].isActivated, false);
+  assert.equal(records[0].expiryPrecision, 'date');
+  assert.equal(records[0].expiryDate, '2026-06-30T00:00:00.000Z');
+  assert.equal(records[1].cashbackAmount, 5);
+  assert.equal(records[1].cashbackType, 'fixed');
+  assert.equal(records[1].offerDescription, 'Statement credit');
+  assert.equal(records[1].expiryDate, '2026-04-01T00:00:00.000Z');
+  assert.equal(records[3].isActivated, true);
+  assert.equal(records[3].bankOfferId, 'ACTIVATED1');
+  assert.equal(records[4].isActivated, true);
+  assert.equal(records[4].cashbackAmount, 4);
+  const saved = JSON.stringify(records);
+  for (const secret of ['CHECKSUM-SECRET', 'DETAIL-CHECKSUM', 'VENDOR-SECRET', 'LONG-SECRET', 'secret.png', 'NOTANOFFER', 'Old Navy', 'No Reward Shop']) {
+    assert.equal(saved.includes(secret), false);
+  }
+});
+
+test('a percent reward and a dollar reward both map', () => {
+  const records = wellsFargoRecords({ json: wellsDealsFixture(), now: NOW });
+  const percent = records.find(offer => offer.merchantName === 'Starbucks');
+  const dollars = records.find(offer => offer.merchantName === 'Target');
+  assert.equal(percent.cashbackAmount, 10);
+  assert.equal(percent.cashbackType, 'percent');
+  assert.equal(dollars.cashbackAmount, 5);
+  assert.equal(dollars.cashbackType, 'fixed');
+});
+
+test('a Wells Fargo offer with no expiration stays searchable and is not expiring soon', () => {
+  const records = wellsFargoRecords({ json: wellsDealsFixture(), now: NOW });
+  const uber = records.find(offer => offer.merchantName === 'Uber');
+  assert.equal(uber.expiryPrecision, 'unknown');
+  assert.equal(uber.expiryDate, null);
+  assert.equal(uber.expiresAt, null);
+  assert.equal(isCurrentOffer(uber, NOW), true);
+  assert.deepEqual(filterOffers(records, 'uber', NOW).map(offer => offer.merchantName), ['Uber']);
+});
+
+test('replacing the Wells Fargo card leaves Chase and Amex rows', () => {
+  const existing = [
+    { id: 'c', bank: 'chase', cardName: 'Freedom', phase: '', merchantName: 'Nike' },
+    { id: 'a', bank: 'amex', cardName: 'Gold', phase: 'eligible', merchantName: 'Whole Foods' },
+    { id: 'w', bank: 'wells_fargo', cardName: 'Wells Fargo', phase: '', merchantName: 'Old Shop' },
+  ];
+  const records = wellsFargoRecords({
+    json: {
+      availableDeals: {
+        cardlyticsEligibleDeals: [{
+          isActivated: false,
+          merchantDealDetails: {
+            merchantOfferId: 'DOLLAR0001',
+            merchantName: 'Target',
+            dealAmount: 5,
+            amountType: '$',
+            shortDescription: 'Statement credit',
+            expirationDate: '2026-04-01',
+          },
+        }],
+      },
+    },
+    now: NOW,
+  });
+  const next = replaceCardOffers(existing, {
+    bank: 'wells_fargo',
+    cardName: 'Wells Fargo',
+    phase: '',
+    records,
+  });
+  assert.deepEqual(next.map(offer => `${offer.bank}:${offer.merchantName}`), [
+    'chase:Nike',
+    'amex:Whole Foods',
+    'wells_fargo:Target',
+  ]);
+
+  const cleared = replaceCardOffers(next, {
+    bank: 'wells_fargo',
+    cardName: 'Wells Fargo',
+    phase: '',
+    records: wellsFargoRecords({
+      json: { availableDeals: { cardlyticsEligibleDeals: [] } },
+      now: NOW,
+    }),
+  });
+  assert.deepEqual(cleared.map(offer => offer.bank), ['chase', 'amex']);
+});
+
+test('an unrecognized Wells Fargo body or deals without an offer id are refused before storage is written', () => {
+  const storage = {
+    value: JSON.stringify([
+      { id: 'c', bank: 'chase', cardName: 'Freedom', phase: '', merchantName: 'Nike' },
+      { id: 'w', bank: 'wells_fargo', cardName: 'Wells Fargo', phase: '', merchantName: 'Old Shop' },
+    ]),
+  };
+  function persist(json) {
+    const existing = JSON.parse(storage.value);
+    const records = buildSnapshotRecords({
+      bank: 'wells_fargo',
+      cardName: 'Wells Fargo',
+      phase: '',
+      json,
+    });
+    const next = replaceCardOffers(existing, {
+      bank: 'wells_fargo',
+      cardName: 'Wells Fargo',
+      phase: '',
+      records,
+    });
+    storage.value = JSON.stringify(next);
+  }
+
+  const before = storage.value;
+  assert.throws(
+    () => persist({ status: 'error', body: 'do-not-store' }),
+    (err) => err.code === 'SNAPSHOT_REFUSED' && /Nothing was changed/.test(err.message) && !/do-not-store/.test(err.message)
+  );
+  assert.throws(
+    () => persist({
+      availableDeals: {
+        cardlyticsEligibleDeals: [{
+          merchantDealDetails: {
+            merchantName: 'Nike',
+            dealAmount: 5,
+            amountType: '%',
+            checkSum: 'NOTANOFFER',
+          },
+        }],
+      },
+    }),
+    (err) => err.code === 'SNAPSHOT_REFUSED' && /no offer id/.test(err.message) && !/NOTANOFFER/.test(err.message)
+  );
+  assert.equal(storage.value, before);
+});
+
+test('deals that have an offer id and no merchant name are refused and leave stored rows', () => {
+  const offerId = 'NAMEDOFFER1';
+  const storage = {
+    value: JSON.stringify([
+      { id: 'c', bank: 'chase', cardName: 'Freedom', phase: '', merchantName: 'Nike' },
+      { id: 'w', bank: 'wells_fargo', cardName: 'Wells Fargo', phase: '', merchantName: 'Old Shop', bankOfferId: 'OLD0000001' },
+    ]),
+  };
+  function persist(json) {
+    const existing = JSON.parse(storage.value);
+    const records = buildSnapshotRecords({
+      bank: 'wells_fargo',
+      cardName: 'Wells Fargo',
+      phase: '',
+      json,
+    });
+    const next = replaceCardOffers(existing, {
+      bank: 'wells_fargo',
+      cardName: 'Wells Fargo',
+      phase: '',
+      records,
+    });
+    storage.value = JSON.stringify(next);
+  }
+
+  const before = storage.value;
+  assert.throws(
+    () => persist({
+      availableDeals: {
+        cardlyticsEligibleDeals: [{
+          merchantDealDetails: {
+            merchantOfferId: offerId,
+            merchantName: '',
+            dealAmount: 10,
+            amountType: '%',
+            shortDescription: '10% cash back',
+          },
+        }],
+      },
+    }),
+    (err) => err.code === 'SNAPSHOT_REFUSED'
+      && /incomplete/.test(err.message)
+      && !err.message.includes(offerId)
+  );
+  assert.equal(storage.value, before);
 });

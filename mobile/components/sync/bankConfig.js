@@ -43,4 +43,14 @@ export const BANK_CONFIG = {
     loginPaths: ['/account/login', '/login', '/sign-in', '/identity', '/auth', '/challenge', 'two-step-verification'],
     useAmexCardSwitcher: true,
   },
+  wells_fargo: {
+    // Wells Fargo's deals sign-on. serviceType sends the customer to deals
+    // after login. Do not replace that with the desktop deals-portal URL.
+    url: 'https://connect.secure.wellsfargo.com/auth/login/ulink?serviceType=dealsportal',
+    offersUrl: 'https://connect.secure.wellsfargo.com/auth/login/ulink?serviceType=dealsportal',
+    label: 'Wells Fargo Offers',
+    color: '#c0392b',
+    offersPaths: ['/auth/deals-portal', 'dealsportal'],
+    loginPaths: ['/auth/login'],
+  },
 };
