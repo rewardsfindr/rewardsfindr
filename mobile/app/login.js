@@ -5,7 +5,7 @@
 // ─────────────────────────────────────────────
 import React, { useEffect, useState } from 'react';
 import {
-  View, Text, TouchableOpacity, ActivityIndicator,
+  View, Text, Image, TouchableOpacity, ActivityIndicator,
   StyleSheet, SafeAreaView, Platform,
 } from 'react-native';
 import { Stack, useRouter } from 'expo-router';
@@ -146,9 +146,11 @@ export default function LoginScreen() {
       <Stack.Screen options={{ headerShown: false }} />
       <View style={s.container}>
 
-        <View style={s.iconWrap}>
-          <Text style={s.icon}>💳</Text>
-        </View>
+        <Image
+          source={require('../assets/logo.png')}
+          style={s.icon}
+          accessible={false}
+        />
 
         <Text style={s.title}>RewardsFindr</Text>
         <Text style={s.subtitle}>Find the best card rewards{"\n"}for any store</Text>
@@ -217,8 +219,7 @@ const s = StyleSheet.create({
   safe:          { flex: 1, backgroundColor: colors.bgPage },
   container:     { flex: 1, alignItems: 'center', justifyContent: 'center', padding: 32 },
 
-  iconWrap:      { backgroundColor: colors.primary, borderRadius: 24, padding: 20, marginBottom: 24 },
-  icon:          { fontSize: 44 },
+  icon:          { width: 112, height: 112, marginBottom: 24 },
   title:         { fontSize: 32, fontWeight: '900', color: colors.primary, marginBottom: 8 },
   subtitle:      { fontSize: 16, color: colors.textMuted, textAlign: 'center', lineHeight: 26, marginBottom: 36 },
 
