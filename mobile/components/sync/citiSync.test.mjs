@@ -1,22 +1,30 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
+import { dirname, join } from 'node:path';
 import { BANK_LIST, FAQ_ITEMS } from '../../shared/constants.js';
 import { BANK_CONFIG } from './bankConfig.js';
 import { CONNECT_BANK_COPY, ONBOARDING_PAGES } from '../../lib/onboardingContent.js';
 import { formatOfferExpiry } from '../../lib/savedOffers.js';
-import { citiRecords } from '../../../api/lib/offers/deviceCatalog.js';
+import { citiRecords, replaceCardOffers } from '../../../api/lib/offers/deviceCatalog.js';
 import {
   buildCitiOfferCaptureJs,
+  buildCitiOffersVisibleJs,
   buildCitiReadJs,
   stripCitiOffers,
 } from './citiSync.js';
 
 const NOW = new Date('2026-01-01T00:00:00.000Z');
+const HERE = dirname(fileURLToPath(import.meta.url));
 const STORE_FIXTURE_PATHS = [
   '/cursor/stores/self/docs/citi-offers-fixture-redacted.json',
   '/cursor/stores/bc-d795c680-e7e9-489b-996e-4127198403b2/docs/citi-offers-fixture-redacted.json',
 ];
+
+function readRepoFile(...parts) {
+  return readFileSync(join(HERE, ...parts), 'utf8');
+}
 
 function baseFixture() {
   return {
@@ -176,6 +184,44 @@ test('Citi opens Merchant Offers and is marked supported', () => {
   assert.equal(comingSoon.includes('Citi'), false);
   assert.match(ONBOARDING_PAGES[1].body, /Citi/);
   assert.equal(CONNECT_BANK_COPY.footnote.includes('Citi'), false);
+});
+
+test('home BankGrid treats supported Citi as tappable (+ Add), not Coming Soon', () => {
+  const citi = BANK_LIST.find(bank => bank.id === 'citi');
+  assert.equal(citi.supported, true);
+
+  // Mirror BankGrid.js: disabled = !supported || syncing; Coming Soon only when !supported.
+  const syncingBank = null;
+  const disabled = !citi.supported || syncingBank === citi.id;
+  assert.equal(disabled, false);
+  assert.equal(citi.supported ? '+ Add' : 'Coming Soon', '+ Add');
+
+  const bankGridSource = readRepoFile('..', 'BankGrid.js');
+  assert.match(bankGridSource, /BANK_LIST/);
+  assert.match(bankGridSource, /!bank\.supported \|\| syncing/);
+  assert.match(bankGridSource, /Coming Soon/);
+  assert.match(bankGridSource, /onSyncPress\(bank\.id\)/);
+
+  const homeSource = readRepoFile('..', '..', 'app', 'index.js');
+  assert.match(homeSource, /BankGrid/);
+  assert.match(homeSource, /SyncWebView/);
+  assert.match(homeSource, /onSyncPress=\{setSyncBank\}/);
+  assert.match(homeSource, /bank=\{syncBank\}/);
+});
+
+test('SyncWebView wires Citi capture/read/save the same way as Wells Fargo', () => {
+  const syncSource = readRepoFile('..', 'SyncWebView.js');
+  assert.match(syncSource, /buildCitiOfferCaptureJs/);
+  assert.match(syncSource, /buildCitiOffersVisibleJs/);
+  assert.match(syncSource, /buildCitiReadJs/);
+  assert.match(syncSource, /bank === 'citi'/);
+  assert.match(syncSource, /CITI_ON_OFFERS/);
+  assert.match(syncSource, /CITI_CAPTURE_UNAVAILABLE/);
+  assert.match(syncSource, /CITI_OFFERS/);
+  assert.match(syncSource, /bank: 'citi'/);
+  assert.equal(typeof buildCitiOffersVisibleJs(), 'string');
+  assert.match(buildCitiOffersVisibleJs(), /CITI_ON_OFFERS/);
+  assert.equal(BANK_CONFIG.citi.url, 'https://online.citi.com/US/nga/products-offers/merchantoffers');
 });
 
 test('stripCitiOffers keeps offer fields and the selected credit card only', () => {
@@ -345,4 +391,60 @@ test('maps the redacted fixture into citi catalog rows and dedupes offerId', () 
   assert.equal(percent.cashbackType, 'percent');
   assert.equal(percent.expiryDate, '2026-12-31T00:00:00.000Z');
   assert.equal(percent.isActivated, false);
+});
+
+test('hooks merchant-offers on fetch and ignores a non-2xx response', async () => {
+  const messages = [];
+  let ok = false;
+  const fixture = loadFixtureWithSecrets();
+  const window = {
+    XMLHttpRequest: FakeXHR,
+    fetch() {
+      return Promise.resolve({
+        ok,
+        clone() { return this; },
+        text() { return Promise.resolve(JSON.stringify(fixture)); },
+      });
+    },
+    ReactNativeWebView: {
+      postMessage(raw) { messages.push(JSON.parse(raw)); },
+    },
+  };
+  new Function('window', 'document', buildCitiOfferCaptureJs())(window, {});
+
+  await window.fetch('/US/nga/products-offers/merchantoffers/api');
+  await new Promise(resolve => setTimeout(resolve, 0));
+  assert.equal(readOffers(window, messages).type, 'CITI_CAPTURE_UNAVAILABLE');
+
+  ok = true;
+  await window.fetch('/US/nga/products-offers/merchantoffers/api');
+  await new Promise(resolve => setTimeout(resolve, 0));
+  const message = readOffers(window, messages);
+  assert.equal(message.type, 'CITI_OFFERS');
+  assert.equal(message.offers.merchantOffers[0].offers[0].merchantName, 'CVS');
+  assert.equal(JSON.stringify(message).includes('ACCOUNT-SECRET'), false);
+});
+
+test('replaceCardOffers for Citi replaces one card and leaves other banks', () => {
+  const existing = [
+    { id: 'c', bank: 'chase', cardName: 'Freedom', phase: '', merchantName: 'Nike' },
+    { id: 'w', bank: 'wells_fargo', cardName: 'Wells Fargo', phase: '', merchantName: 'Old Shop' },
+    { id: 'ci', bank: 'citi', cardName: 'Citi Strata® Card', phase: '', merchantName: 'Old Citi' },
+  ];
+  const records = citiRecords({
+    cardName: 'Citi Strata® Card',
+    json: stripCitiOffers(loadFixture()),
+    now: NOW,
+  });
+  const next = replaceCardOffers(existing, {
+    bank: 'citi',
+    cardName: 'Citi Strata® Card',
+    phase: '',
+    records,
+  });
+  assert.equal(next.some(offer => offer.bank === 'chase' && offer.merchantName === 'Nike'), true);
+  assert.equal(next.some(offer => offer.bank === 'wells_fargo' && offer.merchantName === 'Old Shop'), true);
+  assert.equal(next.some(offer => offer.bank === 'citi' && offer.merchantName === 'Old Citi'), false);
+  assert.equal(next.filter(offer => offer.bank === 'citi').length, records.length);
+  assert.equal(next.some(offer => offer.bank === 'citi' && offer.merchantName === 'CVS'), true);
 });
