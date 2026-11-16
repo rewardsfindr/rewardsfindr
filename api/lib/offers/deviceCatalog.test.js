@@ -658,3 +658,48 @@ test('an unrecognized Citi body or offers without an offer id are refused before
   );
   assert.equal(storage.value, before);
 });
+
+test('an empty Citi merchantOffers payload is refused and leaves stored Citi rows', () => {
+  const storage = {
+    value: JSON.stringify([
+      { id: 'c', bank: 'chase', cardName: 'Freedom', phase: '', merchantName: 'Nike' },
+      { id: 'ci', bank: 'citi', cardName: 'Citi Strata® Card', phase: '', merchantName: 'Old Citi', bankOfferId: 'OLD-CITI-1' },
+    ]),
+  };
+  function persist(json) {
+    const existing = JSON.parse(storage.value);
+    const records = buildSnapshotRecords({
+      bank: 'citi',
+      cardName: 'Citi Strata® Card',
+      phase: '',
+      json,
+    });
+    const next = replaceCardOffers(existing, {
+      bank: 'citi',
+      cardName: 'Citi Strata® Card',
+      phase: '',
+      records,
+    });
+    storage.value = JSON.stringify(next);
+  }
+
+  const before = storage.value;
+  assert.throws(
+    () => persist({ merchantOffers: [] }),
+    (err) => err.code === 'SNAPSHOT_REFUSED' && /empty/.test(err.message)
+  );
+  assert.throws(
+    () => persist({
+      merchantOffers: [
+        { displayOffersCategory: 'Featured', offers: [] },
+        { displayOffersCategory: 'Dining', offers: [] },
+      ],
+    }),
+    (err) => err.code === 'SNAPSHOT_REFUSED' && /empty/.test(err.message)
+  );
+  assert.equal(storage.value, before);
+  assert.deepEqual(JSON.parse(storage.value).map(offer => `${offer.bank}:${offer.merchantName}`), [
+    'chase:Nike',
+    'citi:Old Citi',
+  ]);
+});

@@ -252,6 +252,40 @@ test('does not capture a failed response or an unrecognized body', () => {
   assert.equal(JSON.stringify(afterUnrecognized).includes('SECRET-BODY'), false);
 });
 
+test('an empty merchantOffers list posts capture unavailable and does not look like a wipe', () => {
+  const { window, messages } = installHook();
+  const xhr = new window.XMLHttpRequest();
+  xhr.open('GET', '/US/nga/products-offers/merchantoffers/api');
+  xhr.responseText = JSON.stringify({
+    cardArtDetails: [{
+      displayProductName: 'Citi Strata® Card - 4832',
+      cardType: 'CREDIT',
+      primaryAccountFlag: true,
+    }],
+    merchantOffers: [],
+  });
+  xhr.send();
+  const empty = readOffers(window, messages);
+  assert.equal(empty.type, 'CITI_CAPTURE_UNAVAILABLE');
+
+  const emptyGroups = [];
+  const window2 = {
+    __citiLastOffers: {
+      selectedCard: { displayProductName: 'Citi Strata® Card - 4832', cardType: 'CREDIT' },
+      merchantOffers: [
+        { displayOffersCategory: 'Featured', offers: [] },
+        { displayOffersCategory: 'Dining', offers: [] },
+      ],
+    },
+    ReactNativeWebView: {
+      postMessage(raw) { emptyGroups.push(JSON.parse(raw)); },
+    },
+  };
+  new Function('window', 'document', buildCitiReadJs())(window2, {});
+  assert.equal(emptyGroups.length, 1);
+  assert.equal(emptyGroups[0].type, 'CITI_CAPTURE_UNAVAILABLE');
+});
+
 test('reads a stashed merchantOffers list from the page when the hook is empty', () => {
   const messages = [];
   const fixture = stripCitiOffers(loadFixture());

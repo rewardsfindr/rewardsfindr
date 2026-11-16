@@ -266,13 +266,19 @@ export const buildCitiReadJs = () => `
         return stripCitiOffers(unwrapCitiPayload(value));
       }
 
+      // Empty merchantOffers (or only empty groups) is not a successful
+      // capture — mirror Wells hasListedDeals so we never wipe the card.
       function hasOffers(payload) {
         if (!payload || !Array.isArray(payload.merchantOffers)) return false;
         for (var i = 0; i < payload.merchantOffers.length; i++) {
           var offers = payload.merchantOffers[i] && payload.merchantOffers[i].offers;
-          if (Array.isArray(offers) && offers.length > 0) return true;
+          if (!Array.isArray(offers)) continue;
+          for (var j = 0; j < offers.length; j++) {
+            var id = offers[j] && offers[j].offerId;
+            if (id != null && String(id).trim() !== '') return true;
+          }
         }
-        return Array.isArray(payload.merchantOffers);
+        return false;
       }
 
       function fromFrames(win, doc) {

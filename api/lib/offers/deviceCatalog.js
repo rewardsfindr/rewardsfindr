@@ -359,7 +359,12 @@ export function citiRecords({ cardName, cardLast4, json, now = new Date() }) {
     }
   }
 
-  if (considered > 0 && records.length === 0) {
+  // An empty or no-offer payload is not a successful sync. Refuse so
+  // replaceCardOffers never wipes the saved Citi card.
+  if (records.length === 0) {
+    if (considered === 0) {
+      refuseSnapshot('Citi offers were empty. Nothing was changed.');
+    }
     refuseSnapshot(sawOfferId
       ? 'Citi offers were incomplete. Nothing was changed.'
       : 'Citi offers had no offer id. Nothing was changed.');
