@@ -25,7 +25,7 @@ export default function HomeHeader({ user, onAvatarPress }) {
     <View style={[s.header, { paddingTop: insets.top + 10 }]}>
       <View style={s.logoRow}>
         <Image
-          source={require('../assets/icon.png')}
+          source={require('../assets/logo.png')}
           style={s.logoIcon}
           accessible={false}
         />

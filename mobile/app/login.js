@@ -147,7 +147,7 @@ export default function LoginScreen() {
       <View style={s.container}>
 
         <Image
-          source={require('../assets/icon.png')}
+          source={require('../assets/logo.png')}
           style={s.icon}
           accessible={false}
         />
