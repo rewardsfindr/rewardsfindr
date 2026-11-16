@@ -166,21 +166,16 @@ const readRenderedDealsSource = `function readRenderedDeals(doc, listName) {
   function offerIdFrom(card) {
     var nodes = [card];
     try {
-      var marked = card.querySelectorAll('[data-merchant-offer-id], [data-offer-id], [data-deal-id], [id]');
+      var marked = card.querySelectorAll('[data-merchant-offer-id], [data-offer-id], [data-deal-id], [data-id]');
       for (var i = 0; i < marked.length && i < 30; i++) nodes.push(marked[i]);
     } catch (e) {}
-    var names = ['data-id', 'data-merchant-offer-id', 'data-offer-id', 'data-deal-id'];
+    var names = ['data-merchant-offer-id', 'data-offer-id', 'data-deal-id', 'data-id'];
     for (var n = 0; n < nodes.length; n++) {
       if (!nodes[n] || !nodes[n].getAttribute) continue;
       for (var a = 0; a < names.length; a++) {
         var value = nodes[n].getAttribute(names[a]);
         if (value && String(value).trim()) return String(value).trim();
       }
-    }
-    for (var m = 0; m < nodes.length; m++) {
-      if (!nodes[m] || !nodes[m].getAttribute) continue;
-      var id = nodes[m].getAttribute('id');
-      if (id && /^[A-Za-z0-9]{8,20}$/.test(id)) return id;
     }
     return '';
   }
@@ -211,9 +206,7 @@ const readRenderedDealsSource = `function readRenderedDeals(doc, listName) {
     if (!reward || !merchantName) continue;
     var expiryMatch = text.match(/expires\\s+(\\d{1,2}\\/\\d{1,2}\\/\\d{2,4})/i);
     var offerId = offerIdFrom(card);
-    if (!offerId) {
-      offerId = [merchantName, reward.dealAmount, reward.amountType, expiryMatch ? expiryMatch[1] : ''].join('|');
-    }
+    if (!offerId) continue;
     if (seenIds.indexOf(offerId) !== -1) continue;
     seenIds.push(offerId);
     offers.push({
@@ -432,10 +425,12 @@ export const buildWellsFargoReadJs = () => `
       }
 
       function publish(domAvailable, domActivated, domEarned) {
-        var base = stash;
-        var available = domAvailable.length ? domAvailable : ((base && base.availableDeals && base.availableDeals.cardlyticsEligibleDeals) || []);
-        var activated = domActivated.length ? domActivated : ((base && base.availableDeals && base.availableDeals.activatedDeals) || []);
-        var earned = domEarned.length ? domEarned : ((base && base.earnedDeals && base.earnedDeals.deals) || []);
+        var baseAvailable = (stash && stash.availableDeals && stash.availableDeals.cardlyticsEligibleDeals) || [];
+        var baseActivated = (stash && stash.availableDeals && stash.availableDeals.activatedDeals) || [];
+        var baseEarned = (stash && stash.earnedDeals && stash.earnedDeals.deals) || [];
+        var available = baseAvailable.length ? baseAvailable : (domAvailable || []);
+        var activated = baseActivated.length ? baseActivated : (domActivated || []);
+        var earned = baseEarned.length ? baseEarned : (domEarned || []);
         var payload = stripWellsDeals({
           availableDeals: { cardlyticsEligibleDeals: available, activatedDeals: activated },
           earnedDeals: { deals: earned },

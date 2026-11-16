@@ -426,3 +426,50 @@ test('an unrecognized Wells Fargo body or deals without an offer id are refused 
   );
   assert.equal(storage.value, before);
 });
+
+test('deals that have an offer id and no merchant name are refused and leave stored rows', () => {
+  const offerId = 'NAMEDOFFER1';
+  const storage = {
+    value: JSON.stringify([
+      { id: 'c', bank: 'chase', cardName: 'Freedom', phase: '', merchantName: 'Nike' },
+      { id: 'w', bank: 'wells_fargo', cardName: 'Wells Fargo', phase: '', merchantName: 'Old Shop', bankOfferId: 'OLD0000001' },
+    ]),
+  };
+  function persist(json) {
+    const existing = JSON.parse(storage.value);
+    const records = buildSnapshotRecords({
+      bank: 'wells_fargo',
+      cardName: 'Wells Fargo',
+      phase: '',
+      json,
+    });
+    const next = replaceCardOffers(existing, {
+      bank: 'wells_fargo',
+      cardName: 'Wells Fargo',
+      phase: '',
+      records,
+    });
+    storage.value = JSON.stringify(next);
+  }
+
+  const before = storage.value;
+  assert.throws(
+    () => persist({
+      availableDeals: {
+        cardlyticsEligibleDeals: [{
+          merchantDealDetails: {
+            merchantOfferId: offerId,
+            merchantName: '',
+            dealAmount: 10,
+            amountType: '%',
+            shortDescription: '10% cash back',
+          },
+        }],
+      },
+    }),
+    (err) => err.code === 'SNAPSHOT_REFUSED'
+      && /incomplete/.test(err.message)
+      && !err.message.includes(offerId)
+  );
+  assert.equal(storage.value, before);
+});

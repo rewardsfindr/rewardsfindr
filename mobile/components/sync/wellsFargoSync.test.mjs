@@ -317,7 +317,7 @@ test('finds a deals object that is not initialState.metadata.deals', () => {
   assert.equal(JSON.stringify(messages[0]).includes('CHECKSUM-SECRET'), false);
 });
 
-test('reads a rendered deal tile and keeps a tile that has no id attribute', () => {
+test('reads a rendered deal card that has a bank offer id and skips a card that does not', () => {
   const messages = [];
   function card(id, text) {
     const button = {
@@ -339,6 +339,13 @@ test('reads a rendered deal tile and keeps a tile that has no id attribute', () 
   }
   const withId = card('FLOORD0001', 'Floor & Decor 10% cash back Expires 11/25/26 Activate');
   const noId = card('', 'Tommy John 20% cash back Expires 12/31/26 Activate');
+  const genericId = {
+    innerText: 'Nike 5% cash back Expires 12/01/26 Activate',
+    attrs: { id: 'nikeTile12345678' },
+    parentElement: null,
+    getAttribute(name) { return this.attrs[name] || null; },
+    querySelectorAll() { return []; },
+  };
   const wholeCard = {
     innerText: 'Sharper Image 10% cash back Expires 12/21/26 Activate',
     attrs: { 'data-id': '1000000001' },
@@ -348,7 +355,7 @@ test('reads a rendered deal tile and keeps a tile that has no id attribute', () 
   };
   const document = {
     querySelectorAll(selector) {
-      if (String(selector).includes('button')) return [withId.button, noId.button, wholeCard];
+      if (String(selector).includes('button')) return [withId.button, noId.button, genericId, wholeCard];
       return [];
     },
   };
@@ -360,19 +367,117 @@ test('reads a rendered deal tile and keeps a tile that has no id attribute', () 
   new Function('window', 'document', buildWellsFargoReadJs())(window, document);
   assert.equal(messages[0].type, 'WELLS_DEALS');
   const offers = messages[0].deals.availableDeals.cardlyticsEligibleDeals;
-  assert.equal(offers.length, 3);
+  assert.equal(offers.length, 2);
   assert.equal(offers[0].merchantDealDetails.merchantOfferId, 'FLOORD0001');
   assert.equal(offers[0].merchantDealDetails.merchantName, 'Floor & Decor');
   assert.equal(offers[0].merchantDealDetails.dealAmount, 10);
   assert.equal(offers[0].merchantDealDetails.amountType, '%');
   assert.equal(offers[0].merchantDealDetails.expirationDate, '11/25/26');
-  assert.equal(offers[1].merchantDealDetails.merchantName, 'Tommy John');
-  assert.equal(offers[1].merchantDealDetails.merchantOfferId, 'Tommy John|20|%|12/31/26');
-  assert.equal(offers[1].merchantDealDetails.dealAmount, 20);
-  assert.equal(offers[1].merchantDealDetails.expirationDate, '12/31/26');
-  assert.equal(offers[2].merchantDealDetails.merchantOfferId, '1000000001');
-  assert.equal(offers[2].merchantDealDetails.merchantName, 'Sharper Image');
-  assert.equal(offers[2].merchantDealDetails.expirationDate, '12/21/26');
+  assert.equal(offers[1].merchantDealDetails.merchantOfferId, '1000000001');
+  assert.equal(offers[1].merchantDealDetails.merchantName, 'Sharper Image');
+  assert.equal(offers[1].merchantDealDetails.expirationDate, '12/21/26');
+  const posted = JSON.stringify(messages[0]);
+  assert.equal(posted.includes('Tommy John|20|%|12/31/26'), false);
+  assert.equal(posted.includes('nikeTile12345678'), false);
+  assert.equal(posted.includes('Nike|5|%|12/01/26'), false);
+});
+
+test('keeps the getDeals bank offer id when a rendered card has no offer id', async () => {
+  const messages = [];
+  const state = { tab: 'available' };
+  const noOfferId = {
+    innerText: 'Tommy John 20% cash back Expires 12/31/26 Activate',
+    attrs: { id: 'tommyTile12345678' },
+    parentElement: null,
+    getAttribute(name) { return this.attrs[name] || null; },
+    querySelectorAll() { return []; },
+    click() { throw new Error('deal clicked'); },
+  };
+  function tab(name) {
+    const el = {
+      innerText: name,
+      attrs: { 'aria-selected': name === 'Available' ? 'true' : 'false' },
+      parentElement: null,
+      getAttribute(attr) { return this.attrs[attr] || null; },
+      querySelectorAll() { return []; },
+      click() {
+        state.tab = name.toLowerCase();
+        for (const other of tabs) other.attrs['aria-selected'] = other === el ? 'true' : 'false';
+      },
+    };
+    return el;
+  }
+  const tabs = [tab('Available'), tab('Activated'), tab('Earned')];
+  const document = {
+    body: { get innerText() { return state.tab; } },
+    querySelectorAll(selector) {
+      const sel = String(selector);
+      if (sel.includes('role="tab"')) return tabs;
+      if (sel.includes('button')) return state.tab === 'available' ? [noOfferId] : [];
+      return [];
+    },
+  };
+  const window = {
+    __wellsLastDeals: {
+      availableDeals: {
+        cardlyticsEligibleDeals: [{
+          isActivated: false,
+          merchantDealDetails: {
+            merchantOfferId: 'BANKOFFER01',
+            merchantName: 'Tommy John',
+            dealAmount: 20,
+            amountType: '%',
+            shortDescription: '20% cash back',
+            expirationDate: '12/31/26',
+          },
+        }],
+        activatedDeals: [],
+      },
+      earnedDeals: { deals: [] },
+    },
+    ReactNativeWebView: {
+      postMessage(raw) { messages.push(JSON.parse(raw)); },
+    },
+  };
+  new Function('window', 'document', buildWellsFargoReadJs())(window, document);
+  await new Promise(resolve => setTimeout(resolve, 1200));
+  assert.equal(messages.length, 1);
+  assert.equal(messages[0].type, 'WELLS_DEALS');
+  assert.equal(
+    messages[0].deals.availableDeals.cardlyticsEligibleDeals[0].merchantDealDetails.merchantOfferId,
+    'BANKOFFER01'
+  );
+  const posted = JSON.stringify(messages[0]);
+  assert.equal(posted.includes('Tommy John|20|%|12/31/26'), false);
+  assert.equal(posted.includes('tommyTile12345678'), false);
+});
+
+test('posts capture unavailable when no rendered card has a bank offer id', () => {
+  const messages = [];
+  const card = {
+    innerText: 'Tommy John 20% cash back Expires 12/31/26 Activate',
+    attrs: { id: 'tommyTile12345678' },
+    parentElement: null,
+    getAttribute(name) { return this.attrs[name] || null; },
+    querySelectorAll() { return []; },
+  };
+  const document = {
+    querySelectorAll(selector) {
+      if (String(selector).includes('button')) return [card];
+      return [];
+    },
+  };
+  const window = {
+    ReactNativeWebView: {
+      postMessage(raw) { messages.push(JSON.parse(raw)); },
+    },
+  };
+  new Function('window', 'document', buildWellsFargoReadJs())(window, document);
+  assert.equal(messages.length, 1);
+  assert.equal(messages[0].type, 'WELLS_CAPTURE_UNAVAILABLE');
+  const posted = JSON.stringify(messages[0]);
+  assert.equal(posted.includes('Tommy John|20|%|12/31/26'), false);
+  assert.equal(posted.includes('tommyTile12345678'), false);
 });
 
 test('reads the activated and earned tabs and does not click a deal', async () => {
