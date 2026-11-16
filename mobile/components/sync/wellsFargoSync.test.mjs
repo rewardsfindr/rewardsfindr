@@ -84,9 +84,10 @@ test('Wells Fargo opens the sign-on page and syncs from the deals portal', () =>
   const wells = BANK_LIST.find(bank => bank.id === 'wells_fargo');
   assert.equal(wells.supported, true);
   assert.equal(wells.label, 'Wells Fargo');
-  for (const id of ['capital_one', 'citi', 'discover', 'bofa', 'bilt']) {
+  for (const id of ['capital_one', 'discover', 'bofa', 'bilt']) {
     assert.equal(BANK_LIST.find(bank => bank.id === id).supported, false);
   }
+  assert.equal(BANK_LIST.find(bank => bank.id === 'citi').supported, true);
   const config = BANK_CONFIG.wells_fargo;
   assert.equal(
     config.url,

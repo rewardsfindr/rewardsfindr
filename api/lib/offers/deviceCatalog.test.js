@@ -5,6 +5,7 @@ import {
   amexRecords,
   buildSnapshotRecords,
   chaseRecords,
+  citiRecords,
   filterOffers,
   replaceCardOffers,
   wellsFargoRecords,
@@ -472,4 +473,233 @@ test('deals that have an offer id and no merchant name are refused and leave sto
       && !err.message.includes(offerId)
   );
   assert.equal(storage.value, before);
+});
+
+function citiOffersFixture() {
+  return {
+    selectedCard: {
+      displayProductName: 'Citi Strata® Card - 4832',
+      cardType: 'CREDIT',
+    },
+    merchantOffers: [
+      {
+        displayOffersCategory: 'Featured',
+        offers: [
+          {
+            offerId: '8cfb0cc0-0ba6-41ec-bbd5-c3280862a6e0',
+            offerStatus: 'AVAILABLE',
+            merchantName: 'CVS',
+            offerEndDate: 'Nov 30, 2026',
+            offerDiscountType: 'ABSOLUTE',
+            offerTitle: '$5 Back',
+          },
+          {
+            offerId: '15d21ca1-170a-4758-b7a3-02220186aeb3',
+            offerStatus: 'ENROLLED',
+            merchantName: 'Starbucks',
+            offerEndDate: 'Nov 30, 2026',
+            offerDiscountType: 'ABSOLUTE',
+            offerTitle: '$5 Back',
+          },
+          {
+            offerId: 'RN-311510',
+            offerStatus: 'AVAILABLE',
+            merchantName: 'Tea Monks - Escondido',
+            offerEndDate: 'Dec 31, 2026',
+            offerDiscountType: 'PERCENTAGE',
+            offerTitle: '5% Back',
+          },
+        ],
+      },
+      {
+        displayOffersCategory: 'Dining',
+        offers: [
+          {
+            offerId: '15d21ca1-170a-4758-b7a3-02220186aeb3',
+            offerStatus: 'ENROLLED',
+            merchantName: 'Starbucks',
+            offerEndDate: 'Nov 30, 2026',
+            offerDiscountType: 'ABSOLUTE',
+            offerTitle: '$5 Back',
+          },
+        ],
+      },
+    ],
+  };
+}
+
+test('maps a Citi merchantOffers list into one card snapshot and dedupes offerId', () => {
+  const records = citiRecords({
+    cardName: 'Citi Strata® Card',
+    cardLast4: '4832',
+    json: citiOffersFixture(),
+    now: NOW,
+  });
+  assert.equal(records.length, 3);
+  assert.equal(records[0].bank, 'citi');
+  assert.equal(records[0].cardName, 'Citi Strata® Card');
+  assert.equal(records[0].phase, '');
+  assert.equal(records[0].bankOfferId, '8cfb0cc0-0ba6-41ec-bbd5-c3280862a6e0');
+  assert.equal(records[0].cashbackAmount, 5);
+  assert.equal(records[0].cashbackType, 'fixed');
+  assert.equal(records[0].isActivated, false);
+  assert.equal(records[0].expiryDate, '2026-11-30T00:00:00.000Z');
+  const enrolled = records.find(offer => offer.merchantName === 'Starbucks');
+  assert.equal(enrolled.isActivated, true);
+  const percent = records.find(offer => offer.merchantName === 'Tea Monks - Escondido');
+  assert.equal(percent.cashbackType, 'percent');
+  assert.equal(percent.cashbackAmount, 5);
+  assert.equal(records.filter(offer => offer.bankOfferId === '15d21ca1-170a-4758-b7a3-02220186aeb3').length, 1);
+});
+
+test('a Citi offer with no end date stays searchable and is not expiring soon', () => {
+  const records = citiRecords({
+    cardName: 'Citi Strata® Card',
+    json: {
+      merchantOffers: [{
+        displayOffersCategory: 'Featured',
+        offers: [{
+          offerId: 'NODATE0001',
+          offerStatus: 'AVAILABLE',
+          merchantName: 'Uber',
+          offerDiscountType: 'ABSOLUTE',
+          offerTitle: '$2 Back',
+        }],
+      }],
+    },
+    now: NOW,
+  });
+  assert.equal(records[0].expiryPrecision, 'unknown');
+  assert.equal(records[0].expiryDate, null);
+  assert.equal(isCurrentOffer(records[0], NOW), true);
+  assert.deepEqual(filterOffers(records, 'uber', NOW).map(offer => offer.merchantName), ['Uber']);
+});
+
+test('replacing the Citi card leaves Chase, Amex, and Wells Fargo rows', () => {
+  const existing = [
+    { id: 'c', bank: 'chase', cardName: 'Freedom', phase: '', merchantName: 'Nike' },
+    { id: 'a', bank: 'amex', cardName: 'Gold', phase: 'eligible', merchantName: 'Whole Foods' },
+    { id: 'w', bank: 'wells_fargo', cardName: 'Wells Fargo', phase: '', merchantName: 'Old Shop' },
+    { id: 'ci', bank: 'citi', cardName: 'Citi Strata® Card', phase: '', merchantName: 'Old Citi' },
+  ];
+  const records = citiRecords({
+    cardName: 'Citi Strata® Card',
+    json: {
+      merchantOffers: [{
+        displayOffersCategory: 'Featured',
+        offers: [{
+          offerId: 'NEWOFFER01',
+          offerStatus: 'AVAILABLE',
+          merchantName: 'Target',
+          offerDiscountType: 'ABSOLUTE',
+          offerTitle: '$10 Back',
+          offerEndDate: 'Apr 1, 2026',
+        }],
+      }],
+    },
+    now: NOW,
+  });
+  const next = replaceCardOffers(existing, {
+    bank: 'citi',
+    cardName: 'Citi Strata® Card',
+    phase: '',
+    records,
+  });
+  assert.deepEqual(next.map(offer => `${offer.bank}:${offer.merchantName}`), [
+    'chase:Nike',
+    'amex:Whole Foods',
+    'wells_fargo:Old Shop',
+    'citi:Target',
+  ]);
+});
+
+test('an unrecognized Citi body or offers without an offer id are refused before storage is written', () => {
+  const storage = {
+    value: JSON.stringify([
+      { id: 'c', bank: 'chase', cardName: 'Freedom', phase: '', merchantName: 'Nike' },
+      { id: 'ci', bank: 'citi', cardName: 'Citi Strata® Card', phase: '', merchantName: 'Old Citi' },
+    ]),
+  };
+  function persist(json) {
+    const existing = JSON.parse(storage.value);
+    const records = buildSnapshotRecords({
+      bank: 'citi',
+      cardName: 'Citi Strata® Card',
+      phase: '',
+      json,
+    });
+    const next = replaceCardOffers(existing, {
+      bank: 'citi',
+      cardName: 'Citi Strata® Card',
+      phase: '',
+      records,
+    });
+    storage.value = JSON.stringify(next);
+  }
+
+  const before = storage.value;
+  assert.throws(
+    () => persist({ status: 'error', body: 'do-not-store' }),
+    (err) => err.code === 'SNAPSHOT_REFUSED' && /Nothing was changed/.test(err.message) && !/do-not-store/.test(err.message)
+  );
+  assert.throws(
+    () => persist({
+      merchantOffers: [{
+        displayOffersCategory: 'Featured',
+        offers: [{
+          merchantName: 'Nike',
+          offerDiscountType: 'PERCENTAGE',
+          offerTitle: '5% Back',
+          accountId: 'NOTANOFFER',
+        }],
+      }],
+    }),
+    (err) => err.code === 'SNAPSHOT_REFUSED' && /no offer id/.test(err.message) && !/NOTANOFFER/.test(err.message)
+  );
+  assert.equal(storage.value, before);
+});
+
+test('an empty Citi merchantOffers payload is refused and leaves stored Citi rows', () => {
+  const storage = {
+    value: JSON.stringify([
+      { id: 'c', bank: 'chase', cardName: 'Freedom', phase: '', merchantName: 'Nike' },
+      { id: 'ci', bank: 'citi', cardName: 'Citi Strata® Card', phase: '', merchantName: 'Old Citi', bankOfferId: 'OLD-CITI-1' },
+    ]),
+  };
+  function persist(json) {
+    const existing = JSON.parse(storage.value);
+    const records = buildSnapshotRecords({
+      bank: 'citi',
+      cardName: 'Citi Strata® Card',
+      phase: '',
+      json,
+    });
+    const next = replaceCardOffers(existing, {
+      bank: 'citi',
+      cardName: 'Citi Strata® Card',
+      phase: '',
+      records,
+    });
+    storage.value = JSON.stringify(next);
+  }
+
+  const before = storage.value;
+  assert.throws(
+    () => persist({ merchantOffers: [] }),
+    (err) => err.code === 'SNAPSHOT_REFUSED' && /empty/.test(err.message)
+  );
+  assert.throws(
+    () => persist({
+      merchantOffers: [
+        { displayOffersCategory: 'Featured', offers: [] },
+        { displayOffersCategory: 'Dining', offers: [] },
+      ],
+    }),
+    (err) => err.code === 'SNAPSHOT_REFUSED' && /empty/.test(err.message)
+  );
+  assert.equal(storage.value, before);
+  assert.deepEqual(JSON.parse(storage.value).map(offer => `${offer.bank}:${offer.merchantName}`), [
+    'chase:Nike',
+    'citi:Old Citi',
+  ]);
 });

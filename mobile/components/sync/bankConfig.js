@@ -53,4 +53,13 @@ export const BANK_CONFIG = {
     offersPaths: ['/auth/deals-portal', 'dealsportal'],
     loginPaths: ['/auth/login'],
   },
+  citi: {
+    // Merchant Offers entry — redirects to sign-on when the session is gone.
+    url: 'https://online.citi.com/US/nga/products-offers/merchantoffers',
+    offersUrl: 'https://online.citi.com/US/nga/products-offers/merchantoffers',
+    label: 'Citi Offers',
+    color: '#003b8e',
+    offersPaths: ['/nga/products-offers/merchantoffers', 'merchantoffers'],
+    loginPaths: ['/login', '/signon', '/sign-on', 'parent-interstitial', 'pageNotFound', 'www.citi.com'],
+  },
 };
