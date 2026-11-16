@@ -39,7 +39,7 @@ import {
   buildAmexClearFiltersJs,
   amexHandleLoadEnd,
 } from './sync/amexSync.js';
-import { buildWellsFargoOfferCaptureJs, buildWellsFargoReadJs } from './sync/wellsFargoSync.js';
+import { buildWellsFargoDealsVisibleJs, buildWellsFargoOfferCaptureJs, buildWellsFargoReadJs } from './sync/wellsFargoSync.js';
 import { parseCardLabel }                                 from './sync/cardLabel.js';
 
 const SWITCH_TIMEOUT_MS    = 3500;
@@ -191,16 +191,12 @@ export default function SyncWebView({ visible, bank, onClose, onSuccess }) {
 
     if (bank === 'wells_fargo') {
       webViewRef.current?.injectJavaScript(buildWellsFargoOfferCaptureJs());
+      webViewRef.current?.injectJavaScript(buildWellsFargoDealsVisibleJs());
       if (!url) return;
       const onLogin = (config.loginPaths || []).some(p => url.includes(p.toLowerCase()));
       const onOffers = !onLogin && (config.offersPaths || []).some(p => url.includes(p.toLowerCase()));
       setOnOffersPage(onOffers);
       setOnLoginPage(onLogin && !onOffers);
-      if (onOffers) {
-        offersRedirectRef.current = false;
-      } else if (!onLogin) {
-        goToOffers();
-      }
       return;
     }
 
@@ -480,6 +476,13 @@ export default function SyncWebView({ visible, bank, onClose, onSuccess }) {
         captureArmed.current = false;
         webViewRef.current?.injectJavaScript(`window.__amexJsonCaptureArmed = false; true;`);
         Alert.alert('Capture Error', data.message);
+        return;
+      }
+
+      if (data.type === 'WELLS_ON_DEALS' && bank === 'wells_fargo') {
+        offersRedirectRef.current = false;
+        setOnLoginPage(false);
+        setOnOffersPage(true);
         return;
       }
 

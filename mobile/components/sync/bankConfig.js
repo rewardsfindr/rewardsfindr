@@ -44,12 +44,13 @@ export const BANK_CONFIG = {
     useAmexCardSwitcher: true,
   },
   wells_fargo: {
-    // Wells Fargo's own Sign On link. The deals portal is opened after login.
-    url: 'https://connect.secure.wellsfargo.com/auth/login/present?origin=cob&LOB=CONS',
-    offersUrl: 'https://web.secure.wellsfargo.com/auth/deals-portal',
+    // Wells Fargo's deals sign-on. serviceType sends the customer to deals
+    // after login. Do not replace that with the desktop deals-portal URL.
+    url: 'https://connect.secure.wellsfargo.com/auth/login/ulink?serviceType=dealsportal',
+    offersUrl: 'https://connect.secure.wellsfargo.com/auth/login/ulink?serviceType=dealsportal',
     label: 'Wells Fargo Offers',
     color: '#c0392b',
-    offersPaths: ['/auth/deals-portal'],
+    offersPaths: ['/auth/deals-portal', 'dealsportal'],
     loginPaths: ['/auth/login'],
   },
 };

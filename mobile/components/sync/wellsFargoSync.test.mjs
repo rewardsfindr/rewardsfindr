@@ -90,14 +90,12 @@ test('Wells Fargo opens the sign-on page and syncs from the deals portal', () =>
   const config = BANK_CONFIG.wells_fargo;
   assert.equal(
     config.url,
-    'https://connect.secure.wellsfargo.com/auth/login/present?origin=cob&LOB=CONS'
+    'https://connect.secure.wellsfargo.com/auth/login/ulink?serviceType=dealsportal'
   );
-  assert.equal(config.url.includes('/auth/deals-portal'), false);
-  assert.equal(config.offersUrl, 'https://web.secure.wellsfargo.com/auth/deals-portal');
+  assert.equal(config.url.includes('web.secure.wellsfargo.com'), false);
+  assert.equal(config.offersUrl, config.url);
   assert.ok(config.loginPaths.length > 0);
   assert.equal(config.loginPaths.some(path => config.url.toLowerCase().includes(path.toLowerCase())), true);
-  assert.equal(config.offersUrl.toLowerCase().includes(config.loginPaths[0].toLowerCase()), false);
-  assert.deepEqual(config.offersPaths, ['/auth/deals-portal']);
 
   const faq = FAQ_ITEMS.find(item => item.q === 'Which banks are supported?');
   const [supported, comingSoon] = faq.a.split('coming soon');
@@ -257,6 +255,32 @@ test('a wrapped getDeals body becomes WELLS_DEALS with the merchant offer id', (
   assert.equal(posted.includes('secret.png'), false);
 });
 
+test('a getDeals body with the deals list at the top becomes WELLS_DEALS', () => {
+  const { window, messages } = installHook();
+  const xhr = new window.XMLHttpRequest();
+  xhr.open('POST', '/deals-portal/as/getDeals');
+  xhr.responseText = JSON.stringify({
+    cardlyticsEligibleDeals: [{
+      isActivated: false,
+      merchantDealDetails: {
+        merchantOfferId: '1000000002',
+        merchantName: 'Tovala',
+        dealAmount: 30,
+        amountType: '%',
+        shortDescription: '30% cash back',
+      },
+    }],
+    activatedDeals: [],
+  });
+  xhr.send();
+  const message = readDeals(window, messages);
+  assert.equal(message.type, 'WELLS_DEALS');
+  assert.equal(
+    message.deals.availableDeals.cardlyticsEligibleDeals[0].merchantDealDetails.merchantName,
+    'Tovala'
+  );
+});
+
 test('finds a deals object that is not initialState.metadata.deals', () => {
   const messages = [];
   const window = {
@@ -293,11 +317,11 @@ test('finds a deals object that is not initialState.metadata.deals', () => {
   assert.equal(JSON.stringify(messages[0]).includes('CHECKSUM-SECRET'), false);
 });
 
-test('reads a rendered deal tile and skips a tile with no id', () => {
+test('reads a rendered deal tile and keeps a tile that has no id attribute', () => {
   const messages = [];
   function card(id, text) {
     const button = {
-      innerText: 'Activate',
+      innerText: '+ Activate',
       parentElement: null,
       getAttribute() { return null; },
       querySelectorAll() { return []; },
@@ -315,9 +339,16 @@ test('reads a rendered deal tile and skips a tile with no id', () => {
   }
   const withId = card('FLOORD0001', 'Floor & Decor 10% cash back Expires 11/25/26 Activate');
   const noId = card('', 'Tommy John 20% cash back Expires 12/31/26 Activate');
+  const wholeCard = {
+    innerText: 'Sharper Image 10% cash back Expires 12/21/26 Activate',
+    attrs: { 'data-id': '1000000001' },
+    parentElement: null,
+    getAttribute(name) { return this.attrs[name] || null; },
+    querySelectorAll() { return []; },
+  };
   const document = {
     querySelectorAll(selector) {
-      if (String(selector).includes('button')) return [withId.button, noId.button];
+      if (String(selector).includes('button')) return [withId.button, noId.button, wholeCard];
       return [];
     },
   };
@@ -329,12 +360,85 @@ test('reads a rendered deal tile and skips a tile with no id', () => {
   new Function('window', 'document', buildWellsFargoReadJs())(window, document);
   assert.equal(messages[0].type, 'WELLS_DEALS');
   const offers = messages[0].deals.availableDeals.cardlyticsEligibleDeals;
-  assert.equal(offers.length, 1);
+  assert.equal(offers.length, 3);
   assert.equal(offers[0].merchantDealDetails.merchantOfferId, 'FLOORD0001');
   assert.equal(offers[0].merchantDealDetails.merchantName, 'Floor & Decor');
   assert.equal(offers[0].merchantDealDetails.dealAmount, 10);
   assert.equal(offers[0].merchantDealDetails.amountType, '%');
   assert.equal(offers[0].merchantDealDetails.expirationDate, '11/25/26');
+  assert.equal(offers[1].merchantDealDetails.merchantName, 'Tommy John');
+  assert.equal(offers[1].merchantDealDetails.merchantOfferId, 'Tommy John|20|%|12/31/26');
+  assert.equal(offers[1].merchantDealDetails.dealAmount, 20);
+  assert.equal(offers[1].merchantDealDetails.expirationDate, '12/31/26');
+  assert.equal(offers[2].merchantDealDetails.merchantOfferId, '1000000001');
+  assert.equal(offers[2].merchantDealDetails.merchantName, 'Sharper Image');
+  assert.equal(offers[2].merchantDealDetails.expirationDate, '12/21/26');
+});
+
+test('reads the activated and earned tabs and does not click a deal', async () => {
+  const messages = [];
+  const clicked = [];
+  const state = { tab: 'available' };
+  function deal(text, id) {
+    return {
+      innerText: text,
+      attrs: { 'data-id': id },
+      parentElement: null,
+      getAttribute(name) { return this.attrs[name] || null; },
+      querySelectorAll() { return []; },
+      click() { throw new Error('deal clicked'); },
+    };
+  }
+  const cards = {
+    available: [deal('Sharper Image 10% cash back Expires 12/21/26 Activate', '1000000001')],
+    activated: [deal('Little Caesars 10% cash back Expires 11/30/26 Activated', '1000000002')],
+    earned: [deal('Nike 5% cash back Expires 12/01/26 Earned', '1000000003')],
+  };
+  function tab(name) {
+    const el = {
+      innerText: name,
+      attrs: { 'aria-selected': name === 'Available' ? 'true' : 'false' },
+      parentElement: null,
+      getAttribute(name) { return this.attrs[name] || null; },
+      querySelectorAll() { return []; },
+      click() {
+        clicked.push(name);
+        state.tab = name.toLowerCase();
+        for (const other of tabs) other.attrs['aria-selected'] = other === el ? 'true' : 'false';
+      },
+    };
+    return el;
+  }
+  const tabs = [tab('Available'), tab('Activated'), tab('Earned')];
+  const document = {
+    body: { get innerText() { return state.tab; } },
+    querySelectorAll(selector) {
+      const sel = String(selector);
+      if (sel.includes('role="tab"')) return tabs;
+      if (sel.includes('button')) return cards[state.tab];
+      return [];
+    },
+  };
+  const window = {
+    ReactNativeWebView: {
+      postMessage(raw) { messages.push(JSON.parse(raw)); },
+    },
+  };
+  new Function('window', 'document', buildWellsFargoReadJs())(window, document);
+  await new Promise(resolve => setTimeout(resolve, 1200));
+  assert.equal(messages.length, 1);
+  assert.equal(messages[0].type, 'WELLS_DEALS');
+  const eligible = messages[0].deals.availableDeals.cardlyticsEligibleDeals;
+  const activated = messages[0].deals.availableDeals.activatedDeals;
+  const earned = messages[0].deals.earnedDeals.deals;
+  assert.equal(eligible[0].merchantDealDetails.merchantName, 'Sharper Image');
+  assert.equal(eligible[0].isActivated, false);
+  assert.equal(activated[0].merchantDealDetails.merchantName, 'Little Caesars');
+  assert.equal(activated[0].isActivated, true);
+  assert.equal(activated[0].merchantDealDetails.merchantOfferId, '1000000002');
+  assert.equal(earned[0].merchantDealDetails.merchantName, 'Nike');
+  assert.equal(earned[0].isActivated, true);
+  assert.deepEqual(clicked, ['Activated', 'Earned', 'Available']);
 });
 
 test('hooks getDeals on fetch and ignores a non-2xx response', async () => {

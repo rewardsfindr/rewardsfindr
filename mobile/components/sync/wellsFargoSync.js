@@ -62,8 +62,9 @@ const unwrapWellsPayloadSource = `function unwrapWellsPayload(parsed, allowEmpty
 
   function hostOf(value) {
     if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
-    var available = value.availableDeals;
-    if (!available || typeof available !== 'object' || Array.isArray(available)) return null;
+    var available = value.availableDeals && typeof value.availableDeals === 'object' && !Array.isArray(value.availableDeals)
+      ? value.availableDeals
+      : value;
     if (!Array.isArray(available.cardlyticsEligibleDeals)) return null;
     if (!allowEmpty && available.cardlyticsEligibleDeals.length === 0) return null;
     return {
@@ -124,7 +125,8 @@ const unwrapWellsPayloadSource = `function unwrapWellsPayload(parsed, allowEmpty
   };
 }`;
 
-const readRenderedDealsSource = `function readRenderedDeals(doc) {
+const readRenderedDealsSource = `function readRenderedDeals(doc, listName) {
+  listName = listName || 'available';
   if (!doc || typeof doc.querySelectorAll !== 'function') return null;
 
   function textOf(el) {
@@ -145,7 +147,10 @@ const readRenderedDealsSource = `function readRenderedDeals(doc) {
 
   function merchantFromText(text, card) {
     var cleaned = text
+      .replace(/\\bactivated\\b/ig, ' ')
+      .replace(/\\bearned\\b/ig, ' ')
       .replace(/\\bactivate\\b/ig, ' ')
+      .replace(/\\+/g, ' ')
       .replace(/\\$?\\d+(?:\\.\\d+)?\\s*%?\\s*cash\\s*back/ig, ' ')
       .replace(/\\bexpires\\b[^a-z0-9]*\\d{1,2}\\/\\d{1,2}\\/\\d{2,4}/ig, ' ')
       .replace(/\\b\\d+\\s*days?\\s*left\\b/ig, ' ')
@@ -164,7 +169,7 @@ const readRenderedDealsSource = `function readRenderedDeals(doc) {
       var marked = card.querySelectorAll('[data-merchant-offer-id], [data-offer-id], [data-deal-id], [id]');
       for (var i = 0; i < marked.length && i < 30; i++) nodes.push(marked[i]);
     } catch (e) {}
-    var names = ['data-merchant-offer-id', 'data-offer-id', 'data-deal-id'];
+    var names = ['data-id', 'data-merchant-offer-id', 'data-offer-id', 'data-deal-id'];
     for (var n = 0; n < nodes.length; n++) {
       if (!nodes[n] || !nodes[n].getAttribute) continue;
       for (var a = 0; a < names.length; a++) {
@@ -186,24 +191,33 @@ const readRenderedDealsSource = `function readRenderedDeals(doc) {
   var offers = [];
   var seenIds = [];
   for (var b = 0; b < buttons.length; b++) {
-    if (textOf(buttons[b]).toLowerCase() !== 'activate') continue;
+    var raw = textOf(buttons[b]);
+    var buttonText = raw.replace(/^\\+\\s*/, '').toLowerCase();
     var card = buttons[b];
-    var text = '';
-    for (var up = 0; up < 8 && card; up++) {
-      text = textOf(card);
-      if (/cash\\s*back/i.test(text) && text.length < 700) break;
-      card = card.parentElement;
+    var text = raw;
+    var ownDeals = (raw.match(/cash\\s*back/ig) || []).length;
+    if (ownDeals !== 1) {
+      if (buttonText !== 'activate') continue;
+      for (var up = 0; up < 8 && card; up++) {
+        text = textOf(card);
+        if ((text.match(/cash\\s*back/ig) || []).length === 1 && text.length < 700) break;
+        card = card.parentElement;
+      }
     }
-    if (!card || !/cash\\s*back/i.test(text) || text.length >= 700) continue;
-    var offerId = offerIdFrom(card);
-    if (!offerId || seenIds.indexOf(offerId) !== -1) continue;
+    if (!card || (text.match(/cash\\s*back/ig) || []).length !== 1 || text.length >= 700) continue;
+    if (listName === 'available' && !/\\bactivate\\b/i.test(text)) continue;
     var reward = rewardFromText(text);
     var merchantName = merchantFromText(text, card);
     if (!reward || !merchantName) continue;
-    seenIds.push(offerId);
     var expiryMatch = text.match(/expires\\s+(\\d{1,2}\\/\\d{1,2}\\/\\d{2,4})/i);
+    var offerId = offerIdFrom(card);
+    if (!offerId) {
+      offerId = [merchantName, reward.dealAmount, reward.amountType, expiryMatch ? expiryMatch[1] : ''].join('|');
+    }
+    if (seenIds.indexOf(offerId) !== -1) continue;
+    seenIds.push(offerId);
     offers.push({
-      isActivated: false,
+      isActivated: listName !== 'available',
       merchantDealDetails: {
         merchantOfferId: offerId,
         merchantName: merchantName,
@@ -216,8 +230,11 @@ const readRenderedDealsSource = `function readRenderedDeals(doc) {
   }
   if (!offers.length) return null;
   return {
-    availableDeals: { cardlyticsEligibleDeals: offers, activatedDeals: [] },
-    earnedDeals: { deals: [] },
+    availableDeals: {
+      cardlyticsEligibleDeals: listName === 'available' ? offers : [],
+      activatedDeals: listName === 'activated' ? offers : [],
+    },
+    earnedDeals: { deals: listName === 'earned' ? offers : [] },
   };
 }`;
 
@@ -319,6 +336,20 @@ export const buildWellsFargoOfferCaptureJs = () => `
   true;
 `;
 
+// Tells the app the deals heading is on screen, including when Wells
+// lands on a URL other than the desktop deals portal.
+export const buildWellsFargoDealsVisibleJs = () => `
+  (function() {
+    try {
+      var text = document.body ? (document.body.innerText || '') : '';
+      if (/my wells fargo deals/i.test(text) && window.ReactNativeWebView) {
+        window.ReactNativeWebView.postMessage(JSON.stringify({ type: 'WELLS_ON_DEALS' }));
+      }
+    } catch (e) {}
+  })();
+  true;
+`;
+
 // Posts offer fields from the getDeals stash, or from the deals object the
 // page already rendered: any same-origin window or frame, then the deal tiles.
 // The raw response never leaves the page.
@@ -375,21 +406,94 @@ export const buildWellsFargoReadJs = () => `
       if (!stash) {
         try { stash = fromFrames(window, document); } catch (e) { stash = null; }
       }
-      if (!stash) {
-        var rendered = readRenderedDeals(document);
-        stash = rendered ? stripWellsDeals(rendered) : null;
+      function listOf(rendered, listName) {
+        if (!rendered || !rendered.availableDeals) return [];
+        if (listName === 'activated') return rendered.availableDeals.activatedDeals || [];
+        if (listName === 'earned') return (rendered.earnedDeals && rendered.earnedDeals.deals) || [];
+        return rendered.availableDeals.cardlyticsEligibleDeals || [];
       }
-      if (!stash && saved) stash = saved;
-      if (!stash || !stash.availableDeals) {
-        window.ReactNativeWebView.postMessage(JSON.stringify({
-          type: 'WELLS_CAPTURE_UNAVAILABLE',
-        }));
+
+      function labelOf(el) {
+        return String((el && (el.innerText || el.textContent)) || '').replace(/\\s+/g, ' ').trim().toLowerCase();
+      }
+
+      function findTab(name) {
+        var nodes = [];
+        try { nodes = document.querySelectorAll('a, [role="tab"]'); } catch (e) { return null; }
+        for (var i = 0; i < nodes.length; i++) {
+          if (labelOf(nodes[i]) === name) return nodes[i];
+        }
+        return null;
+      }
+
+      function tabSelected(el) {
+        if (!el || !el.getAttribute) return false;
+        return String(el.getAttribute('aria-selected') || '').toLowerCase() === 'true';
+      }
+
+      function publish(domAvailable, domActivated, domEarned) {
+        var base = stash;
+        var available = domAvailable.length ? domAvailable : ((base && base.availableDeals && base.availableDeals.cardlyticsEligibleDeals) || []);
+        var activated = domActivated.length ? domActivated : ((base && base.availableDeals && base.availableDeals.activatedDeals) || []);
+        var earned = domEarned.length ? domEarned : ((base && base.earnedDeals && base.earnedDeals.deals) || []);
+        var payload = stripWellsDeals({
+          availableDeals: { cardlyticsEligibleDeals: available, activatedDeals: activated },
+          earnedDeals: { deals: earned },
+        });
+        var count = payload && payload.availableDeals
+          ? payload.availableDeals.cardlyticsEligibleDeals.length
+            + payload.availableDeals.activatedDeals.length
+            + ((payload.earnedDeals && payload.earnedDeals.deals) || []).length
+          : 0;
+        if (!payload || !count) {
+          window.ReactNativeWebView.postMessage(JSON.stringify({ type: 'WELLS_CAPTURE_UNAVAILABLE' }));
+          return;
+        }
+        window.ReactNativeWebView.postMessage(JSON.stringify({ type: 'WELLS_DEALS', deals: payload }));
+      }
+
+      function readList(listName) {
+        try { return listOf(readRenderedDeals(document, listName), listName); }
+        catch (e) { return []; }
+      }
+
+      // The three tabs are links. Only an exact Available, Activated, or
+      // Earned label is clicked. A deal card is never clicked.
+      function visit(name, done) {
+        var tab = findTab(name);
+        if (!tab) { done([]); return; }
+        if (tabSelected(tab)) { done(readList(name)); return; }
+        var before = document.body ? String(document.body.innerText || '') : '';
+        try { tab.click(); } catch (e) { done([]); return; }
+        var tries = 0;
+        (function poll() {
+          tries += 1;
+          var body = document.body ? String(document.body.innerText || '') : '';
+          if (tabSelected(tab) || body !== before || tries > 20) {
+            setTimeout(function() { done(readList(name)); }, 400);
+            return;
+          }
+          setTimeout(poll, 100);
+        })();
+      }
+
+      if (!findTab('available') && !findTab('activated') && !findTab('earned')) {
+        publish(readList('available'), [], []);
         return;
       }
-      window.ReactNativeWebView.postMessage(JSON.stringify({
-        type: 'WELLS_DEALS',
-        deals: stash,
-      }));
+
+      visit('available', function(availableNow) {
+        visit('activated', function(activatedNow) {
+          visit('earned', function(earnedNow) {
+            var back = findTab('available');
+            if (back && !tabSelected(back)) {
+              try { back.click(); } catch (e) {}
+            }
+            publish(availableNow, activatedNow, earnedNow);
+          });
+        });
+      });
+      return;
     } catch (e) {
       window.ReactNativeWebView.postMessage(JSON.stringify({
         type: 'WELLS_CAPTURE_UNAVAILABLE',
