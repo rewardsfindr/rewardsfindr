@@ -152,7 +152,7 @@ const unwrapCapitalOnePayloadSource = `function unwrapCapitalOnePayload(parsed) 
 export const buildCapitalOneOfferCaptureJs = () => `
   (function() {
     try {
-      if (window.__capOneOfferHookVersion === 1) return;
+      if (window.__capOneOfferHookVersion === 2) return;
       var stripCapitalOneOffers = ${stripCapitalOneOffersSource};
       var unwrapCapitalOnePayload = ${unwrapCapitalOnePayloadSource};
 
@@ -165,10 +165,10 @@ export const buildCapitalOneOfferCaptureJs = () => `
           return;
         }
         // Keep the first usable natural feed response. Do not replace a
-        // good stash with a later empty/silent body (rate-limit).
+        // good stash with a later empty/silent body (rate-limit) or a later
+        // non-empty cursor page (scroll pagination) — stash-first, no thrash.
         if (window.__capOneLastOffers && Array.isArray(window.__capOneLastOffers.offers)
-            && window.__capOneLastOffers.offers.length > 0
-            && (!stripped.offers || stripped.offers.length === 0)) {
+            && window.__capOneLastOffers.offers.length > 0) {
           return;
         }
         window.__capOneLastOffers = stripped;
@@ -268,7 +268,7 @@ export const buildCapitalOneOfferCaptureJs = () => `
           });
         };
       }
-      window.__capOneOfferHookVersion = 1;
+      window.__capOneOfferHookVersion = 2;
     } catch (e) {
       window.__capOneHookError = 'unreadable';
     }

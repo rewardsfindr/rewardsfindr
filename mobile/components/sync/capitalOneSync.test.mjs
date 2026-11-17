@@ -360,6 +360,39 @@ test('keeps a good stash when a later empty feed arrives (rate-limit silent)', (
   assert.ok(message.offers.offers.length >= 5);
 });
 
+test('keeps the first non-empty feed page when a later non-empty cursor page arrives', () => {
+  const { window, messages } = installHook();
+  const page1 = new window.XMLHttpRequest();
+  page1.open('GET', FEED_LIST_URL);
+  page1.responseText = JSON.stringify(loadFixture());
+  page1.send();
+
+  const page2 = new window.XMLHttpRequest();
+  page2.open('GET', FEED_LIST_URL);
+  page2.responseText = JSON.stringify({
+    cursor: 'page2',
+    data: [
+      {
+        merchantTLD: 'nike.com',
+        merchantDisplayName: 'Nike',
+        type: 'Standard',
+        id: '<REDACTED_SESSION_BOUND_TILE_ID>',
+        text: 'Online',
+        buttonText: 'Up to 10X miles',
+        offerSources: ['affiliate'],
+      },
+    ],
+  });
+  page2.send();
+
+  const message = readOffers(window, messages);
+  assert.equal(message.type, 'CAPONE_OFFERS');
+  const names = message.offers.offers.map(o => o.merchantName);
+  assert.equal(names.includes('adidas'), true);
+  assert.equal(names.includes('Nike'), false);
+  assert.ok(message.offers.offers.length >= 5);
+});
+
 test('ignores non-feed URLs and does not hook page HTML /feed without opaque segment', () => {
   const { window, messages } = installHook();
   const page = new window.XMLHttpRequest();
