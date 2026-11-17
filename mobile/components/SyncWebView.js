@@ -43,6 +43,10 @@ import { buildWellsFargoDealsVisibleJs, buildWellsFargoOfferCaptureJs, buildWell
 import { buildCitiOfferCaptureJs, buildCitiOffersVisibleJs, buildCitiReadJs } from './sync/citiSync.js';
 import { buildCapitalOneOfferCaptureJs, buildCapitalOneOffersVisibleJs, buildCapitalOneReadJs } from './sync/capitalOneSync.js';
 import { parseCardLabel }                                 from './sync/cardLabel.js';
+import {
+  buildOpenWindowRedirectJs,
+  shouldAllowSyncWebViewNavigation,
+} from './sync/syncWebViewNavigation.js';
 
 function citiCardLabelFromOffers(payload) {
   const raw = String(payload?.selectedCard?.displayProductName || '').trim();
@@ -193,20 +197,13 @@ export default function SyncWebView({ visible, bank, onClose, onSuccess }) {
   // new URL leaves the sheet and opens the phone browser.
   const handleOpenWindow = (event) => {
     const targetUrl = event?.nativeEvent?.targetUrl;
-    if (!targetUrl || !webViewRef.current) return;
-    const safe = JSON.stringify(String(targetUrl));
-    webViewRef.current.injectJavaScript(
-      `try { window.location.href = ${safe}; } catch (e) {} true;`
-    );
+    const js = buildOpenWindowRedirectJs(targetUrl);
+    if (!js || !webViewRef.current) return;
+    webViewRef.current.injectJavaScript(js);
   };
 
-  const handleShouldStartLoadWithRequest = (request) => {
-    const url = String(request?.url || '');
-    if (!url) return true;
-    if (/^https?:\/\//i.test(url) || url === 'about:blank') return true;
-    // Block intent://, market://, mailto:, etc. from escaping the sync sheet.
-    return false;
-  };
+  const handleShouldStartLoadWithRequest = (request) =>
+    shouldAllowSyncWebViewNavigation(request?.url);
 
   const handleLoadEnd = (syntheticEvent) => {
     const url = (syntheticEvent?.nativeEvent?.url || currentUrl).toLowerCase();
