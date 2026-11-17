@@ -4,6 +4,7 @@ import { isCurrentOffer } from './offerFreshness.js';
 import {
   amexRecords,
   buildSnapshotRecords,
+  capitalOneRecords,
   chaseRecords,
   citiRecords,
   filterOffers,
@@ -702,4 +703,72 @@ test('an empty Citi merchantOffers payload is refused and leaves stored Citi row
     'chase:Nike',
     'citi:Old Citi',
   ]);
+});
+
+test('maps Capital One stripped offers under stable bankOfferId and replaces one card', () => {
+  const records = capitalOneRecords({
+    json: {
+      offers: [
+        {
+          bankOfferId: 'adidas.com|standard|affiliate',
+          merchantName: 'adidas',
+          rewardText: 'Up to 15X miles',
+          offerSources: ['affiliate'],
+          isActivated: false,
+        },
+        {
+          bankOfferId: 'expedia.com|showcase|affiliate',
+          merchantName: 'Expedia',
+          rewardText: 'Up to 5X miles',
+          expiryText: 'Offer ends Dec 31, 2026',
+          offerSources: ['affiliate'],
+          isActivated: false,
+        },
+      ],
+    },
+    now: NOW,
+  });
+  assert.equal(records.length, 2);
+  assert.equal(records[0].bank, 'capital_one');
+  assert.equal(records[0].cardName, 'Capital One');
+  assert.equal(records[0].cashbackType, 'points');
+  assert.equal(records[0].cashbackAmount, 15);
+  assert.equal(records[0].isActivated, false);
+  assert.equal(records[1].expiryDate, '2026-12-31T00:00:00.000Z');
+
+  const viaBuild = buildSnapshotRecords({
+    bank: 'capital_one',
+    cardName: 'Capital One',
+    phase: '',
+    json: { offers: records.map(r => ({
+      bankOfferId: r.bankOfferId,
+      merchantName: r.merchantName,
+      rewardText: r.offerDescription,
+      isActivated: false,
+    })) },
+    now: NOW,
+  });
+  assert.equal(viaBuild.length, 2);
+
+  const next = replaceCardOffers(
+    [
+      { id: 'c', bank: 'chase', cardName: 'Freedom', phase: '', merchantName: 'Nike' },
+      { id: 'old', bank: 'capital_one', cardName: 'Capital One', phase: '', merchantName: 'Old' },
+    ],
+    { bank: 'capital_one', cardName: 'Capital One', phase: '', records }
+  );
+  assert.equal(next.some(o => o.bank === 'chase'), true);
+  assert.equal(next.some(o => o.bank === 'capital_one' && o.merchantName === 'Old'), false);
+  assert.equal(next.filter(o => o.bank === 'capital_one').length, 2);
+});
+
+test('refuses empty or unrecognized Capital One payloads so saved rows stay', () => {
+  assert.throws(
+    () => capitalOneRecords({ json: null, now: NOW }),
+    (err) => err.code === 'SNAPSHOT_REFUSED'
+  );
+  assert.throws(
+    () => capitalOneRecords({ json: { offers: [] }, now: NOW }),
+    (err) => err.code === 'SNAPSHOT_REFUSED' && /empty/.test(err.message)
+  );
 });

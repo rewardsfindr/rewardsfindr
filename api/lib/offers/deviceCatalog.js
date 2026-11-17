@@ -372,12 +372,110 @@ export function citiRecords({ cardName, cardLast4, json, now = new Date() }) {
   return records;
 }
 
+const CAPITAL_ONE_CARD_NAME = 'Capital One';
+
+function capitalOneOffersReady(json) {
+  if (!json || typeof json !== 'object' || Array.isArray(json)) return false;
+  return Array.isArray(json.offers);
+}
+
+function mapCapitalOneReward(offer) {
+  const text = String(offer?.rewardText ?? '').trim();
+  const multiplier = text.match(/(\d+(?:\.\d+)?)\s*X\s*miles/i)
+    || text.match(/up\s+to\s+(\d+(?:\.\d+)?)\s*X/i)
+    || text.match(/(\d+(?:\.\d+)?)\s*X\b/i);
+  if (multiplier) {
+    return {
+      hasReward: true,
+      cashbackAmount: parseFloat(multiplier[1]),
+      cashbackType: 'points',
+      offerDescription: text,
+    };
+  }
+  const flatMiles = text.match(/([\d,]+)\s*miles/i);
+  if (flatMiles) {
+    const amount = parseFloat(flatMiles[1].replace(/,/g, ''));
+    return {
+      hasReward: true,
+      cashbackAmount: Number.isFinite(amount) ? amount : 0,
+      cashbackType: 'points',
+      offerDescription: text,
+    };
+  }
+  return {
+    hasReward: text !== '',
+    cashbackAmount: 0,
+    cashbackType: 'percent',
+    offerDescription: text,
+  };
+}
+
+export function capitalOneRecords({ json, now = new Date() }) {
+  if (!capitalOneOffersReady(json)) {
+    refuseSnapshot('Capital One offers were not recognized. Nothing was changed.');
+  }
+
+  const seen = new Set();
+  const records = [];
+  let considered = 0;
+  let sawOfferId = false;
+
+  for (const item of json.offers) {
+    considered += 1;
+    const bankOfferId = String(item?.bankOfferId ?? '').trim();
+    if (bankOfferId) sawOfferId = true;
+    const merchantName = String(item?.merchantName ?? '').trim();
+    if (!bankOfferId || !merchantName || seen.has(bankOfferId)) continue;
+    seen.add(bankOfferId);
+    const reward = mapCapitalOneReward(item);
+    const rawExpiry = String(item?.expiryText ?? '').trim();
+    const expiryMatch = rawExpiry.match(/([A-Za-z]+\s+\d{1,2},?\s*\d{4})/);
+    const expiry = mapCitiExpiry(expiryMatch ? expiryMatch[1].replace(/,\s*/, ', ') : rawExpiry);
+    const offerToken = bankOfferId.replace(/[/\s]/g, '_');
+    records.push({
+      id: `capital_one_${slug(CAPITAL_ONE_CARD_NAME)}_${offerToken}`.slice(0, 700),
+      bankOfferId,
+      userId: null,
+      merchantName,
+      merchantNameLower: merchantName.toLowerCase().trim(),
+      offerDescription: reward.offerDescription,
+      cashbackAmount: reward.cashbackAmount,
+      cashbackType: reward.cashbackType,
+      minimumSpend: 0,
+      category: 'other',
+      expiryDate: expiry.expiryDate,
+      expiryPrecision: expiry.expiryPrecision,
+      expiresAt: expiry.expiresAt,
+      // cardLinked in offerSources is not activation; Added-to-Card not captured.
+      isActivated: item?.isActivated === true,
+      offerDeepLink: null,
+      bank: 'capital_one',
+      cardName: CAPITAL_ONE_CARD_NAME,
+      cardLast4: null,
+      phase: '',
+      syncedAt: now.toISOString(),
+    });
+  }
+
+  // Empty / silent / no-id payloads refuse so replaceCardOffers never wipes.
+  if (records.length === 0) {
+    if (considered === 0) {
+      refuseSnapshot('Capital One offers were empty. Nothing was changed.');
+    }
+    refuseSnapshot(sawOfferId
+      ? 'Capital One offers were incomplete. Nothing was changed.'
+      : 'Capital One offers had no offer id. Nothing was changed.');
+  }
+  return records;
+}
+
 export function buildSnapshotRecords(input) {
   if (input.bank === 'chase') return chaseRecords(input);
   if (input.bank === 'amex') return amexRecords(input);
   if (input.bank === 'wells_fargo') return wellsFargoRecords(input);
   if (input.bank === 'citi') return citiRecords(input);
-  throw new Error('bank must be chase, amex, wells_fargo, or citi');
+  if (input.bank === 'capital_one') return capitalOneRecords(input);
+  throw new Error('bank must be chase, amex, wells_fargo, citi, or capital_one');
 }
 
 export function replaceCardOffers(existing, { bank, cardName, phase, records }) {
