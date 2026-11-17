@@ -56,6 +56,94 @@ test('buildContainOpenWindowsJs patches window.open and target=_blank clicks', (
   assert.match(js, /preventDefault/);
 });
 
+/** Fake window/document so the early contain inject can be executed in node. */
+function installContainInject() {
+  const clickListeners = [];
+  const location = { href: 'https://www.capitalone.com/offers' };
+  const window = {
+    location,
+    open() {
+      throw new Error('native window.open should be overwritten by contain inject');
+    },
+  };
+  const document = {
+    addEventListener(type, handler, capture) {
+      clickListeners.push({ type, handler, capture });
+    },
+  };
+  new Function('window', 'document', buildContainOpenWindowsJs())(window, document);
+  return { window, location, clickListeners };
+}
+
+test('buildContainOpenWindowsJs routes window.open and _blank clicks to location.href', () => {
+  const { window, location, clickListeners } = installContainInject();
+
+  const openResult = window.open('https://capitaloneoffers.com/ease?deal=1');
+  assert.equal(location.href, 'https://capitaloneoffers.com/ease?deal=1');
+  assert.equal(openResult, window);
+
+  const click = clickListeners.find((entry) => entry.type === 'click' && entry.capture === true);
+  assert.ok(click, 'contain inject must register a capturing click listener');
+
+  let prevented = false;
+  let stopped = false;
+  const blankAnchor = {
+    tagName: 'A',
+    href: 'https://capitaloneoffers.com/ease?from=_blank',
+    parentElement: null,
+    getAttribute(name) {
+      return name === 'target' ? '_blank' : null;
+    },
+  };
+  click.handler({
+    target: blankAnchor,
+    preventDefault() { prevented = true; },
+    stopPropagation() { stopped = true; },
+  });
+  assert.equal(prevented, true);
+  assert.equal(stopped, true);
+  assert.equal(location.href, 'https://capitaloneoffers.com/ease?from=_blank');
+
+  prevented = false;
+  stopped = false;
+  location.href = 'https://www.capitalone.com/offers';
+  const nestedBlank = {
+    tagName: 'SPAN',
+    parentElement: {
+      tagName: 'A',
+      href: 'https://capitaloneoffers.com/ease?from=_new',
+      parentElement: null,
+      getAttribute(name) {
+        return name === 'target' ? '_new' : null;
+      },
+    },
+  };
+  click.handler({
+    target: nestedBlank,
+    preventDefault() { prevented = true; },
+    stopPropagation() { stopped = true; },
+  });
+  assert.equal(prevented, true);
+  assert.equal(stopped, true);
+  assert.equal(location.href, 'https://capitaloneoffers.com/ease?from=_new');
+
+  prevented = false;
+  location.href = 'https://www.capitalone.com/offers';
+  const sameTab = {
+    tagName: 'A',
+    href: 'https://capitaloneoffers.com/ease?same',
+    parentElement: null,
+    getAttribute() { return null; },
+  };
+  click.handler({
+    target: sameTab,
+    preventDefault() { prevented = true; },
+    stopPropagation() {},
+  });
+  assert.equal(prevented, false);
+  assert.equal(location.href, 'https://www.capitalone.com/offers');
+});
+
 test('SyncWebView wires in-sheet open-window containment and load policy', () => {
   const syncSource = readRepoFile('..', 'SyncWebView.js');
   assert.match(syncSource, /shouldAllowSyncWebViewNavigation/);
