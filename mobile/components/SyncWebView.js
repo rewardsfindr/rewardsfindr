@@ -188,6 +188,26 @@ export default function SyncWebView({ visible, bank, onClose, onSuccess }) {
     }
   };
 
+  // Cap One (and similar) often open offers via window.open / target=_blank.
+  // Android WebView defaults to multiple windows; without this handler the
+  // new URL leaves the sheet and opens the phone browser.
+  const handleOpenWindow = (event) => {
+    const targetUrl = event?.nativeEvent?.targetUrl;
+    if (!targetUrl || !webViewRef.current) return;
+    const safe = JSON.stringify(String(targetUrl));
+    webViewRef.current.injectJavaScript(
+      `try { window.location.href = ${safe}; } catch (e) {} true;`
+    );
+  };
+
+  const handleShouldStartLoadWithRequest = (request) => {
+    const url = String(request?.url || '');
+    if (!url) return true;
+    if (/^https?:\/\//i.test(url) || url === 'about:blank') return true;
+    // Block intent://, market://, mailto:, etc. from escaping the sync sheet.
+    return false;
+  };
+
   const handleLoadEnd = (syntheticEvent) => {
     const url = (syntheticEvent?.nativeEvent?.url || currentUrl).toLowerCase();
     setPageLoaded(true);
@@ -746,6 +766,9 @@ export default function SyncWebView({ visible, bank, onClose, onSuccess }) {
             }
             onMessage={handleMessage}
             onNavigationStateChange={handleNavigationStateChange}
+            onShouldStartLoadWithRequest={handleShouldStartLoadWithRequest}
+            setSupportMultipleWindows={true}
+            onOpenWindow={handleOpenWindow}
             onLoadStart={() => {
               setPageLoaded(false);
               setOnOffersPage(false);
