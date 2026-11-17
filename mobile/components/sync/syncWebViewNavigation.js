@@ -20,3 +20,32 @@ export function buildOpenWindowRedirectJs(targetUrl) {
   const safe = JSON.stringify(String(targetUrl));
   return `try { window.location.href = ${safe}; } catch (e) {} true;`;
 }
+
+/**
+ * Early inject: force window.open / target=_blank navigations into the same
+ * document. Complements Android setSupportMultipleWindows={false} when the
+ * bank page never fires onOpenWindow (or the app was on a stale Metro bundle).
+ */
+export function buildContainOpenWindowsJs() {
+  return `(function() {
+  try {
+    function go(url) {
+      if (!url) return null;
+      try { window.location.href = String(url); } catch (e) {}
+      return window;
+    }
+    window.open = function(url) { return go(url); };
+    document.addEventListener('click', function(ev) {
+      var el = ev.target;
+      while (el && el.tagName !== 'A') el = el.parentElement;
+      if (!el || !el.href) return;
+      var target = (el.getAttribute('target') || '').toLowerCase();
+      if (target !== '_blank' && target !== '_new') return;
+      ev.preventDefault();
+      ev.stopPropagation();
+      go(el.href);
+    }, true);
+  } catch (e) {}
+  true;
+})();`;
+}

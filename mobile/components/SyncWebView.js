@@ -46,6 +46,7 @@ import { parseCardLabel }                                 from './sync/cardLabel
 import {
   buildOpenWindowRedirectJs,
   shouldAllowSyncWebViewNavigation,
+  buildContainOpenWindowsJs,
 } from './sync/syncWebViewNavigation.js';
 
 function citiCardLabelFromOffers(payload) {
@@ -755,16 +756,23 @@ export default function SyncWebView({ visible, bank, onClose, onSuccess }) {
             ref={webViewRef}
             source={{ uri: config.url }}
             injectedJavaScriptBeforeContentLoaded={
-              bank === 'chase' ? buildChaseOfferCaptureJs()
-              : bank === 'wells_fargo' ? buildWellsFargoOfferCaptureJs()
-              : bank === 'citi' ? buildCitiOfferCaptureJs()
-              : bank === 'capital_one' ? buildCapitalOneOfferCaptureJs()
-              : undefined
+              // Contain window.open / target=_blank in-sheet for every bank.
+              // Cap One especially opens capitaloneoffers.com as a new window.
+              [
+                buildContainOpenWindowsJs(),
+                bank === 'chase' ? buildChaseOfferCaptureJs()
+                : bank === 'wells_fargo' ? buildWellsFargoOfferCaptureJs()
+                : bank === 'citi' ? buildCitiOfferCaptureJs()
+                : bank === 'capital_one' ? buildCapitalOneOfferCaptureJs()
+                : '',
+              ].filter(Boolean).join('\n')
             }
             onMessage={handleMessage}
             onNavigationStateChange={handleNavigationStateChange}
             onShouldStartLoadWithRequest={handleShouldStartLoadWithRequest}
-            setSupportMultipleWindows={true}
+            // false: Android treats window.open as same-document navigation.
+            // onOpenWindow remains as a fallback if a new window is still created.
+            setSupportMultipleWindows={false}
             onOpenWindow={handleOpenWindow}
             onLoadStart={() => {
               setPageLoaded(false);

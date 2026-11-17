@@ -5,6 +5,7 @@ import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 import {
   buildOpenWindowRedirectJs,
+  buildContainOpenWindowsJs,
   shouldAllowSyncWebViewNavigation,
 } from './syncWebViewNavigation.js';
 
@@ -47,11 +48,20 @@ test('buildOpenWindowRedirectJs injects JSON-safe location.href redirect', () =>
   assert.equal(js.includes(`window.location.href = ${JSON.stringify(url)}`), true);
 });
 
+test('buildContainOpenWindowsJs patches window.open and target=_blank clicks', () => {
+  const js = buildContainOpenWindowsJs();
+  assert.match(js, /window\.open\s*=\s*function/);
+  assert.match(js, /target/);
+  assert.match(js, /_blank/);
+  assert.match(js, /preventDefault/);
+});
+
 test('SyncWebView wires in-sheet open-window containment and load policy', () => {
   const syncSource = readRepoFile('..', 'SyncWebView.js');
   assert.match(syncSource, /shouldAllowSyncWebViewNavigation/);
   assert.match(syncSource, /buildOpenWindowRedirectJs/);
+  assert.match(syncSource, /buildContainOpenWindowsJs/);
   assert.match(syncSource, /onOpenWindow=\{handleOpenWindow\}/);
   assert.match(syncSource, /onShouldStartLoadWithRequest=\{handleShouldStartLoadWithRequest\}/);
-  assert.match(syncSource, /setSupportMultipleWindows=\{true\}/);
+  assert.match(syncSource, /setSupportMultipleWindows=\{false\}/);
 });
