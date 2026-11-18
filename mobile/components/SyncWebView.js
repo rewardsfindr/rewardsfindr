@@ -45,6 +45,7 @@ import {
   buildCapitalOneOfferCaptureJs,
   buildCapitalOneOffersVisibleJs,
   buildCapitalOneReadJs,
+  buildCapitalOneDetectCardsJs,
   buildCapitalOneExpandThenReadJs,
   buildCapitalOneSyncReadOrReloadJs,
   capitalOneChromeFromLoadEndUrl,
@@ -255,9 +256,11 @@ export default function SyncWebView({ visible, bank, onClose, onSuccess }) {
     if (bank === 'capital_one') {
       webViewRef.current?.injectJavaScript(buildCapitalOneOfferCaptureJs());
       webViewRef.current?.injectJavaScript(buildCapitalOneOffersVisibleJs());
+      webViewRef.current?.injectJavaScript(buildCapitalOneDetectCardsJs());
       // Feed chrome can paint after first loadEnd — nudge visibility once more.
       setTimeout(() => {
         webViewRef.current?.injectJavaScript(buildCapitalOneOffersVisibleJs());
+        webViewRef.current?.injectJavaScript(buildCapitalOneDetectCardsJs());
       }, 800);
       // After Sync's soft-reload, wait for the first feed XHR, then click
       // "View More Offers" (merging each page) and read the stash.
@@ -659,6 +662,34 @@ export default function SyncWebView({ visible, bank, onClose, onSuccess }) {
         offersRedirectRef.current = false;
         setOnLoginPage(false);
         setOnOffersPage(true);
+        webViewRef.current?.injectJavaScript(buildCapitalOneDetectCardsJs());
+        return;
+      }
+
+      if (data.type === 'CAPONE_EXPAND_STATUS' && bank === 'capital_one') {
+        console.log('[CapOne] expand', data.clicks, 'stash', data.stashBefore, '->', data.stashAfter, 'dom', data.domTiles);
+        return;
+      }
+
+      if (data.type === 'CAPONE_CARDS' && bank === 'capital_one') {
+        const cards = Array.isArray(data.cards) ? data.cards : [];
+        console.log('[CapOne] card picker candidates', cards.length, cards.map(c => c.label).join(' | '), data.href);
+        if (cards.length > 0) {
+          cardOptionsRef.current = cards.map((card, index) => ({
+            label: card.label,
+            selected: !!card.selected,
+            index,
+            testId: `capone-${index}`,
+          }));
+          cardsDiscovered.current = true;
+          setCardCount(cards.length);
+          const activeIdx = cards.findIndex(c => c.selected);
+          cardIndexRef.current = activeIdx >= 0 ? activeIdx : 0;
+          setCardIndexUi(cardIndexRef.current);
+          if (cards[cardIndexRef.current]?.label) {
+            setCurrentCard(cards[cardIndexRef.current].label);
+          }
+        }
         return;
       }
 

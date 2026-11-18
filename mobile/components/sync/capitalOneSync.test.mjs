@@ -14,6 +14,7 @@ import {
   buildCapitalOneReadJs,
   buildCapitalOneExpandOffersJs,
   buildCapitalOneExpandThenReadJs,
+  buildCapitalOneDetectCardsJs,
   buildCapitalOneSyncReadOrReloadJs,
   capitalOneChromeFromLoadEndUrl,
   isCapitalOneSyncOffersReady,
@@ -501,12 +502,14 @@ test('SyncWebView Cap One sync expands View More then reads the merged stash', (
   const syncSource = readRepoFile('..', 'SyncWebView.js');
   assert.match(syncSource, /buildCapitalOneSyncReadOrReloadJs/);
   assert.match(syncSource, /buildCapitalOneExpandThenReadJs/);
-  assert.match(buildCapitalOneExpandOffersJs(), /View More Offers/);
   assert.match(buildCapitalOneExpandThenReadJs(), /__capOneExpandOffers/);
   assert.match(buildCapitalOneSyncReadOrReloadJs(), /__capOneReloadForSync/);
   assert.match(buildCapitalOneSyncReadOrReloadJs(), /location\.reload/);
-  assert.match(buildCapitalOneOfferCaptureJs(), /__capOneOfferHookVersion === 4/);
+  assert.match(buildCapitalOneOfferCaptureJs(), /__capOneOfferHookVersion === 5/);
   assert.match(buildCapitalOneOfferCaptureJs(), /mergeOfferPages/);
+  assert.match(buildCapitalOneExpandOffersJs(), /view\\s\*more/);
+  assert.match(buildCapitalOneExpandOffersJs(), /feed-tile-/);
+  assert.match(buildCapitalOneDetectCardsJs(), /CAPONE_CARDS/);
 });
 
 test('maps the redacted fixture into capital_one catalog rows with stable ids', () => {

@@ -152,7 +152,7 @@ const unwrapCapitalOnePayloadSource = `function unwrapCapitalOnePayload(parsed) 
 export const buildCapitalOneOfferCaptureJs = () => `
   (function() {
     try {
-      if (window.__capOneOfferHookVersion === 4) return;
+      if (window.__capOneOfferHookVersion === 5) return;
       var stripCapitalOneOffers = ${stripCapitalOneOffersSource};
       var unwrapCapitalOnePayload = ${unwrapCapitalOnePayloadSource};
 
@@ -313,7 +313,7 @@ export const buildCapitalOneOfferCaptureJs = () => `
           });
         };
       }
-      window.__capOneOfferHookVersion = 4;
+      window.__capOneOfferHookVersion = 5;
     } catch (e) {
       window.__capOneHookError = 'unreadable';
     }
@@ -321,44 +321,216 @@ export const buildCapitalOneOfferCaptureJs = () => `
   true;
 `;
 
-// Click "View More Offers" until gone so each natural /feed/<token> page is
-// merged into the stash (same idea as the bookmarklet expand loop, but we
-// still read offer fields from the hooked XHR — not a DOM scrape).
+// Click "View More Offers" until gone (bookmarklet-style). Also scrape visible
+// feed-tile DOM into the stash so pages that never re-hit /feed/<token> still count.
 export const buildCapitalOneExpandOffersJs = () => `
   (function() {
-    var BUTTON = 'View More Offers';
-    var MAX_CLICKS = 40;
+    var MAX_CLICKS = 60;
     function sleep(ms) {
       return new Promise(function(resolve) { setTimeout(resolve, ms); });
     }
     function findMoreButton() {
-      var nodes = document.querySelectorAll('button, a, [role="button"]');
+      var nodes = document.querySelectorAll('button, a, [role="button"], div, span');
       for (var i = 0; i < nodes.length; i++) {
         var text = String(nodes[i].textContent || '').replace(/\\s+/g, ' ').trim();
-        if (text === BUTTON) return nodes[i];
+        if (/^view\\s*more(\\s+offers)?$/i.test(text)) return nodes[i];
       }
       return null;
     }
+    function clickLikeBookmarklet(el) {
+      if (!el) return;
+      try {
+        el.dispatchEvent(new MouseEvent('mousedown', { bubbles: true }));
+        el.dispatchEvent(new MouseEvent('mouseup', { bubbles: true }));
+      } catch (e) {}
+      var clicked = false;
+      try {
+        for (var key in el) {
+          if (!key || key.indexOf('__react') !== 0) continue;
+          var props = el[key];
+          var handler = props && (props.onClick
+            || (props.memoizedProps && props.memoizedProps.onClick));
+          if (typeof handler === 'function') {
+            handler({ preventDefault: function() {}, stopPropagation: function() {} });
+            clicked = true;
+            break;
+          }
+        }
+      } catch (e) {}
+      if (!clicked) {
+        try { el.click(); } catch (e) {}
+      }
+    }
+    function scrapeDomOffers() {
+      var tiles = document.querySelectorAll('div[data-testid^="feed-tile-"]');
+      var offers = [];
+      for (var i = 0; i < tiles.length; i++) {
+        var tile = tiles[i];
+        var full = String(tile.textContent || '');
+        var miles = '';
+        var milesEl = tile.querySelector('.font-semibold') || tile.querySelector('.text-2xl');
+        if (milesEl) miles = String(milesEl.textContent || '').trim();
+        if (!miles || miles.indexOf('$') !== -1 || miles.length > 20) {
+          var match = full.match(/(up to\\s*)?([\\d,]+\\.?\\d*)\\s*(%|x|miles|points)/i);
+          if (match) {
+            miles = ((match[1] || '') + match[2] + ' ' + match[3]).replace(/\\s+/g, ' ').trim();
+          } else {
+            miles = '';
+          }
+        }
+        var merchantName = 'Unknown';
+        var merchantTLD = '';
+        var img = tile.querySelector('img');
+        if (img) {
+          var alt = img.getAttribute('alt');
+          if (alt && alt.toLowerCase().indexOf('logo') === -1) merchantName = alt.trim();
+          try {
+            var src = img.getAttribute('src') || '';
+            var domainMatch = src.match(/[?&]domain=([^&]+)/i);
+            if (domainMatch) {
+              merchantTLD = decodeURIComponent(domainMatch[1]).toLowerCase();
+              if (merchantName === 'Unknown') {
+                var parts = merchantTLD.split('.');
+                var namePart = parts.length > 1 ? parts[parts.length - 2] : parts[0];
+                merchantName = namePart.charAt(0).toUpperCase() + namePart.slice(1);
+              }
+            }
+          } catch (e) {}
+        }
+        if (!merchantTLD && merchantName !== 'Unknown') {
+          merchantTLD = merchantName.toLowerCase().replace(/[^a-z0-9]+/g, '') + '.com';
+        }
+        if (!merchantTLD || !miles) continue;
+        var lower = full.toLowerCase();
+        var channel = 'Online';
+        if (lower.indexOf('in-store') !== -1) {
+          channel = lower.indexOf('online') !== -1 ? 'In-Store & Online' : 'In-Store';
+        } else if (lower.indexOf('in-app') !== -1) {
+          channel = 'In-App';
+        }
+        offers.push({
+          bankOfferId: merchantTLD + '|dom|' + miles.toLowerCase().replace(/\\s+/g, ''),
+          merchantTLD: merchantTLD,
+          merchantName: merchantName,
+          type: 'dom',
+          channel: channel,
+          rewardText: miles,
+          offerSources: ['dom'],
+          expiryText: '',
+          isActivated: false,
+        });
+      }
+      return { offers: offers };
+    }
+    function mergeDomIntoStash() {
+      var scraped = scrapeDomOffers();
+      if (!scraped.offers.length) return scraped.offers.length;
+      if (!window.__capOneLastOffers || !Array.isArray(window.__capOneLastOffers.offers)) {
+        window.__capOneLastOffers = scraped;
+        return scraped.offers.length;
+      }
+      var seen = {};
+      var out = [];
+      function add(list) {
+        for (var i = 0; i < list.length; i++) {
+          var o = list[i];
+          if (!o || !o.bankOfferId) continue;
+          var id = String(o.bankOfferId);
+          if (seen[id]) continue;
+          seen[id] = 1;
+          out.push(o);
+        }
+      }
+      add(window.__capOneLastOffers.offers);
+      add(scraped.offers);
+      window.__capOneLastOffers = { offers: out };
+      return out.length;
+    }
     async function expand() {
       var clicks = 0;
+      var before = (window.__capOneLastOffers && window.__capOneLastOffers.offers
+        && window.__capOneLastOffers.offers.length) || 0;
       while (clicks < MAX_CLICKS) {
         try { window.scrollTo(0, document.body.scrollHeight); } catch (e) {}
+        mergeDomIntoStash();
         var button = findMoreButton();
         if (!button) break;
         clicks += 1;
         try { button.scrollIntoView({ block: 'center' }); } catch (e) {}
-        await sleep(400);
-        try { button.click(); } catch (e) {}
+        await sleep(500);
+        clickLikeBookmarklet(button);
         var waited = 0;
-        while (waited < 10) {
-          await sleep(300);
+        while (waited < 12) {
+          await sleep(350);
           waited += 1;
+          mergeDomIntoStash();
           if (findMoreButton()) break;
         }
       }
+      mergeDomIntoStash();
+      var after = (window.__capOneLastOffers && window.__capOneLastOffers.offers
+        && window.__capOneLastOffers.offers.length) || 0;
+      try {
+        if (window.ReactNativeWebView) {
+          window.ReactNativeWebView.postMessage(JSON.stringify({
+            type: 'CAPONE_EXPAND_STATUS',
+            clicks: clicks,
+            stashBefore: before,
+            stashAfter: after,
+            domTiles: document.querySelectorAll('div[data-testid^="feed-tile-"]').length,
+          }));
+        }
+      } catch (e) {}
       return clicks;
     }
     window.__capOneExpandOffers = expand;
+    window.__capOneScrapeDomOffers = scrapeDomOffers;
+  })();
+  true;
+`;
+
+// Probe the Cap One feed chrome for a card picker / switcher and report labels.
+export const buildCapitalOneDetectCardsJs = () => `
+  (function() {
+    try {
+      var cards = [];
+      var seen = {};
+      function add(label, selected) {
+        var name = String(label || '').replace(/\\s+/g, ' ').trim();
+        if (!name || name.length < 3 || name.length > 80) return;
+        if (/sign\\s*in|view more|category|filter|activate|offers for you/i.test(name)) return;
+        var key = name.toLowerCase();
+        if (seen[key]) return;
+        seen[key] = 1;
+        cards.push({ label: name, selected: !!selected });
+      }
+      var selects = document.querySelectorAll('select');
+      for (var s = 0; s < selects.length; s++) {
+        var opts = selects[s].options || [];
+        for (var o = 0; o < opts.length; o++) {
+          add(opts[o].text, opts[o].selected);
+        }
+      }
+      var nodes = document.querySelectorAll(
+        '[data-testid*="card"], [data-testid*="Card"], [aria-label*="card"], [aria-label*="Card"], button, [role="option"], [role="menuitem"]'
+      );
+      for (var i = 0; i < nodes.length; i++) {
+        var el = nodes[i];
+        var text = String(el.getAttribute('aria-label') || el.textContent || '')
+          .replace(/\\s+/g, ' ').trim();
+        if (!/(\\d{4}|venture|savor|quark|spark|platinum|quicksilver|cash|miles)/i.test(text)) continue;
+        var selected = el.getAttribute('aria-selected') === 'true'
+          || /selected|current|active/i.test(String(el.className || ''));
+        add(text, selected);
+      }
+      if (window.ReactNativeWebView) {
+        window.ReactNativeWebView.postMessage(JSON.stringify({
+          type: 'CAPONE_CARDS',
+          cards: cards,
+          href: String((window.location && window.location.href) || ''),
+        }));
+      }
+    } catch (e) {}
   })();
   true;
 `;
