@@ -45,6 +45,7 @@ import {
   buildCapitalOneOfferCaptureJs,
   buildCapitalOneOffersVisibleJs,
   buildCapitalOneReadJs,
+  buildCapitalOneSyncReadOrReloadJs,
   capitalOneChromeFromLoadEndUrl,
   isCapitalOneSyncOffersReady,
   shouldClearOffersChromeOnLoadStart,
@@ -257,6 +258,14 @@ export default function SyncWebView({ visible, bank, onClose, onSuccess }) {
       setTimeout(() => {
         webViewRef.current?.injectJavaScript(buildCapitalOneOffersVisibleJs());
       }, 800);
+      // After Sync's soft-reload, give the natural feed XHR a moment to stash,
+      // then read. Ignored when the user has not started sync.
+      if (syncStartedRef.current) {
+        setTimeout(() => {
+          if (!syncStartedRef.current) return;
+          webViewRef.current?.injectJavaScript(buildCapitalOneReadJs());
+        }, 1200);
+      }
       // Only promote/clear from top-level Cap One URLs. Ignore iframe loadEnds
       // (ads/analytics) so they cannot hide Sync Offers.
       const chrome = capitalOneChromeFromLoadEndUrl(url, {
@@ -332,8 +341,10 @@ export default function SyncWebView({ visible, bank, onClose, onSuccess }) {
 
     if (bank === 'capital_one') {
       setCurrentCard('Capital One');
+      // Arm the feed hook, then read the stash — or soft-reload once so the
+      // page's natural /feed/<token> XHR can be caught (missed after Cloudflare).
       webViewRef.current?.injectJavaScript(buildCapitalOneOfferCaptureJs());
-      webViewRef.current?.injectJavaScript(buildCapitalOneReadJs());
+      webViewRef.current?.injectJavaScript(buildCapitalOneSyncReadOrReloadJs());
       return;
     }
 

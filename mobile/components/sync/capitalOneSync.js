@@ -152,7 +152,7 @@ const unwrapCapitalOnePayloadSource = `function unwrapCapitalOnePayload(parsed) 
 export const buildCapitalOneOfferCaptureJs = () => `
   (function() {
     try {
-      if (window.__capOneOfferHookVersion === 2) return;
+      if (window.__capOneOfferHookVersion === 3) return;
       var stripCapitalOneOffers = ${stripCapitalOneOffersSource};
       var unwrapCapitalOnePayload = ${unwrapCapitalOnePayloadSource};
 
@@ -175,15 +175,31 @@ export const buildCapitalOneOfferCaptureJs = () => `
         window.__capOneHookError = '';
       }
 
+      function onOffersHost() {
+        try {
+          var host = String((window.location && window.location.hostname) || '').toLowerCase();
+          return host.indexOf('capitaloneoffers.com') !== -1;
+        } catch (e) {
+          return false;
+        }
+      }
+
       function watchUrl(url) {
         var value = String(url || '').toLowerCase();
-        if (value.indexOf('capitaloneoffers.com') === -1) return false;
+        if (!value) return false;
+        // Absolute list URLs include the host; mobile SPAs often use relative /feed/<token>.
+        var absolute = value.indexOf('http://') === 0 || value.indexOf('https://') === 0;
+        if (absolute) {
+          if (value.indexOf('capitaloneoffers.com') === -1) return false;
+        } else if (!onOffersHost()) {
+          return false;
+        }
         // List XHR: /feed/<opaqueSessionToken>?… — not the HTML page /feed?
         try {
           var path = value.split('?')[0];
           var marker = path.indexOf('/feed/');
           if (marker === -1) return false;
-          var after = path.slice(marker + '/feed/'.length);
+          var after = path.slice(marker + '/feed/'.length).replace(/\\/+$/, '');
           return after.length > 0 && after.indexOf('/') === -1;
         } catch (e) {
           return value.indexOf('/feed/') !== -1;
@@ -268,9 +284,34 @@ export const buildCapitalOneOfferCaptureJs = () => `
           });
         };
       }
-      window.__capOneOfferHookVersion = 2;
+      window.__capOneOfferHookVersion = 3;
     } catch (e) {
       window.__capOneHookError = 'unreadable';
+    }
+  })();
+  true;
+`;
+
+// Sync press helper: read the stash if present; otherwise soft-reload once so
+// the page's natural /feed/<token> XHR runs again with the hook already armed
+// (common after Cloudflare — feed paints before the first hook catch).
+export const buildCapitalOneSyncReadOrReloadJs = () => `
+  (function() {
+    try {
+      var ready = window.__capOneLastOffers && Array.isArray(window.__capOneLastOffers.offers)
+        && window.__capOneLastOffers.offers.length > 0;
+      if (ready) {
+        ${buildCapitalOneReadJs()}
+        return;
+      }
+      if (window.__capOneReloadForSync) {
+        window.ReactNativeWebView.postMessage(JSON.stringify({ type: 'CAPONE_CAPTURE_UNAVAILABLE' }));
+        return;
+      }
+      window.__capOneReloadForSync = true;
+      window.location.reload();
+    } catch (e) {
+      window.ReactNativeWebView.postMessage(JSON.stringify({ type: 'CAPONE_CAPTURE_UNAVAILABLE' }));
     }
   })();
   true;

@@ -12,6 +12,7 @@ import {
   buildCapitalOneOfferCaptureJs,
   buildCapitalOneOffersVisibleJs,
   buildCapitalOneReadJs,
+  buildCapitalOneSyncReadOrReloadJs,
   capitalOneChromeFromLoadEndUrl,
   isCapitalOneSyncOffersReady,
   shouldClearOffersChromeOnLoadStart,
@@ -157,9 +158,10 @@ class FakeXHR {
   }
 }
 
-function installHook() {
+function installHook(locationHost = 'capitaloneoffers.com') {
   const messages = [];
   const window = {
+    location: { hostname: locationHost, href: `https://${locationHost}/feed` },
     XMLHttpRequest: FakeXHR,
     ReactNativeWebView: {
       postMessage(raw) { messages.push(JSON.parse(raw)); },
@@ -462,6 +464,45 @@ test('ignores non-feed URLs and does not hook page HTML /feed without opaque seg
   assert.equal(after.type, 'CAPONE_CAPTURE_UNAVAILABLE');
 });
 
+test('hooks relative /feed/<token> XHRs on the capitaloneoffers host', () => {
+  const { window, messages } = installHook('capitaloneoffers.com');
+  const xhr = new window.XMLHttpRequest();
+  xhr.open('GET', '/feed/opaqueSessionToken?numberOfColumnsInGrid=2&contentSlug=ease-web-l1');
+  xhr.responseText = JSON.stringify(loadFixture());
+  xhr.send();
+
+  const message = readOffers(window, messages);
+  assert.equal(message.type, 'CAPONE_OFFERS');
+  assert.equal(message.offers.offers[0].merchantName, 'adidas');
+});
+
+test('hooks /feed/<token>/ with a trailing slash', () => {
+  const { window, messages } = installHook();
+  const xhr = new window.XMLHttpRequest();
+  xhr.open('GET', 'https://capitaloneoffers.com/feed/opaqueSessionToken/?numberOfColumnsInGrid=2');
+  xhr.responseText = JSON.stringify(loadFixture());
+  xhr.send();
+  assert.equal(readOffers(window, messages).type, 'CAPONE_OFFERS');
+});
+
+test('relative feed URLs are ignored off the capitaloneoffers host', () => {
+  const { window, messages } = installHook('www.capitalone.com');
+  const xhr = new window.XMLHttpRequest();
+  xhr.open('GET', '/feed/opaqueSessionToken');
+  xhr.responseText = JSON.stringify(loadFixture());
+  xhr.send();
+  assert.equal(window.__capOneLastOffers, undefined);
+  assert.equal(readOffers(window, messages).type, 'CAPONE_CAPTURE_UNAVAILABLE');
+});
+
+test('SyncWebView Cap One sync uses read-or-reload after arming the feed hook', () => {
+  const syncSource = readRepoFile('..', 'SyncWebView.js');
+  assert.match(syncSource, /buildCapitalOneSyncReadOrReloadJs/);
+  assert.match(buildCapitalOneSyncReadOrReloadJs(), /__capOneReloadForSync/);
+  assert.match(buildCapitalOneSyncReadOrReloadJs(), /location\.reload/);
+  assert.match(buildCapitalOneOfferCaptureJs(), /__capOneOfferHookVersion === 3/);
+});
+
 test('maps the redacted fixture into capital_one catalog rows with stable ids', () => {
   const stripped = stripCapitalOneOffers(loadFixture());
   const records = capitalOneRecords({ json: stripped, now: NOW });
@@ -486,6 +527,7 @@ test('hooks feed on fetch and ignores a non-2xx response', async () => {
   let ok = false;
   const fixture = loadFixtureWithSecrets();
   const window = {
+    location: { hostname: 'capitaloneoffers.com', href: 'https://capitaloneoffers.com/feed' },
     XMLHttpRequest: FakeXHR,
     fetch() {
       return Promise.resolve({
