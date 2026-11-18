@@ -152,9 +152,28 @@ const unwrapCapitalOnePayloadSource = `function unwrapCapitalOnePayload(parsed) 
 export const buildCapitalOneOfferCaptureJs = () => `
   (function() {
     try {
-      if (window.__capOneOfferHookVersion === 3) return;
+      if (window.__capOneOfferHookVersion === 4) return;
       var stripCapitalOneOffers = ${stripCapitalOneOffersSource};
       var unwrapCapitalOnePayload = ${unwrapCapitalOnePayloadSource};
+
+      function mergeOfferPages(existing, incoming) {
+        var seen = {};
+        var out = [];
+        function add(list) {
+          if (!Array.isArray(list)) return;
+          for (var i = 0; i < list.length; i++) {
+            var offer = list[i];
+            if (!offer || !offer.bankOfferId) continue;
+            var id = String(offer.bankOfferId);
+            if (seen[id]) continue;
+            seen[id] = 1;
+            out.push(offer);
+          }
+        }
+        add(existing);
+        add(incoming);
+        return { offers: out };
+      }
 
       function remember(text) {
         var parsed = JSON.parse(text);
@@ -164,14 +183,24 @@ export const buildCapitalOneOfferCaptureJs = () => `
           window.__capOneHookError = 'unrecognized';
           return;
         }
-        // Keep the first usable natural feed response. Do not replace a
-        // good stash with a later empty/silent body (rate-limit) or a later
-        // non-empty cursor page (scroll pagination) — stash-first, no thrash.
-        if (window.__capOneLastOffers && Array.isArray(window.__capOneLastOffers.offers)
-            && window.__capOneLastOffers.offers.length > 0) {
+        // Never stash/wipe on empty (rate-limit silent). Merge later
+        // non-empty "View More" / cursor pages by bankOfferId.
+        if (!Array.isArray(stripped.offers) || stripped.offers.length === 0) {
+          if (!(window.__capOneLastOffers && window.__capOneLastOffers.offers
+              && window.__capOneLastOffers.offers.length > 0)) {
+            window.__capOneHookError = 'empty';
+          }
           return;
         }
-        window.__capOneLastOffers = stripped;
+        if (window.__capOneLastOffers && Array.isArray(window.__capOneLastOffers.offers)
+            && window.__capOneLastOffers.offers.length > 0) {
+          window.__capOneLastOffers = mergeOfferPages(
+            window.__capOneLastOffers.offers,
+            stripped.offers
+          );
+        } else {
+          window.__capOneLastOffers = stripped;
+        }
         window.__capOneHookError = '';
       }
 
@@ -284,7 +313,7 @@ export const buildCapitalOneOfferCaptureJs = () => `
           });
         };
       }
-      window.__capOneOfferHookVersion = 3;
+      window.__capOneOfferHookVersion = 4;
     } catch (e) {
       window.__capOneHookError = 'unreadable';
     }
@@ -292,23 +321,91 @@ export const buildCapitalOneOfferCaptureJs = () => `
   true;
 `;
 
-// Sync press helper: read the stash if present; otherwise soft-reload once so
-// the page's natural /feed/<token> XHR runs again with the hook already armed
-// (common after Cloudflare — feed paints before the first hook catch).
+// Click "View More Offers" until gone so each natural /feed/<token> page is
+// merged into the stash (same idea as the bookmarklet expand loop, but we
+// still read offer fields from the hooked XHR — not a DOM scrape).
+export const buildCapitalOneExpandOffersJs = () => `
+  (function() {
+    var BUTTON = 'View More Offers';
+    var MAX_CLICKS = 40;
+    function sleep(ms) {
+      return new Promise(function(resolve) { setTimeout(resolve, ms); });
+    }
+    function findMoreButton() {
+      var nodes = document.querySelectorAll('button, a, [role="button"]');
+      for (var i = 0; i < nodes.length; i++) {
+        var text = String(nodes[i].textContent || '').replace(/\\s+/g, ' ').trim();
+        if (text === BUTTON) return nodes[i];
+      }
+      return null;
+    }
+    async function expand() {
+      var clicks = 0;
+      while (clicks < MAX_CLICKS) {
+        try { window.scrollTo(0, document.body.scrollHeight); } catch (e) {}
+        var button = findMoreButton();
+        if (!button) break;
+        clicks += 1;
+        try { button.scrollIntoView({ block: 'center' }); } catch (e) {}
+        await sleep(400);
+        try { button.click(); } catch (e) {}
+        var waited = 0;
+        while (waited < 10) {
+          await sleep(300);
+          waited += 1;
+          if (findMoreButton()) break;
+        }
+      }
+      return clicks;
+    }
+    window.__capOneExpandOffers = expand;
+  })();
+  true;
+`;
+
+// Expand View More, then post CAPONE_OFFERS from the merged stash.
+export const buildCapitalOneExpandThenReadJs = () => `
+  (function() {
+    try {
+      try { sessionStorage.removeItem('__capOneReloadForSync'); } catch (e) {}
+      ${buildCapitalOneExpandOffersJs()}
+      function runRead() {
+        ${buildCapitalOneReadJs()}
+      }
+      var expand = window.__capOneExpandOffers;
+      if (typeof expand !== 'function') {
+        runRead();
+        return;
+      }
+      expand().then(function() { runRead(); }).catch(function() { runRead(); });
+    } catch (e) {
+      window.ReactNativeWebView.postMessage(JSON.stringify({ type: 'CAPONE_CAPTURE_UNAVAILABLE' }));
+    }
+  })();
+  true;
+`;
+
+// Sync press helper: expand+read if stash already warm; otherwise soft-reload
+// once (sessionStorage flag survives the reload) so the first feed XHR can be
+// caught after Cloudflare. loadEnd then runs expand+read.
 export const buildCapitalOneSyncReadOrReloadJs = () => `
   (function() {
     try {
+      var reloadKey = '__capOneReloadForSync';
+      var alreadyReloaded = false;
+      try { alreadyReloaded = sessionStorage.getItem(reloadKey) === '1'; } catch (e) {}
+      if (alreadyReloaded) {
+        try { sessionStorage.removeItem(reloadKey); } catch (e) {}
+        ${buildCapitalOneExpandThenReadJs()}
+        return;
+      }
       var ready = window.__capOneLastOffers && Array.isArray(window.__capOneLastOffers.offers)
         && window.__capOneLastOffers.offers.length > 0;
       if (ready) {
-        ${buildCapitalOneReadJs()}
+        ${buildCapitalOneExpandThenReadJs()}
         return;
       }
-      if (window.__capOneReloadForSync) {
-        window.ReactNativeWebView.postMessage(JSON.stringify({ type: 'CAPONE_CAPTURE_UNAVAILABLE' }));
-        return;
-      }
-      window.__capOneReloadForSync = true;
+      try { sessionStorage.setItem(reloadKey, '1'); } catch (e) {}
       window.location.reload();
     } catch (e) {
       window.ReactNativeWebView.postMessage(JSON.stringify({ type: 'CAPONE_CAPTURE_UNAVAILABLE' }));

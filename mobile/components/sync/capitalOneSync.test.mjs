@@ -12,6 +12,8 @@ import {
   buildCapitalOneOfferCaptureJs,
   buildCapitalOneOffersVisibleJs,
   buildCapitalOneReadJs,
+  buildCapitalOneExpandOffersJs,
+  buildCapitalOneExpandThenReadJs,
   buildCapitalOneSyncReadOrReloadJs,
   capitalOneChromeFromLoadEndUrl,
   isCapitalOneSyncOffersReady,
@@ -413,7 +415,7 @@ test('keeps a good stash when a later empty feed arrives (rate-limit silent)', (
   assert.ok(message.offers.offers.length >= 5);
 });
 
-test('keeps the first non-empty feed page when a later non-empty cursor page arrives', () => {
+test('merges later non-empty View More / cursor pages by bankOfferId', () => {
   const { window, messages } = installHook();
   const page1 = new window.XMLHttpRequest();
   page1.open('GET', FEED_LIST_URL);
@@ -442,8 +444,8 @@ test('keeps the first non-empty feed page when a later non-empty cursor page arr
   assert.equal(message.type, 'CAPONE_OFFERS');
   const names = message.offers.offers.map(o => o.merchantName);
   assert.equal(names.includes('adidas'), true);
-  assert.equal(names.includes('Nike'), false);
-  assert.ok(message.offers.offers.length >= 5);
+  assert.equal(names.includes('Nike'), true);
+  assert.ok(message.offers.offers.length >= 6);
 });
 
 test('ignores non-feed URLs and does not hook page HTML /feed without opaque segment', () => {
@@ -495,12 +497,16 @@ test('relative feed URLs are ignored off the capitaloneoffers host', () => {
   assert.equal(readOffers(window, messages).type, 'CAPONE_CAPTURE_UNAVAILABLE');
 });
 
-test('SyncWebView Cap One sync uses read-or-reload after arming the feed hook', () => {
+test('SyncWebView Cap One sync expands View More then reads the merged stash', () => {
   const syncSource = readRepoFile('..', 'SyncWebView.js');
   assert.match(syncSource, /buildCapitalOneSyncReadOrReloadJs/);
+  assert.match(syncSource, /buildCapitalOneExpandThenReadJs/);
+  assert.match(buildCapitalOneExpandOffersJs(), /View More Offers/);
+  assert.match(buildCapitalOneExpandThenReadJs(), /__capOneExpandOffers/);
   assert.match(buildCapitalOneSyncReadOrReloadJs(), /__capOneReloadForSync/);
   assert.match(buildCapitalOneSyncReadOrReloadJs(), /location\.reload/);
-  assert.match(buildCapitalOneOfferCaptureJs(), /__capOneOfferHookVersion === 3/);
+  assert.match(buildCapitalOneOfferCaptureJs(), /__capOneOfferHookVersion === 4/);
+  assert.match(buildCapitalOneOfferCaptureJs(), /mergeOfferPages/);
 });
 
 test('maps the redacted fixture into capital_one catalog rows with stable ids', () => {

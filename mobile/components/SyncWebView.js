@@ -45,6 +45,7 @@ import {
   buildCapitalOneOfferCaptureJs,
   buildCapitalOneOffersVisibleJs,
   buildCapitalOneReadJs,
+  buildCapitalOneExpandThenReadJs,
   buildCapitalOneSyncReadOrReloadJs,
   capitalOneChromeFromLoadEndUrl,
   isCapitalOneSyncOffersReady,
@@ -258,12 +259,12 @@ export default function SyncWebView({ visible, bank, onClose, onSuccess }) {
       setTimeout(() => {
         webViewRef.current?.injectJavaScript(buildCapitalOneOffersVisibleJs());
       }, 800);
-      // After Sync's soft-reload, give the natural feed XHR a moment to stash,
-      // then read. Ignored when the user has not started sync.
+      // After Sync's soft-reload, wait for the first feed XHR, then click
+      // "View More Offers" (merging each page) and read the stash.
       if (syncStartedRef.current) {
         setTimeout(() => {
           if (!syncStartedRef.current) return;
-          webViewRef.current?.injectJavaScript(buildCapitalOneReadJs());
+          webViewRef.current?.injectJavaScript(buildCapitalOneExpandThenReadJs());
         }, 1200);
       }
       // Only promote/clear from top-level Cap One URLs. Ignore iframe loadEnds
