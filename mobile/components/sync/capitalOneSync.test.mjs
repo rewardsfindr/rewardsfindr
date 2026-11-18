@@ -12,6 +12,9 @@ import {
   buildCapitalOneOfferCaptureJs,
   buildCapitalOneOffersVisibleJs,
   buildCapitalOneReadJs,
+  capitalOneChromeFromLoadEndUrl,
+  isCapitalOneSyncOffersReady,
+  shouldClearOffersChromeOnLoadStart,
   stripCapitalOneOffers,
 } from './capitalOneSync.js';
 
@@ -224,9 +227,10 @@ test('SyncWebView wires Capital One capture/read/save stash-first like Citi', ()
   assert.match(syncSource, /CAPONE_CAPTURE_UNAVAILABLE/);
   assert.match(syncSource, /CAPONE_OFFERS/);
   assert.match(syncSource, /bank: 'capital_one'/);
-  // Iframe loadStart must not clear Cap One offers chrome / pageLoaded.
-  assert.match(syncSource, /if \(bank === 'capital_one'\) return;/);
-  assert.match(syncSource, /bank === 'capital_one' \|\| pageLoaded/);
+  // Iframe load churn retention uses pure helpers (executed below), not inline rules alone.
+  assert.match(syncSource, /isCapitalOneSyncOffersReady/);
+  assert.match(syncSource, /shouldClearOffersChromeOnLoadStart/);
+  assert.match(syncSource, /capitalOneChromeFromLoadEndUrl/);
   assert.equal(typeof buildCapitalOneOffersVisibleJs(), 'string');
   assert.match(buildCapitalOneOffersVisibleJs(), /CAPONE_ON_OFFERS/);
   assert.match(buildCapitalOneOffersVisibleJs(), /capitaloneoffers\.com/);
@@ -241,6 +245,49 @@ test('SyncWebView wires Capital One capture/read/save stash-first like Citi', ()
   assert.equal(readJs.includes('new XMLHttpRequest'), false);
   assert.equal(readJs.includes('XMLHttpRequest('), false);
   assert.equal(/numberOfColumnsInGrid|contentSlug=ease-web-l1/.test(readJs), false);
+});
+
+test('Cap One Sync Offers stays ready when pageLoaded flips false under iframe churn', () => {
+  // pageLoaded goes false on every subframe loadStart; Cap One must still show Sync Offers.
+  assert.equal(isCapitalOneSyncOffersReady({ onOffersPage: true, pageLoaded: false }), true);
+  assert.equal(isCapitalOneSyncOffersReady({ onOffersPage: true, pageLoaded: true }), true);
+  assert.equal(isCapitalOneSyncOffersReady({ onOffersPage: false, pageLoaded: false }), false);
+  assert.equal(isCapitalOneSyncOffersReady({ onOffersPage: false, pageLoaded: true }), false);
+});
+
+test('Cap One loadStart must not clear offers chrome; other banks still clear', () => {
+  assert.equal(shouldClearOffersChromeOnLoadStart('capital_one'), false);
+  assert.equal(shouldClearOffersChromeOnLoadStart('citi'), true);
+  assert.equal(shouldClearOffersChromeOnLoadStart('wells_fargo'), true);
+  assert.equal(shouldClearOffersChromeOnLoadStart('chase'), true);
+  assert.equal(shouldClearOffersChromeOnLoadStart('amex'), true);
+});
+
+test('Cap One loadEnd ignores unknown iframe URLs and does not clear Sync Offers chrome', () => {
+  const paths = {
+    loginPaths: BANK_CONFIG.capital_one.loginPaths,
+    offersPaths: BANK_CONFIG.capital_one.offersPaths,
+  };
+  // Ads/analytics iframe loadEnd → null → leave onOffersPage as-is.
+  assert.equal(capitalOneChromeFromLoadEndUrl('https://ads.example/pixel.gif', paths), null);
+  assert.equal(capitalOneChromeFromLoadEndUrl('about:blank', paths), null);
+  assert.equal(capitalOneChromeFromLoadEndUrl('', paths), null);
+  assert.deepEqual(
+    capitalOneChromeFromLoadEndUrl('https://capitaloneoffers.com/feed/opaque-token', paths),
+    { onOffersPage: true, onLoginPage: false }
+  );
+  assert.deepEqual(
+    capitalOneChromeFromLoadEndUrl('https://capitaloneoffers.com/', paths),
+    { onOffersPage: true, onLoginPage: false }
+  );
+  assert.deepEqual(
+    capitalOneChromeFromLoadEndUrl('https://verified.capitalone.com/auth', paths),
+    { onOffersPage: false, onLoginPage: true }
+  );
+  assert.deepEqual(
+    capitalOneChromeFromLoadEndUrl('https://www.capitalone.com/sign-in', paths),
+    { onOffersPage: false, onLoginPage: true }
+  );
 });
 
 test('stripCapitalOneOffers builds stable bankOfferIds and skips PromotedAffiliate', () => {

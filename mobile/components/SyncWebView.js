@@ -41,7 +41,14 @@ import {
 } from './sync/amexSync.js';
 import { buildWellsFargoDealsVisibleJs, buildWellsFargoOfferCaptureJs, buildWellsFargoReadJs } from './sync/wellsFargoSync.js';
 import { buildCitiOfferCaptureJs, buildCitiOffersVisibleJs, buildCitiReadJs } from './sync/citiSync.js';
-import { buildCapitalOneOfferCaptureJs, buildCapitalOneOffersVisibleJs, buildCapitalOneReadJs } from './sync/capitalOneSync.js';
+import {
+  buildCapitalOneOfferCaptureJs,
+  buildCapitalOneOffersVisibleJs,
+  buildCapitalOneReadJs,
+  capitalOneChromeFromLoadEndUrl,
+  isCapitalOneSyncOffersReady,
+  shouldClearOffersChromeOnLoadStart,
+} from './sync/capitalOneSync.js';
 import { parseCardLabel }                                 from './sync/cardLabel.js';
 import {
   buildOpenWindowRedirectJs,
@@ -250,17 +257,15 @@ export default function SyncWebView({ visible, bank, onClose, onSuccess }) {
       setTimeout(() => {
         webViewRef.current?.injectJavaScript(buildCapitalOneOffersVisibleJs());
       }, 800);
-      if (!url) return;
-      const onLogin = (config.loginPaths || []).some(p => url.includes(p.toLowerCase()));
-      const onOffers = !onLogin && (config.offersPaths || []).some(p => url.includes(p.toLowerCase()));
       // Only promote/clear from top-level Cap One URLs. Ignore iframe loadEnds
       // (ads/analytics) so they cannot hide Sync Offers.
-      if (onOffers) {
-        setOnOffersPage(true);
-        setOnLoginPage(false);
-      } else if (onLogin) {
-        setOnOffersPage(false);
-        setOnLoginPage(true);
+      const chrome = capitalOneChromeFromLoadEndUrl(url, {
+        loginPaths: config.loginPaths,
+        offersPaths: config.offersPaths,
+      });
+      if (chrome) {
+        setOnOffersPage(chrome.onOffersPage);
+        setOnLoginPage(chrome.onLoginPage);
       }
       return;
     }
@@ -752,9 +757,11 @@ export default function SyncWebView({ visible, bank, onClose, onSuccess }) {
     }
     // Cap One: show Sync Offers as soon as we know we're on the feed.
     // pageLoaded flips on every iframe loadStart/End and would hide the button.
-    const ready = onOffersPage
-      && (bank === 'capital_one' || pageLoaded)
-      && (bank !== 'amex' || amexCardsReady);
+    const ready = (
+      bank === 'capital_one'
+        ? isCapitalOneSyncOffersReady({ onOffersPage, pageLoaded })
+        : onOffersPage && pageLoaded
+    ) && (bank !== 'amex' || amexCardsReady);
     if (ready) return renderSyncButton();
     return null;
   };
@@ -797,7 +804,7 @@ export default function SyncWebView({ visible, bank, onClose, onSuccess }) {
               // Cap One offers pages load many iframes; each subframe used to
               // flip pageLoaded/onOffersPage and hide Sync Offers. Ignore that
               // churn — navigation / CAPONE_ON_OFFERS / loadEnd own Cap One state.
-              if (bank === 'capital_one') return;
+              if (!shouldClearOffersChromeOnLoadStart(bank)) return;
               setPageLoaded(false);
               setOnOffersPage(false);
               setOnLoginPage(false);

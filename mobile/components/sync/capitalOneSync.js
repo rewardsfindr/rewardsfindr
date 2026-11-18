@@ -379,3 +379,33 @@ export const buildCapitalOneReadJs = () => `
   })();
   true;
 `;
+
+// ── Sync Offers chrome under Cap One iframe loadStart/loadEnd churn ──
+// Cap One offers pages fire many subframe loads. Clearing chrome or requiring
+// pageLoaded on every churn hides Sync Offers. Pure helpers below encode the
+// retention rules so node tests can execute them (not only regex SyncWebView).
+
+/** Cap One: Sync Offers ready when on the feed — ignore pageLoaded iframe flips. */
+export function isCapitalOneSyncOffersReady({ onOffersPage, pageLoaded }) {
+  void pageLoaded;
+  return Boolean(onOffersPage);
+}
+
+/** Whether onLoadStart should clear offers chrome / pageLoaded. Cap One: no. */
+export function shouldClearOffersChromeOnLoadStart(bank) {
+  return bank !== 'capital_one';
+}
+
+/**
+ * Cap One loadEnd chrome from a URL. Returns null for unknown/iframe URLs so
+ * callers leave onOffersPage / onLoginPage unchanged (do not clear Sync Offers).
+ */
+export function capitalOneChromeFromLoadEndUrl(url, { loginPaths, offersPaths } = {}) {
+  const lower = String(url || '').toLowerCase();
+  if (!lower) return null;
+  const onLogin = (loginPaths || []).some(p => lower.includes(String(p).toLowerCase()));
+  const onOffers = !onLogin && (offersPaths || []).some(p => lower.includes(String(p).toLowerCase()));
+  if (onOffers) return { onOffersPage: true, onLoginPage: false };
+  if (onLogin) return { onOffersPage: false, onLoginPage: true };
+  return null;
+}
