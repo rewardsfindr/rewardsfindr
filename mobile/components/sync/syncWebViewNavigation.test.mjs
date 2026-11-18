@@ -15,11 +15,13 @@ function readRepoFile(...parts) {
   return readFileSync(join(HERE, ...parts), 'utf8');
 }
 
-test('shouldAllowSyncWebViewNavigation allows http(s) and about:blank', () => {
+test('shouldAllowSyncWebViewNavigation allows http(s), about:blank, data, and blob', () => {
   assert.equal(shouldAllowSyncWebViewNavigation('https://www.capitalone.com/offers'), true);
   assert.equal(shouldAllowSyncWebViewNavigation('http://example.com/path'), true);
   assert.equal(shouldAllowSyncWebViewNavigation('HTTPS://BANK.EXAMPLE/'), true);
   assert.equal(shouldAllowSyncWebViewNavigation('about:blank'), true);
+  assert.equal(shouldAllowSyncWebViewNavigation('data:text/html,hi'), true);
+  assert.equal(shouldAllowSyncWebViewNavigation('blob:https://capitaloneoffers.com/abc'), true);
   assert.equal(shouldAllowSyncWebViewNavigation(''), true);
   assert.equal(shouldAllowSyncWebViewNavigation(null), true);
   assert.equal(shouldAllowSyncWebViewNavigation(undefined), true);
@@ -38,6 +40,13 @@ test('buildOpenWindowRedirectJs injects JSON-safe location.href redirect', () =>
   assert.equal(buildOpenWindowRedirectJs(null), null);
   assert.equal(buildOpenWindowRedirectJs(''), null);
   assert.equal(buildOpenWindowRedirectJs(undefined), null);
+  // Cloudflare / blank popups must not replace the offers document.
+  assert.equal(buildOpenWindowRedirectJs('about:blank'), null);
+  assert.equal(
+    buildOpenWindowRedirectJs('https://challenges.cloudflare.com/cdn-cgi/challenge-platform/x'),
+    null,
+  );
+  assert.equal(buildOpenWindowRedirectJs('data:text/html,hi'), null);
 
   const url = 'https://capitaloneoffers.com/ease?x="quotes\'&';
   const js = buildOpenWindowRedirectJs(url);
@@ -60,10 +69,12 @@ test('buildContainOpenWindowsJs patches window.open and target=_blank clicks', (
 function installContainInject() {
   const clickListeners = [];
   const location = { href: 'https://www.capitalone.com/offers' };
+  const nativeCalls = [];
   const window = {
     location,
-    open() {
-      throw new Error('native window.open should be overwritten by contain inject');
+    open(url, name, specs) {
+      nativeCalls.push({ url, name, specs });
+      return { native: true, url };
     },
   };
   const document = {
@@ -72,15 +83,16 @@ function installContainInject() {
     },
   };
   new Function('window', 'document', buildContainOpenWindowsJs())(window, document);
-  return { window, location, clickListeners };
+  return { window, location, clickListeners, nativeCalls };
 }
 
 test('buildContainOpenWindowsJs routes window.open and _blank clicks to location.href', () => {
-  const { window, location, clickListeners } = installContainInject();
+  const { window, location, clickListeners, nativeCalls } = installContainInject();
 
   const openResult = window.open('https://capitaloneoffers.com/ease?deal=1');
   assert.equal(location.href, 'https://capitaloneoffers.com/ease?deal=1');
   assert.equal(openResult, window);
+  assert.equal(nativeCalls.length, 0);
 
   const click = clickListeners.find((entry) => entry.type === 'click' && entry.capture === true);
   assert.ok(click, 'contain inject must register a capturing click listener');
@@ -142,6 +154,40 @@ test('buildContainOpenWindowsJs routes window.open and _blank clicks to location
   });
   assert.equal(prevented, false);
   assert.equal(location.href, 'https://www.capitalone.com/offers');
+});
+
+test('buildContainOpenWindowsJs leaves Cloudflare and about:blank to native open', () => {
+  const { window, location, nativeCalls, clickListeners } = installContainInject();
+  location.href = 'https://capitaloneoffers.com/feed';
+
+  const blank = window.open('about:blank');
+  assert.equal(location.href, 'https://capitaloneoffers.com/feed');
+  assert.deepEqual(blank, { native: true, url: 'about:blank' });
+  assert.equal(nativeCalls.length, 1);
+
+  const cf = window.open('https://challenges.cloudflare.com/cdn-cgi/challenge-platform/x');
+  assert.equal(location.href, 'https://capitaloneoffers.com/feed');
+  assert.deepEqual(cf, {
+    native: true,
+    url: 'https://challenges.cloudflare.com/cdn-cgi/challenge-platform/x',
+  });
+
+  const click = clickListeners.find((entry) => entry.type === 'click' && entry.capture === true);
+  let prevented = false;
+  click.handler({
+    target: {
+      tagName: 'A',
+      href: 'https://challenges.cloudflare.com/cdn-cgi/challenge-platform/x',
+      parentElement: null,
+      getAttribute(name) {
+        return name === 'target' ? '_blank' : null;
+      },
+    },
+    preventDefault() { prevented = true; },
+    stopPropagation() {},
+  });
+  assert.equal(prevented, false);
+  assert.equal(location.href, 'https://capitaloneoffers.com/feed');
 });
 
 test('SyncWebView wires in-sheet open-window containment and load policy', () => {
