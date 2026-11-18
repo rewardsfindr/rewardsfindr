@@ -62,4 +62,14 @@ export const BANK_CONFIG = {
     offersPaths: ['/nga/products-offers/merchantoffers', 'merchantoffers'],
     loginPaths: ['/login', '/signon', '/sign-on', 'parent-interstitial', 'pageNotFound', 'www.citi.com'],
   },
+  capital_one: {
+    // Marketing entry — signed-in session lands on capitaloneoffers.com/feed.
+    // Do not use the stale capitalone.com/card-benefits/offers path.
+    url: 'https://www.capitalone.com/',
+    offersUrl: 'https://capitaloneoffers.com/feed',
+    label: 'Capital One Offers',
+    color: '#d03027',
+    offersPaths: ['capitaloneoffers.com/feed', 'capitaloneoffers.com'],
+    loginPaths: ['/sign-in', '/signin', '/login', '/auth', 'verified.capitalone.com', 'myaccounts'],
+  },
 };

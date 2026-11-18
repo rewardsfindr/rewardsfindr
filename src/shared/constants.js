@@ -183,7 +183,7 @@ export const POPULAR_STORES = [
 export const BANK_OFFER_URLS = {
   [BANKS.CHASE]: 'chase.com/digital/offers',
   [BANKS.AMEX]: 'americanexpress.com/en-us/benefits/offers',
-  [BANKS.CAPITAL_ONE]: 'capitalone.com/card-benefits/offers',
+  [BANKS.CAPITAL_ONE]: 'capitaloneoffers.com/feed',
   [BANKS.BOFA]: 'bankofamerica.com/deposits/manage/rewards-offers',
   [BANKS.CITI]: 'citibank.com/credit-cards/offers',
 };

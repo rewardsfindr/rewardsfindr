@@ -12,7 +12,7 @@
 //   6. Transition to enrolled page → reuse same card list → repeat cycle
 //   7. All phases done → onSuccess + onClose
 //
-// Chase, Amex, Wells Fargo, and Citi each save a structured snapshot on the phone.
+// Chase, Amex, Wells Fargo, Citi, and Capital One each save a structured snapshot on the phone.
 //
 // Key timing note for Amex:
 //   Amex fires ReadOffersHubPresentation (REPLACE) BEFORE CARD_SWITCHED
@@ -41,7 +41,23 @@ import {
 } from './sync/amexSync.js';
 import { buildWellsFargoDealsVisibleJs, buildWellsFargoOfferCaptureJs, buildWellsFargoReadJs } from './sync/wellsFargoSync.js';
 import { buildCitiOfferCaptureJs, buildCitiOffersVisibleJs, buildCitiReadJs } from './sync/citiSync.js';
+import {
+  buildCapitalOneOfferCaptureJs,
+  buildCapitalOneOffersVisibleJs,
+  buildCapitalOneReadJs,
+  buildCapitalOneDetectCardsJs,
+  buildCapitalOneExpandThenReadJs,
+  buildCapitalOneSyncReadOrReloadJs,
+  capitalOneChromeFromLoadEndUrl,
+  isCapitalOneSyncOffersReady,
+  shouldClearOffersChromeOnLoadStart,
+} from './sync/capitalOneSync.js';
 import { parseCardLabel }                                 from './sync/cardLabel.js';
+import {
+  buildOpenWindowRedirectJs,
+  shouldAllowSyncWebViewNavigation,
+  buildContainOpenWindowsJs,
+} from './sync/syncWebViewNavigation.js';
 
 function citiCardLabelFromOffers(payload) {
   const raw = String(payload?.selectedCard?.displayProductName || '').trim();
@@ -185,7 +201,24 @@ export default function SyncWebView({ visible, bank, onClose, onSuccess }) {
       setOnOffersPage(onOffers);
       setOnLoginPage(onLogin && !onOffers);
     }
+    // Cap One SPA / soft navigations: re-signal offers chrome so Sync Offers stays available.
+    if (bank === 'capital_one' && onOffers) {
+      webViewRef.current?.injectJavaScript(buildCapitalOneOffersVisibleJs());
+    }
   };
+
+  // Cap One (and similar) often open offers via window.open / target=_blank.
+  // Android WebView defaults to multiple windows; without this handler the
+  // new URL leaves the sheet and opens the phone browser.
+  const handleOpenWindow = (event) => {
+    const targetUrl = event?.nativeEvent?.targetUrl;
+    const js = buildOpenWindowRedirectJs(targetUrl);
+    if (!js || !webViewRef.current) return;
+    webViewRef.current.injectJavaScript(js);
+  };
+
+  const handleShouldStartLoadWithRequest = (request) =>
+    shouldAllowSyncWebViewNavigation(request?.url);
 
   const handleLoadEnd = (syntheticEvent) => {
     const url = (syntheticEvent?.nativeEvent?.url || currentUrl).toLowerCase();
@@ -217,6 +250,36 @@ export default function SyncWebView({ visible, bank, onClose, onSuccess }) {
       const onOffers = !onLogin && (config.offersPaths || []).some(p => url.includes(p.toLowerCase()));
       setOnOffersPage(onOffers);
       setOnLoginPage(onLogin && !onOffers);
+      return;
+    }
+
+    if (bank === 'capital_one') {
+      webViewRef.current?.injectJavaScript(buildCapitalOneOfferCaptureJs());
+      webViewRef.current?.injectJavaScript(buildCapitalOneOffersVisibleJs());
+      webViewRef.current?.injectJavaScript(buildCapitalOneDetectCardsJs());
+      // Feed chrome can paint after first loadEnd — nudge visibility once more.
+      setTimeout(() => {
+        webViewRef.current?.injectJavaScript(buildCapitalOneOffersVisibleJs());
+        webViewRef.current?.injectJavaScript(buildCapitalOneDetectCardsJs());
+      }, 800);
+      // After Sync's soft-reload, wait for the first feed XHR, then click
+      // "View More Offers" (merging each page) and read the stash.
+      if (syncStartedRef.current) {
+        setTimeout(() => {
+          if (!syncStartedRef.current) return;
+          webViewRef.current?.injectJavaScript(buildCapitalOneExpandThenReadJs());
+        }, 1200);
+      }
+      // Only promote/clear from top-level Cap One URLs. Ignore iframe loadEnds
+      // (ads/analytics) so they cannot hide Sync Offers.
+      const chrome = capitalOneChromeFromLoadEndUrl(url, {
+        loginPaths: config.loginPaths,
+        offersPaths: config.offersPaths,
+      });
+      if (chrome) {
+        setOnOffersPage(chrome.onOffersPage);
+        setOnLoginPage(chrome.onLoginPage);
+      }
       return;
     }
 
@@ -280,6 +343,15 @@ export default function SyncWebView({ visible, bank, onClose, onSuccess }) {
       return;
     }
 
+    if (bank === 'capital_one') {
+      setCurrentCard('Capital One');
+      // Arm the feed hook, then read the stash — or soft-reload once so the
+      // page's natural /feed/<token> XHR can be caught (missed after Cloudflare).
+      webViewRef.current?.injectJavaScript(buildCapitalOneOfferCaptureJs());
+      webViewRef.current?.injectJavaScript(buildCapitalOneSyncReadOrReloadJs());
+      return;
+    }
+
     chaseRefreshRef.current = false;
     webViewRef.current?.injectJavaScript(buildChaseOfferCaptureJs());
     webViewRef.current?.injectJavaScript(buildListCardsJs());
@@ -307,7 +379,8 @@ export default function SyncWebView({ visible, bank, onClose, onSuccess }) {
     const isAmex = bank === 'amex';
     const isWells = bank === 'wells_fargo';
     const isCiti = bank === 'citi';
-    if (!isAmex && !isWells && !isCiti && !fullCardName) {
+    const isCapOne = bank === 'capital_one';
+    if (!isAmex && !isWells && !isCiti && !isCapOne && !fullCardName) {
       throw new Error('Could not read the Chase card name. Nothing was saved.');
     }
     const result = await saveCardSnapshot(user.uid, isWells
@@ -323,6 +396,14 @@ export default function SyncWebView({ visible, bank, onClose, onSuccess }) {
           bank: 'citi',
           cardName: fullCardName || 'Citi Card',
           cardLast4,
+          phase: '',
+          json: payload,
+        }
+      : isCapOne
+      ? {
+          bank: 'capital_one',
+          cardName: 'Capital One',
+          cardLast4: null,
           phase: '',
           json: payload,
         }
@@ -346,14 +427,14 @@ export default function SyncWebView({ visible, bank, onClose, onSuccess }) {
         });
 
     const savedCard = {
-      cardName: isWells ? 'Wells Fargo' : (fullCardName || 'Unknown Card'),
+      cardName: isWells ? 'Wells Fargo' : isCapOne ? 'Capital One' : (fullCardName || 'Unknown Card'),
       count: result.synced ?? 0,
-      phase: isWells || isCiti ? '' : phase,
+      phase: isWells || isCiti || isCapOne ? '' : phase,
     };
     syncedCardsRef.current = replaceCardPass(syncedCardsRef.current, savedCard);
     setSyncing(false);
 
-    if (bank === 'wells_fargo' || bank === 'citi') {
+    if (bank === 'wells_fargo' || bank === 'citi' || bank === 'capital_one') {
       const total = syncedCardsRef.current.reduce((sum, card) => sum + card.count, 0);
       onSuccess(total, syncedCardsRef.current);
       onClose();
@@ -577,6 +658,64 @@ export default function SyncWebView({ visible, bank, onClose, onSuccess }) {
         return;
       }
 
+      if (data.type === 'CAPONE_ON_OFFERS' && bank === 'capital_one') {
+        offersRedirectRef.current = false;
+        setOnLoginPage(false);
+        setOnOffersPage(true);
+        webViewRef.current?.injectJavaScript(buildCapitalOneDetectCardsJs());
+        return;
+      }
+
+      if (data.type === 'CAPONE_EXPAND_STATUS' && bank === 'capital_one') {
+        console.log('[CapOne] expand', data.clicks, 'stash', data.stashBefore, '->', data.stashAfter, 'dom', data.domTiles);
+        return;
+      }
+
+      if (data.type === 'CAPONE_CARDS' && bank === 'capital_one') {
+        const cards = Array.isArray(data.cards) ? data.cards : [];
+        console.log('[CapOne] card picker candidates', cards.length, cards.map(c => c.label).join(' | '), data.href);
+        if (cards.length > 0) {
+          cardOptionsRef.current = cards.map((card, index) => ({
+            label: card.label,
+            selected: !!card.selected,
+            index,
+            testId: `capone-${index}`,
+          }));
+          cardsDiscovered.current = true;
+          setCardCount(cards.length);
+          const activeIdx = cards.findIndex(c => c.selected);
+          cardIndexRef.current = activeIdx >= 0 ? activeIdx : 0;
+          setCardIndexUi(cardIndexRef.current);
+          if (cards[cardIndexRef.current]?.label) {
+            setCurrentCard(cards[cardIndexRef.current].label);
+          }
+        }
+        return;
+      }
+
+      if (data.type === 'CAPONE_CAPTURE_UNAVAILABLE' && bank === 'capital_one') {
+        if (!syncStartedRef.current) return;
+        syncStartedRef.current = false;
+        setSyncStarted(false);
+        setSyncing(false);
+        setSwitching(false);
+        Alert.alert(
+          'Could not read Capital One offers',
+          'Stay on the offers page and try again. Nothing was changed.'
+        );
+        return;
+      }
+
+      if (data.type === 'CAPONE_OFFERS' && bank === 'capital_one') {
+        if (!syncStartedRef.current) return;
+        await handleCaptureResult({
+          payload: data.offers,
+          cardLabel: 'Capital One',
+          phase: '',
+        });
+        return;
+      }
+
       // ── Amex JSON capture ─────────────────────────────────────
       if (data.type === 'CAPTURE_JSON' && bank === 'amex') {
         if (!captureArmed.current) return;
@@ -659,7 +798,13 @@ export default function SyncWebView({ visible, bank, onClose, onSuccess }) {
         </View>
       );
     }
-    const ready = onOffersPage && pageLoaded && (bank !== 'amex' || amexCardsReady);
+    // Cap One: show Sync Offers as soon as we know we're on the feed.
+    // pageLoaded flips on every iframe loadStart/End and would hide the button.
+    const ready = (
+      bank === 'capital_one'
+        ? isCapitalOneSyncOffersReady({ onOffersPage, pageLoaded })
+        : onOffersPage && pageLoaded
+    ) && (bank !== 'amex' || amexCardsReady);
     if (ready) return renderSyncButton();
     return null;
   };
@@ -680,14 +825,29 @@ export default function SyncWebView({ visible, bank, onClose, onSuccess }) {
             ref={webViewRef}
             source={{ uri: config.url }}
             injectedJavaScriptBeforeContentLoaded={
-              bank === 'chase' ? buildChaseOfferCaptureJs()
-              : bank === 'wells_fargo' ? buildWellsFargoOfferCaptureJs()
-              : bank === 'citi' ? buildCitiOfferCaptureJs()
-              : undefined
+              // Contain window.open / target=_blank in-sheet for every bank.
+              // Cap One especially opens capitaloneoffers.com as a new window.
+              [
+                buildContainOpenWindowsJs(),
+                bank === 'chase' ? buildChaseOfferCaptureJs()
+                : bank === 'wells_fargo' ? buildWellsFargoOfferCaptureJs()
+                : bank === 'citi' ? buildCitiOfferCaptureJs()
+                : bank === 'capital_one' ? buildCapitalOneOfferCaptureJs()
+                : '',
+              ].filter(Boolean).join('\n')
             }
             onMessage={handleMessage}
             onNavigationStateChange={handleNavigationStateChange}
+            onShouldStartLoadWithRequest={handleShouldStartLoadWithRequest}
+            // false: Android treats window.open as same-document navigation.
+            // onOpenWindow remains as a fallback if a new window is still created.
+            setSupportMultipleWindows={false}
+            onOpenWindow={handleOpenWindow}
             onLoadStart={() => {
+              // Cap One offers pages load many iframes; each subframe used to
+              // flip pageLoaded/onOffersPage and hide Sync Offers. Ignore that
+              // churn — navigation / CAPONE_ON_OFFERS / loadEnd own Cap One state.
+              if (!shouldClearOffersChromeOnLoadStart(bank)) return;
               setPageLoaded(false);
               setOnOffersPage(false);
               setOnLoginPage(false);

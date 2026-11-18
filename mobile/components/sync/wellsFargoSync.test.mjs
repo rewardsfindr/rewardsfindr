@@ -84,10 +84,11 @@ test('Wells Fargo opens the sign-on page and syncs from the deals portal', () =>
   const wells = BANK_LIST.find(bank => bank.id === 'wells_fargo');
   assert.equal(wells.supported, true);
   assert.equal(wells.label, 'Wells Fargo');
-  for (const id of ['capital_one', 'discover', 'bofa', 'bilt']) {
+  for (const id of ['discover', 'bofa', 'bilt']) {
     assert.equal(BANK_LIST.find(bank => bank.id === id).supported, false);
   }
   assert.equal(BANK_LIST.find(bank => bank.id === 'citi').supported, true);
+  assert.equal(BANK_LIST.find(bank => bank.id === 'capital_one').supported, true);
   const config = BANK_CONFIG.wells_fargo;
   assert.equal(
     config.url,
@@ -102,7 +103,8 @@ test('Wells Fargo opens the sign-on page and syncs from the deals portal', () =>
   const [supported, comingSoon] = faq.a.split('coming soon');
   assert.match(supported, /Wells Fargo/);
   assert.equal(comingSoon.includes('Wells Fargo'), false);
-  assert.match(faq.a, /Capital One/);
+  assert.match(supported, /Capital One/);
+  assert.equal(comingSoon.includes('Capital One'), false);
   assert.match(faq.a, /Bilt/);
 });
 

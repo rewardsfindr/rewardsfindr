@@ -12,7 +12,7 @@ import {
 test('onboarding has exactly three product-aligned pages', () => {
   assert.equal(ONBOARDING_PAGES.length, 3);
   assert.deepEqual(ONBOARDING_PAGES.map((p) => p.key), ['value', 'sync', 'search']);
-  assert.match(ONBOARDING_PAGES[1].body, /Chase, Amex, Wells Fargo, and Citi/);
+  assert.match(ONBOARDING_PAGES[1].body, /Chase, Amex, Wells Fargo, Citi, and Capital One/);
   assert.match(ONBOARDING_PAGES[1].body, /never store your bank password/i);
   assert.equal(ONBOARDING_PAGES[2].cta, 'Get started');
 });
@@ -20,7 +20,8 @@ test('onboarding has exactly three product-aligned pages', () => {
 test('connect-bank copy names live banks only', () => {
   assert.equal(CONNECT_BANK_COPY.chaseCta, 'Sync Chase');
   assert.equal(CONNECT_BANK_COPY.amexCta, 'Sync Amex');
-  assert.match(CONNECT_BANK_COPY.footnote, /Capital One, Discover/);
+  assert.match(CONNECT_BANK_COPY.footnote, /Discover/);
+  assert.equal(CONNECT_BANK_COPY.footnote.includes('Capital One'), false);
   assert.equal(CONNECT_BANK_COPY.footnote.includes('Citi'), false);
 });
 
