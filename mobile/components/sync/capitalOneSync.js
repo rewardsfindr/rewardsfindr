@@ -282,8 +282,8 @@ export const buildCapitalOneOffersVisibleJs = () => `
     try {
       var href = String((window.location && window.location.href) || '').toLowerCase();
       var text = document.body ? (document.body.innerText || '') : '';
-      var onOffers = href.indexOf('capitaloneoffers.com/feed') !== -1
-        || (href.indexOf('capitaloneoffers.com') !== -1 && href.indexOf('/feed') !== -1);
+      // Host match is enough — opaque /feed/<token> paths and query-only feeds vary.
+      var onOffers = href.indexOf('capitaloneoffers.com') !== -1;
       var markers = /additional offers for you|added to card|capital one offers/i.test(text);
       if ((onOffers || markers) && window.ReactNativeWebView) {
         window.ReactNativeWebView.postMessage(JSON.stringify({

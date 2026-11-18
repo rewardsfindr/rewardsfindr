@@ -224,8 +224,12 @@ test('SyncWebView wires Capital One capture/read/save stash-first like Citi', ()
   assert.match(syncSource, /CAPONE_CAPTURE_UNAVAILABLE/);
   assert.match(syncSource, /CAPONE_OFFERS/);
   assert.match(syncSource, /bank: 'capital_one'/);
+  // Iframe loadStart must not clear Cap One offers chrome / pageLoaded.
+  assert.match(syncSource, /if \(bank === 'capital_one'\) return;/);
+  assert.match(syncSource, /bank === 'capital_one' \|\| pageLoaded/);
   assert.equal(typeof buildCapitalOneOffersVisibleJs(), 'string');
   assert.match(buildCapitalOneOffersVisibleJs(), /CAPONE_ON_OFFERS/);
+  assert.match(buildCapitalOneOffersVisibleJs(), /capitaloneoffers\.com/);
   assert.equal(BANK_CONFIG.capital_one.url, 'https://www.capitalone.com/');
 
   const captureJs = buildCapitalOneOfferCaptureJs();

@@ -191,6 +191,10 @@ export default function SyncWebView({ visible, bank, onClose, onSuccess }) {
       setOnOffersPage(onOffers);
       setOnLoginPage(onLogin && !onOffers);
     }
+    // Cap One SPA / soft navigations: re-signal offers chrome so Sync Offers stays available.
+    if (bank === 'capital_one' && onOffers) {
+      webViewRef.current?.injectJavaScript(buildCapitalOneOffersVisibleJs());
+    }
   };
 
   // Cap One (and similar) often open offers via window.open / target=_blank.
@@ -242,11 +246,22 @@ export default function SyncWebView({ visible, bank, onClose, onSuccess }) {
     if (bank === 'capital_one') {
       webViewRef.current?.injectJavaScript(buildCapitalOneOfferCaptureJs());
       webViewRef.current?.injectJavaScript(buildCapitalOneOffersVisibleJs());
+      // Feed chrome can paint after first loadEnd — nudge visibility once more.
+      setTimeout(() => {
+        webViewRef.current?.injectJavaScript(buildCapitalOneOffersVisibleJs());
+      }, 800);
       if (!url) return;
       const onLogin = (config.loginPaths || []).some(p => url.includes(p.toLowerCase()));
       const onOffers = !onLogin && (config.offersPaths || []).some(p => url.includes(p.toLowerCase()));
-      setOnOffersPage(onOffers);
-      setOnLoginPage(onLogin && !onOffers);
+      // Only promote/clear from top-level Cap One URLs. Ignore iframe loadEnds
+      // (ads/analytics) so they cannot hide Sync Offers.
+      if (onOffers) {
+        setOnOffersPage(true);
+        setOnLoginPage(false);
+      } else if (onLogin) {
+        setOnOffersPage(false);
+        setOnLoginPage(true);
+      }
       return;
     }
 
@@ -735,7 +750,11 @@ export default function SyncWebView({ visible, bank, onClose, onSuccess }) {
         </View>
       );
     }
-    const ready = onOffersPage && pageLoaded && (bank !== 'amex' || amexCardsReady);
+    // Cap One: show Sync Offers as soon as we know we're on the feed.
+    // pageLoaded flips on every iframe loadStart/End and would hide the button.
+    const ready = onOffersPage
+      && (bank === 'capital_one' || pageLoaded)
+      && (bank !== 'amex' || amexCardsReady);
     if (ready) return renderSyncButton();
     return null;
   };
@@ -775,6 +794,10 @@ export default function SyncWebView({ visible, bank, onClose, onSuccess }) {
             setSupportMultipleWindows={false}
             onOpenWindow={handleOpenWindow}
             onLoadStart={() => {
+              // Cap One offers pages load many iframes; each subframe used to
+              // flip pageLoaded/onOffersPage and hide Sync Offers. Ignore that
+              // churn — navigation / CAPONE_ON_OFFERS / loadEnd own Cap One state.
+              if (bank === 'capital_one') return;
               setPageLoaded(false);
               setOnOffersPage(false);
               setOnLoginPage(false);
