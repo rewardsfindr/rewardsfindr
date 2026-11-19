@@ -209,7 +209,8 @@ export const mapChaseCustomerOffers = new Function(`
 export const buildChaseOfferCaptureJs = () => `
   (function() {
     try {
-      if (window.__chaseOfferHookVersion === 6) return;
+      if (window.__chaseOfferHookVersion === 7) return;
+      if (window.__chaseCaptureGeneration == null) window.__chaseCaptureGeneration = 0;
       var summarizeOfferTerms = ${summarizeOfferTermsSource};
       var mapChaseCustomerOffers = ${mapChaseCustomerOffersSource};
 
@@ -229,9 +230,23 @@ export const buildChaseOfferCaptureJs = () => `
         return String(url || '').indexOf('customer-offers') !== -1;
       }
 
+      // Card switches bump this. A customer-offers reply is kept only when it
+      // was started for the card currently being captured.
+      function currentGeneration() {
+        return window.__chaseCaptureGeneration || 0;
+      }
+
+      window.__chaseArmNextCapture = function() {
+        window.__chaseCaptureGeneration = currentGeneration() + 1;
+        window.__chaseLastOfferCapture = null;
+        window.__chaseHookError = '';
+      };
+
       function watchSend(xhr, url) {
         if (!watchUrl(url)) return;
+        var generation = currentGeneration();
         xhr.addEventListener('load', function() {
+          if (currentGeneration() !== generation) return;
           if (xhr.status < 200 || xhr.status >= 300) return;
           try { remember(xhr.responseText); }
           catch (e) { window.__chaseHookError = String(e && e.message || e); }
@@ -284,7 +299,9 @@ export const buildChaseOfferCaptureJs = () => `
           var url = (typeof input === 'string' ? input : (input && input.url)) || '';
           var pending = origFetch.apply(window, arguments);
           if (!watchUrl(url)) return pending;
+          var generation = currentGeneration();
           return pending.then(function(response) {
+            if (currentGeneration() !== generation) return response;
             if (response.ok) {
               response.clone().text().then(function(text) {
                 try { remember(text); } catch (e) {}
@@ -294,7 +311,7 @@ export const buildChaseOfferCaptureJs = () => `
           });
         };
       }
-      window.__chaseOfferHookVersion = 6;
+      window.__chaseOfferHookVersion = 7;
     } catch (e) {
       window.__chaseHookError = String(e && e.message || e);
     }
@@ -447,6 +464,7 @@ export const buildSwitchCardJs = (index, timeoutMs = 3500) => `
           post({ type: 'CARD_SWITCH_ERROR', message: 'Card index out of range' });
           return;
         }
+        if (window.__chaseArmNextCapture) window.__chaseArmNextCapture();
         legacyTarget.click();
         legacy.dispatchEvent(new Event('change', { bubbles: true }));
         await new Promise(function(resolve) { setTimeout(resolve, ${timeoutMs}); });
@@ -475,6 +493,7 @@ export const buildSwitchCardJs = (index, timeoutMs = 3500) => `
       }
       var targetLabel = norm(target.innerText);
       var targetLast4 = last4(targetLabel);
+      if (window.__chaseArmNextCapture) window.__chaseArmNextCapture();
       target.click();
 
       var label = '';

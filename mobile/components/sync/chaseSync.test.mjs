@@ -381,6 +381,113 @@ test('reads the offer response for the open card and ignores the tiles', () => {
   assert.equal(JSON.stringify(messages[0]).includes('digitalAccount'), false);
 });
 
+function chaseOffersBody(merchant, id) {
+  return JSON.stringify({
+    customerOffers: [{
+      partial: false,
+      offers: [{
+        offerIdentifier: id,
+        offerStatusName: 'AVAILABLE',
+        merchantDetails: { merchantName: merchant },
+        offerDisplayDetails: { rewardDescriptionText: '$5 cash back' },
+      }],
+    }],
+  });
+}
+
+class DelayedXHR extends FakeXHR {
+  send() {}
+
+  flush() {
+    (this.listeners.load || []).forEach(listener => listener());
+  }
+}
+
+function installChaseHook(document, XHR = FakeXHR) {
+  const messages = [];
+  const window = {
+    XMLHttpRequest: XHR,
+    ReactNativeWebView: {
+      postMessage(raw) { messages.push(JSON.parse(raw)); },
+    },
+  };
+  new Function('window', 'document', buildChaseOfferCaptureJs())(window, document);
+  return { window, messages };
+}
+
+function postCapture(window, document) {
+  new Function('window', 'document', buildCaptureOffersJs())(window, document);
+}
+
+test('does not save the previous card when the next card has no new offers response', async () => {
+  const { document } = chaseHub();
+  const { window, messages } = installChaseHook(document);
+
+  const first = new window.XMLHttpRequest();
+  first.open('POST', 'https://secure.chase.com/svc/customer-offers');
+  first.responseText = chaseOffersBody('Wander', 'FIGG:1');
+  first.send();
+  postCapture(window, document);
+  assert.equal(messages.at(-1).type, 'CAPTURE_OFFERS');
+  assert.equal(messages.at(-1).offers[0].merchantName, 'Wander');
+  assert.equal(messages.at(-1).cardLabel, 'Sapphire Reserve (...2222)');
+
+  const beforeSwitch = messages.length;
+  new Function('window', 'document', buildSwitchCardJs(1, 2000))(window, document);
+  const started = Date.now();
+  while (!messages.slice(beforeSwitch).some(message => message.type === 'CARD_SWITCHED') && Date.now() - started < 4000) {
+    await new Promise(resolve => setTimeout(resolve, 20));
+  }
+  const cardSwitched = messages.slice(beforeSwitch).find(message => message.type === 'CARD_SWITCHED');
+  assert.equal(cardSwitched.cardLabel, 'Flex (...1111)');
+
+  postCapture(window, document);
+  assert.equal(messages.at(-1).type, 'CHASE_CAPTURE_UNAVAILABLE');
+
+  const second = new window.XMLHttpRequest();
+  second.open('POST', 'https://secure.chase.com/svc/customer-offers');
+  second.responseText = chaseOffersBody('Nike', 'FIGG:2');
+  second.send();
+  postCapture(window, document);
+  assert.equal(messages.at(-1).type, 'CAPTURE_OFFERS');
+  assert.equal(messages.at(-1).cardLabel, 'Flex (...1111)');
+  assert.equal(messages.at(-1).offers[0].merchantName, 'Nike');
+  assert.equal(messages.at(-1).offers[0].bankOfferId, 'FIGG:2');
+});
+
+test('ignores a customer-offers response that started before the card click', async () => {
+  const { document } = chaseHub();
+  const { window, messages } = installChaseHook(document, DelayedXHR);
+
+  const early = new window.XMLHttpRequest();
+  early.open('POST', 'https://secure.chase.com/svc/customer-offers');
+  early.responseText = chaseOffersBody('Wander', 'FIGG:1');
+  early.send();
+
+  const beforeSwitch = messages.length;
+  new Function('window', 'document', buildSwitchCardJs(1, 2000))(window, document);
+  const started = Date.now();
+  while (!messages.slice(beforeSwitch).some(message => message.type === 'CARD_SWITCHED') && Date.now() - started < 4000) {
+    await new Promise(resolve => setTimeout(resolve, 20));
+  }
+  assert.equal(messages.slice(beforeSwitch).some(message => message.type === 'CARD_SWITCHED'), true);
+
+  early.flush();
+  postCapture(window, document);
+  assert.equal(messages.at(-1).type, 'CHASE_CAPTURE_UNAVAILABLE');
+  assert.equal(JSON.stringify(messages.at(-1)).includes('Wander'), false);
+
+  const next = new window.XMLHttpRequest();
+  next.open('POST', 'https://secure.chase.com/svc/customer-offers');
+  next.responseText = chaseOffersBody('Nike', 'FIGG:2');
+  next.send();
+  next.flush();
+  postCapture(window, document);
+  assert.equal(messages.at(-1).type, 'CAPTURE_OFFERS');
+  assert.equal(messages.at(-1).cardLabel, 'Flex (...1111)');
+  assert.equal(messages.at(-1).offers[0].merchantName, 'Nike');
+});
+
 test('asks for another card request when the offers response was missed', () => {
   const button = new El('DIV', { id: 'select-credit-card-account', text: 'Sapphire Reserve (...2222)' });
   const messages = [];
