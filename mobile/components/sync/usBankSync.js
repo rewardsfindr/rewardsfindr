@@ -151,15 +151,49 @@ export const buildUsBankOfferCaptureJs = () => `
       var stripUsBankOffers = ${stripUsBankOffersSource};
       var unwrapUsBankPayload = ${unwrapUsBankPayloadSource};
 
+      function looksLikeOffers(text) {
+        var probe = String(text || '').toLowerCase();
+        return probe.indexOf('getinsights') !== -1
+          || probe.indexOf('carddetails') !== -1
+          || probe.indexOf('cardlytics') !== -1;
+      }
+
+      // Several responses can match (dashboard insight, a filtered refetch, another
+      // v2 call). Keep every offer id seen so far. A later shorter list must not
+      // become the snapshot that replaces the card. Newer fields for the same id win.
       function remember(text) {
-        var parsed = JSON.parse(text);
-        var unwrapped = unwrapUsBankPayload(parsed);
-        var stripped = stripUsBankOffers(unwrapped);
-        if (!stripped) {
-          window.__usBankHookError = 'unrecognized';
+        var raw = String(text || '');
+        if (!looksLikeOffers(raw)) {
+          if (!window.__usBankLastOffers) window.__usBankHookError = 'unrecognized';
           return;
         }
-        window.__usBankLastOffers = stripped;
+        var parsed = JSON.parse(raw);
+        var unwrapped = unwrapUsBankPayload(parsed);
+        var stripped = stripUsBankOffers(unwrapped);
+        var incoming = stripped && Array.isArray(stripped.ads) ? stripped.ads : [];
+        if (!incoming.length) {
+          if (!window.__usBankLastOffers) window.__usBankHookError = 'unrecognized';
+          return;
+        }
+        var prev = window.__usBankLastOffers && Array.isArray(window.__usBankLastOffers.ads)
+          ? window.__usBankLastOffers.ads
+          : [];
+        var map = {};
+        var order = [];
+        function take(list) {
+          for (var i = 0; i < list.length; i++) {
+            var ad = list[i];
+            var id = ad && ad.offerId != null ? String(ad.offerId).trim() : '';
+            if (!id) continue;
+            if (!map[id]) order.push(id);
+            map[id] = ad;
+          }
+        }
+        take(prev);
+        take(incoming);
+        var ads = [];
+        for (var j = 0; j < order.length; j++) ads.push(map[order[j]]);
+        window.__usBankLastOffers = { ads: ads };
         window.__usBankHookError = '';
       }
 

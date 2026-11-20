@@ -208,6 +208,114 @@ test('does not capture a failed response or an unrecognized body', () => {
   assert.equal(message.type, 'US_BANK_CAPTURE_UNAVAILABLE');
 });
 
+test('a later shorter getInsights list does not drop offers already captured', () => {
+  const { window, messages } = installHook();
+  const xhr = new window.XMLHttpRequest();
+  xhr.open('POST', 'https://onlinebanking.usbank.com/graphql/v2');
+  xhr.responseText = JSON.stringify(loadFixture());
+  xhr.send(JSON.stringify({ operationName: 'getInsights', useCaseId: 'CardLytics' }));
+
+  const shorter = {
+    data: {
+      getInsights: {
+        insights: [{
+          isDashboardInsight: true,
+          cardDetails: {
+            ads: [{
+              offerId: '1000399917',
+              ad: {
+                merchantName: 'Chevron',
+                activationState: 'ACTIVATED',
+                endDate: '2027-01-01T04:59:59Z',
+                reward: { rewardAmount: 2, rewardType: 'PERCENT_AMOUNT_PURCHASE' },
+                assets: { copy: { value: { headline: '2% cash back' } } },
+              },
+            }],
+          },
+        }],
+      },
+    },
+  };
+  const xhr2 = new window.XMLHttpRequest();
+  xhr2.open('POST', 'https://onlinebanking.usbank.com/graphql/v2');
+  xhr2.responseText = JSON.stringify(shorter);
+  xhr2.send(JSON.stringify({ operationName: 'getInsights' }));
+
+  const message = readOffers(window, messages);
+  assert.equal(message.type, 'US_BANK_OFFERS');
+  const ids = message.offers.ads.map((ad) => ad.offerId);
+  assert.ok(ids.includes('1000405330'));
+  assert.ok(ids.includes('1000395658'));
+  assert.ok(ids.includes('1000399083'));
+  const chevron = message.offers.ads.find((ad) => ad.offerId === '1000399917');
+  assert.equal(chevron.activationState, 'ACTIVATED');
+  assert.equal(chevron.rewardAmount, 2);
+
+  const records = usBankRecords({ json: message.offers, now: NOW });
+  const existing = [
+    { id: 'u', bank: 'us_bank', cardName: 'US Bank', phase: '', merchantName: 'Old US' },
+  ];
+  const next = replaceCardOffers(existing, {
+    bank: 'us_bank',
+    cardName: 'US Bank',
+    phase: '',
+    records,
+  });
+  const kept = next.filter((offer) => offer.bank === 'us_bank').map((offer) => offer.merchantName);
+  assert.equal(kept.includes('Old US'), false);
+  assert.equal(kept.includes('eBay'), true);
+  assert.equal(kept.includes('YouTube TV'), true);
+  assert.equal(kept.includes('Bonus Days'), true);
+});
+
+test('a v2 payload that is not CardLytics offers does not replace the deals list', () => {
+  const { window, messages } = installHook();
+  const xhr = new window.XMLHttpRequest();
+  xhr.open('POST', 'https://onlinebanking.usbank.com/graphql/v2');
+  xhr.responseText = JSON.stringify(loadFixture());
+  xhr.send(JSON.stringify({ operationName: 'getInsights' }));
+
+  const promos = [];
+  for (let i = 0; i < 6; i += 1) {
+    promos.push({
+      offerId: `PROMO-${i}`,
+      merchantName: `Promo ${i}`,
+      headline: 'Earn $300',
+      activationState: 'SERVED',
+      rewardType: 'FIXED_AMOUNT_PURCHASE',
+      rewardAmount: 300,
+    });
+  }
+  const xhr2 = new window.XMLHttpRequest();
+  xhr2.open('POST', 'https://onlinebanking.usbank.com/api/v2/messages');
+  xhr2.responseText = JSON.stringify({ ads: promos });
+  xhr2.send('{}');
+
+  const message = readOffers(window, messages);
+  const ids = message.offers.ads.map((ad) => ad.offerId);
+  assert.equal(ids.some((id) => String(id).startsWith('PROMO-')), false);
+  assert.ok(ids.includes('1000399917'));
+});
+
+test('an empty getInsights payload does not clear offers already captured', () => {
+  const { window, messages } = installHook();
+  const xhr = new window.XMLHttpRequest();
+  xhr.open('POST', 'https://onlinebanking.usbank.com/graphql/v2');
+  xhr.responseText = JSON.stringify(loadFixture());
+  xhr.send(JSON.stringify({ operationName: 'getInsights' }));
+
+  const xhr2 = new window.XMLHttpRequest();
+  xhr2.open('POST', 'https://onlinebanking.usbank.com/graphql/v2');
+  xhr2.responseText = JSON.stringify({
+    data: { getInsights: { insights: [{ cardDetails: { ads: [] } }] } },
+  });
+  xhr2.send(JSON.stringify({ operationName: 'getInsights' }));
+
+  const message = readOffers(window, messages);
+  assert.equal(message.type, 'US_BANK_OFFERS');
+  assert.ok(message.offers.ads.length >= 4);
+});
+
 test('an empty ads list posts capture unavailable and does not look like a wipe', () => {
   const { window, messages } = installHook();
   window.__usBankLastOffers = { ads: [] };
