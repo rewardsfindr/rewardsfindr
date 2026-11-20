@@ -1,11 +1,11 @@
 // ─────────────────────────────────────────────
 // HOME HEADER
-// Dark green bar with title + profile avatar.
+// Dark green bar with logo + profile avatar.
 // Uses useSafeAreaInsets to sit below the status bar.
 // Avatar shows user initials if signed in.
 // ─────────────────────────────────────────────
 import React from 'react';
-import { View, Text, TouchableOpacity, StyleSheet } from 'react-native';
+import { View, Text, Image, TouchableOpacity, StyleSheet } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { colors } from '../shared/theme.js';
 
@@ -23,7 +23,14 @@ export default function HomeHeader({ user, onAvatarPress }) {
 
   return (
     <View style={[s.header, { paddingTop: insets.top + 10 }]}>
-      <Text style={s.logoText}>RewardsFindr</Text>
+      <View style={s.logoRow}>
+        <Image
+          source={require('../assets/logo.png')}
+          style={s.logoIcon}
+          accessible={false}
+        />
+        <Text style={s.logoText}>RewardsFindr</Text>
+      </View>
       <TouchableOpacity style={s.avatar} onPress={onAvatarPress}>
         {initials
           ? <Text style={s.avatarText}>{initials}</Text>
@@ -36,6 +43,8 @@ export default function HomeHeader({ user, onAvatarPress }) {
 const s = StyleSheet.create({
   header:     { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
                 backgroundColor: colors.bgHeader, paddingHorizontal: 16, paddingBottom: 14 },
+  logoRow:    { flexDirection: 'row', alignItems: 'center', gap: 8 },
+  logoIcon:   { width: 28, height: 28 },
   logoText:   { fontSize: 20, fontWeight: '800', color: colors.textOnDark },
   avatar:     { width: 36, height: 36, borderRadius: 18, backgroundColor: 'rgba(255,255,255,0.15)',
                 alignItems: 'center', justifyContent: 'center' },
