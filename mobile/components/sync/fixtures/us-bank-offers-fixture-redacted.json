@@ -1,0 +1,137 @@
+{
+  "_note": "Redacted US Bank cashback-deals sample from getInsights / CardLytics. Tokens, session ids, affiliate tracking URLs, and image CDNs stripped. Keep offerId, merchantName, activationState, reward, endDate, headline.",
+  "data": {
+    "getInsights": {
+      "insights": [
+        {
+          "cardDetails": {
+            "ads": [
+              {
+                "offerId": "1000405330",
+                "rank": 1,
+                "ad": {
+                  "activationState": "ACTIVATED",
+                  "adType": "CASH_BACK_OFFER",
+                  "merchantName": "Bonus Days",
+                  "endDate": "2026-11-28T04:59:59Z",
+                  "startDate": "2026-11-20T05:00:00Z",
+                  "visibilityState": "VISIBLE",
+                  "assets": {
+                    "copy": {
+                      "type": "AD_COPY",
+                      "value": {
+                        "headline": "Earn 2x cash back on all deals November 25-27th",
+                        "shortPreMessage": "Earn bonus!"
+                      }
+                    }
+                  }
+                }
+              },
+              {
+                "offerId": "1000399917",
+                "rank": 2,
+                "ad": {
+                  "activationState": "SERVED",
+                  "adType": "CASH_BACK_OFFER",
+                  "merchantName": "Chevron",
+                  "endDate": "2027-01-01T04:59:59Z",
+                  "startDate": "2026-11-15T05:00:00Z",
+                  "visibilityState": "VISIBLE",
+                  "reward": {
+                    "activationModel": "ACTIVATABLE",
+                    "isMultiRedemption": false,
+                    "maxRewardAmount": 2,
+                    "purchaseRequirement": {
+                      "minSpendAmount": 0.2,
+                      "purchaseChannels": ["Pay at pump"]
+                    },
+                    "rewardAmount": 2,
+                    "rewardType": "PERCENT_AMOUNT_PURCHASE"
+                  },
+                  "assets": {
+                    "copy": {
+                      "type": "AD_COPY",
+                      "value": {
+                        "headline": "2% cash back",
+                        "shortPreMessage": "Earn 2% cash back!"
+                      }
+                    }
+                  }
+                }
+              },
+              {
+                "offerId": "1000395658",
+                "rank": 3,
+                "ad": {
+                  "activationState": "SERVED",
+                  "adType": "CASH_BACK_OFFER",
+                  "merchantName": "eBay",
+                  "endDate": "2026-12-01T04:59:59Z",
+                  "startDate": "2026-11-08T05:00:00Z",
+                  "visibilityState": "VISIBLE",
+                  "reward": {
+                    "activationModel": "ACTIVATABLE",
+                    "isMultiRedemption": true,
+                    "maxRewardAmount": 3,
+                    "purchaseRequirement": {
+                      "minSpendAmount": 20,
+                      "purchaseChannels": ["Online"]
+                    },
+                    "rewardAmount": 2,
+                    "rewardType": "PERCENT_AMOUNT_PURCHASE"
+                  },
+                  "assets": {
+                    "copy": {
+                      "type": "AD_COPY",
+                      "value": {
+                        "headline": "2% cash back",
+                        "shortPreMessage": "Earn 2% cash back!"
+                      }
+                    }
+                  }
+                }
+              },
+              {
+                "offerId": "1000399083",
+                "rank": 7,
+                "ad": {
+                  "activationState": "SERVED",
+                  "adType": "CASH_BACK_OFFER",
+                  "merchantName": "YouTube TV",
+                  "endDate": "2026-12-30T04:59:59Z",
+                  "startDate": "2026-11-01T04:00:00Z",
+                  "visibilityState": "VISIBLE",
+                  "reward": {
+                    "activationModel": "ACTIVATABLE",
+                    "isMultiRedemption": false,
+                    "maxRewardAmount": 20,
+                    "purchaseRequirement": {
+                      "minSpendAmount": 39.99,
+                      "purchaseChannels": ["Online"],
+                      "purchaseTypes": ["Subscription"]
+                    },
+                    "rewardAmount": 20,
+                    "rewardType": "FIXED_AMOUNT_PURCHASE"
+                  },
+                  "assets": {
+                    "copy": {
+                      "type": "AD_COPY",
+                      "value": {
+                        "headline": "$20 cash back",
+                        "shortPreMessage": "Earn $20 cash back!"
+                      }
+                    }
+                  }
+                }
+              }
+            ],
+            "offerCount": "75",
+            "useCaseId": "CardLytics"
+          },
+          "cardType": "CDLX",
+          "isDashboardInsight": true
+        }
+      ]
+    }
+  }
+}

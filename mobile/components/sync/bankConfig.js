@@ -62,4 +62,13 @@ export const BANK_CONFIG = {
     offersPaths: ['/nga/products-offers/merchantoffers', 'merchantoffers'],
     loginPaths: ['/login', '/signon', '/sign-on', 'parent-interstitial', 'pageNotFound', 'www.citi.com'],
   },
+  us_bank: {
+    // Cash Back Deals — redirects to /auth/login when the session is gone.
+    url: 'https://onlinebanking.usbank.com/digital/servicing/dominjection/cashback-deals',
+    offersUrl: 'https://onlinebanking.usbank.com/digital/servicing/dominjection/cashback-deals',
+    label: 'US Bank Offers',
+    color: '#0c2074',
+    offersPaths: ['cashback-deals', 'dominjection/cashback-deals'],
+    loginPaths: ['/auth/login'],
+  },
 };

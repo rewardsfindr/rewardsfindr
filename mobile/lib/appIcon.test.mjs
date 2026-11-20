@@ -6,7 +6,7 @@ import { inflateSync } from 'node:zlib';
 import { fileURLToPath } from 'node:url';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
-const MINT = [240, 247, 238];
+const BRAND = [5, 150, 105]; // #059669 — same as rewardsfindr-web favicon field
 
 function readPng(rel) {
   const buf = fs.readFileSync(path.join(root, rel));
@@ -98,30 +98,32 @@ function pixel(png, x, y) {
   return [png.pixels[i], png.pixels[i + 1], png.pixels[i + 2], png.pixels[i + 3]];
 }
 
-function assertClearCorners(rel, png) {
-  for (const [x, y] of [
-    [0, 0],
-    [png.width - 1, 0],
-    [0, png.height - 1],
-    [png.width - 1, png.height - 1],
-  ]) {
-    assert.deepEqual(pixel(png, x, y), [0, 0, 0, 0], `${rel} corner ${x},${y} is transparent`);
+function assertNear(actual, expected, tol, label) {
+  for (let i = 0; i < expected.length; i++) {
+    assert.ok(
+      Math.abs(actual[i] - expected[i]) <= tol,
+      `${label}: got ${actual}, expected near ${expected}`,
+    );
   }
 }
 
-test('login and home header use logo.png', () => {
+test('login and home brand use logo.png; home has no header wordmark', () => {
   const login = fs.readFileSync(path.join(root, 'app/login.js'), 'utf8');
-  const header = fs.readFileSync(path.join(root, 'components/HomeHeader.js'), 'utf8');
+  const brand = fs.readFileSync(path.join(root, 'components/HomeBrand.js'), 'utf8');
+  const index = fs.readFileSync(path.join(root, 'app/index.js'), 'utf8');
   assert.match(login, /require\(\s*['"]\.\.\/assets\/logo\.png['"]\s*\)/);
-  assert.match(header, /require\(\s*['"]\.\.\/assets\/logo\.png['"]\s*\)/);
+  assert.match(brand, /require\(\s*['"]\.\.\/assets\/logo\.png['"]\s*\)/);
+  assert.match(brand, /RewardsFindr/);
+  assert.equal(index.includes('HomeHeader'), false);
+  assert.equal(fs.existsSync(path.join(root, 'components/HomeHeader.js')), false);
 });
 
-test('android adaptive icon background is the mint field', () => {
+test('android adaptive icon background matches the web brand green', () => {
   const app = JSON.parse(fs.readFileSync(path.join(root, 'app.json'), 'utf8'));
-  assert.equal(app.expo.android.adaptiveIcon.backgroundColor, '#f0f7ee');
+  assert.equal(app.expo.android.adaptiveIcon.backgroundColor, '#059669');
 });
 
-test('icon.png is an opaque 1024 mint square with no alpha channel', () => {
+test('icon.png is an opaque 1024 brand-green square with the RF mark', () => {
   const icon = readPng('assets/icon.png');
   assert.equal(icon.width, 1024);
   assert.equal(icon.height, 1024);
@@ -134,36 +136,31 @@ test('icon.png is an opaque 1024 mint square with no alpha channel', () => {
     [icon.width - 1, icon.height - 1],
   ]) {
     const [r, g, b, a] = pixel(icon, x, y);
-    assert.deepEqual([r, g, b], MINT, `icon.png corner ${x},${y} is #f0f7ee`);
+    assertNear([r, g, b], BRAND, 2, `icon.png corner ${x},${y}`);
     assert.equal(a, 255);
   }
+  // Center of the RF glyph is white
+  assertNear(pixel(icon, 512, 512).slice(0, 3), [255, 255, 255], 20, 'icon.png center');
 });
 
-test('logo, adaptive icon, and favicon keep a transparent field and an opaque wallet', () => {
+test('logo, adaptive icon, and favicon keep a transparent field and opaque RF disk', () => {
   const marks = [
-    ['assets/logo.png', 512, 800],
-    ['assets/adaptive-icon.png', 512, 800],
-    ['assets/favicon.png', 24, 37],
+    ['assets/logo.png', 256, 256],
+    ['assets/adaptive-icon.png', 512, 512],
+    ['assets/favicon.png', 16, 16],
   ];
-  for (const [rel, walletX, walletY] of marks) {
+  for (const [rel, bodyX, bodyY] of marks) {
     const png = readPng(rel);
     assert.equal(png.colorType, 6, `${rel} has an alpha channel`);
-    assertClearCorners(rel, png);
-    const wallet = pixel(png, walletX, walletY);
-    assert.equal(wallet[3], 255, `${rel} wallet body stays opaque`);
-  }
-
-  for (const rel of ['assets/logo.png', 'assets/adaptive-icon.png']) {
-    const png = readPng(rel);
-    assert.deepEqual(pixel(png, 0, 400), [0, 0, 0, 0], `${rel} rounded-square stroke is gone`);
-    assert.deepEqual(pixel(png, 132, 16), [0, 0, 0, 0], `${rel} rounded-square stroke is gone`);
-    const margin = 40;
-    for (let y = 0; y < png.height; y++) {
-      for (let x = 0; x < png.width; x++) {
-        const onEdge = x < margin || y < margin || x >= png.width - margin || y >= png.height - margin;
-        if (!onEdge) continue;
-        assert.deepEqual(pixel(png, x, y), [0, 0, 0, 0], `${rel} edge ${x},${y} keeps the outline`);
-      }
+    for (const [x, y] of [
+      [0, 0],
+      [png.width - 1, 0],
+      [0, png.height - 1],
+      [png.width - 1, png.height - 1],
+    ]) {
+      assert.deepEqual(pixel(png, x, y), [0, 0, 0, 0], `${rel} corner ${x},${y} is transparent`);
     }
+    const body = pixel(png, bodyX, bodyY);
+    assert.equal(body[3], 255, `${rel} RF disk stays opaque`);
   }
 });

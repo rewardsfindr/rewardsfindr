@@ -12,7 +12,7 @@
 //   6. Transition to enrolled page → reuse same card list → repeat cycle
 //   7. All phases done → onSuccess + onClose
 //
-// Chase, Amex, Wells Fargo, and Citi each save a structured snapshot on the phone.
+// Chase, Amex, Wells Fargo, Citi, and US Bank each save a structured snapshot on the phone.
 //
 // Key timing note for Amex:
 //   Amex fires ReadOffersHubPresentation (REPLACE) BEFORE CARD_SWITCHED
@@ -41,6 +41,7 @@ import {
 } from './sync/amexSync.js';
 import { buildWellsFargoDealsVisibleJs, buildWellsFargoOfferCaptureJs, buildWellsFargoReadJs } from './sync/wellsFargoSync.js';
 import { buildCitiOfferCaptureJs, buildCitiOffersVisibleJs, buildCitiReadJs } from './sync/citiSync.js';
+import { buildUsBankOfferCaptureJs, buildUsBankOffersVisibleJs, buildUsBankReadJs } from './sync/usBankSync.js';
 import { parseCardLabel }                                 from './sync/cardLabel.js';
 
 function citiCardLabelFromOffers(payload) {
@@ -220,6 +221,17 @@ export default function SyncWebView({ visible, bank, onClose, onSuccess }) {
       return;
     }
 
+    if (bank === 'us_bank') {
+      webViewRef.current?.injectJavaScript(buildUsBankOfferCaptureJs());
+      webViewRef.current?.injectJavaScript(buildUsBankOffersVisibleJs());
+      if (!url) return;
+      const onLogin = (config.loginPaths || []).some(p => url.includes(p.toLowerCase()));
+      const onOffers = !onLogin && (config.offersPaths || []).some(p => url.includes(p.toLowerCase()));
+      setOnOffersPage(onOffers);
+      setOnLoginPage(onLogin && !onOffers);
+      return;
+    }
+
     if (bank === 'amex') {
       const { onOffersPage: onOffers } = amexHandleLoadEnd({
         url,
@@ -280,6 +292,13 @@ export default function SyncWebView({ visible, bank, onClose, onSuccess }) {
       return;
     }
 
+    if (bank === 'us_bank') {
+      setCurrentCard('US Bank');
+      webViewRef.current?.injectJavaScript(buildUsBankOfferCaptureJs());
+      webViewRef.current?.injectJavaScript(buildUsBankReadJs());
+      return;
+    }
+
     chaseRefreshRef.current = false;
     webViewRef.current?.injectJavaScript(buildChaseOfferCaptureJs());
     webViewRef.current?.injectJavaScript(buildListCardsJs());
@@ -307,13 +326,22 @@ export default function SyncWebView({ visible, bank, onClose, onSuccess }) {
     const isAmex = bank === 'amex';
     const isWells = bank === 'wells_fargo';
     const isCiti = bank === 'citi';
-    if (!isAmex && !isWells && !isCiti && !fullCardName) {
+    const isUsBank = bank === 'us_bank';
+    if (!isAmex && !isWells && !isCiti && !isUsBank && !fullCardName) {
       throw new Error('Could not read the Chase card name. Nothing was saved.');
     }
     const result = await saveCardSnapshot(user.uid, isWells
       ? {
           bank: 'wells_fargo',
           cardName: 'Wells Fargo',
+          cardLast4: null,
+          phase: '',
+          json: payload,
+        }
+      : isUsBank
+      ? {
+          bank: 'us_bank',
+          cardName: 'US Bank',
           cardLast4: null,
           phase: '',
           json: payload,
@@ -346,14 +374,14 @@ export default function SyncWebView({ visible, bank, onClose, onSuccess }) {
         });
 
     const savedCard = {
-      cardName: isWells ? 'Wells Fargo' : (fullCardName || 'Unknown Card'),
+      cardName: isWells ? 'Wells Fargo' : isUsBank ? 'US Bank' : (fullCardName || 'Unknown Card'),
       count: result.synced ?? 0,
-      phase: isWells || isCiti ? '' : phase,
+      phase: isWells || isCiti || isUsBank ? '' : phase,
     };
     syncedCardsRef.current = replaceCardPass(syncedCardsRef.current, savedCard);
     setSyncing(false);
 
-    if (bank === 'wells_fargo' || bank === 'citi') {
+    if (bank === 'wells_fargo' || bank === 'citi' || bank === 'us_bank') {
       const total = syncedCardsRef.current.reduce((sum, card) => sum + card.count, 0);
       onSuccess(total, syncedCardsRef.current);
       onClose();
@@ -577,6 +605,36 @@ export default function SyncWebView({ visible, bank, onClose, onSuccess }) {
         return;
       }
 
+      if (data.type === 'US_BANK_ON_OFFERS' && bank === 'us_bank') {
+        offersRedirectRef.current = false;
+        setOnLoginPage(false);
+        setOnOffersPage(true);
+        return;
+      }
+
+      if (data.type === 'US_BANK_CAPTURE_UNAVAILABLE' && bank === 'us_bank') {
+        if (!syncStartedRef.current) return;
+        syncStartedRef.current = false;
+        setSyncStarted(false);
+        setSyncing(false);
+        setSwitching(false);
+        Alert.alert(
+          'Could not read US Bank offers',
+          'Stay on the Cash Back Deals page and try again. Nothing was changed.'
+        );
+        return;
+      }
+
+      if (data.type === 'US_BANK_OFFERS' && bank === 'us_bank') {
+        if (!syncStartedRef.current) return;
+        await handleCaptureResult({
+          payload: data.offers,
+          cardLabel: 'US Bank',
+          phase: '',
+        });
+        return;
+      }
+
       // ── Amex JSON capture ─────────────────────────────────────
       if (data.type === 'CAPTURE_JSON' && bank === 'amex') {
         if (!captureArmed.current) return;
@@ -683,6 +741,7 @@ export default function SyncWebView({ visible, bank, onClose, onSuccess }) {
               bank === 'chase' ? buildChaseOfferCaptureJs()
               : bank === 'wells_fargo' ? buildWellsFargoOfferCaptureJs()
               : bank === 'citi' ? buildCitiOfferCaptureJs()
+              : bank === 'us_bank' ? buildUsBankOfferCaptureJs()
               : undefined
             }
             onMessage={handleMessage}

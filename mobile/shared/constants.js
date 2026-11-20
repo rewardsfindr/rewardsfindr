@@ -22,7 +22,7 @@ export const BANKS = {
   CITI:        'citi',
   BOFA:        'bofa',
   CAPITAL_ONE: 'capital_one',
-  DISCOVER:    'discover',
+  US_BANK:     'us_bank',
   WELLS_FARGO: 'wells_fargo',
   BILT:        'bilt',
 };
@@ -153,22 +153,12 @@ export const STORES = [
   { storeName: 'Hulu',             category: CATEGORIES.SUBSCRIPTION, aliases: [] },
 ];
 
-export const POPULAR_STORES = [
-  'Starbucks', 'Amazon', 'Whole Foods', 'Uber', 'Target', 'Costco', "McDonald's", 'Netflix',
-];
-
-export const EXAMPLE_REWARDS = [
-  { reward: '6% Back',   store: 'Whole Foods', cardName: 'Blue Cash Preferred', last4: '6612', bank: 'AMEX' },
-  { reward: '4% Back',   store: 'Chipotle',    cardName: 'Savor Cash Rewards',  last4: '2278', bank: 'CAPITAL ONE' },
-  { reward: '3x Points', store: 'Starbucks',   cardName: 'Sapphire Preferred',  last4: '4821', bank: 'CHASE' },
-];
-
 export const BANK_LIST = [
   { id: 'chase',       label: 'Chase',           supported: true  },
   { id: 'amex',        label: 'Amex',            supported: true  },
   { id: 'capital_one', label: 'Capital One',     supported: false },
   { id: 'citi',        label: 'Citi',            supported: true  },
-  { id: 'discover',    label: 'Discover',        supported: false },
+  { id: 'us_bank',     label: 'US Bank',         supported: true  },
   { id: 'wells_fargo', label: 'Wells Fargo',     supported: true  },
   { id: 'bofa',        label: 'Bank of America', supported: false },
   { id: 'bilt',        label: 'Bilt',            supported: false },
@@ -181,7 +171,7 @@ export const FAQ_ITEMS = [
   },
   {
     q: 'Which banks are supported?',
-    a: 'Currently Chase, American Express, Wells Fargo, and Citi. Capital One, Discover, Bank of America, and Bilt are coming soon.',
+    a: 'Currently Chase, American Express, Wells Fargo, Citi, and US Bank. Capital One, Bank of America, and Bilt are coming soon.',
   },
   {
     q: 'Is my data secure?',

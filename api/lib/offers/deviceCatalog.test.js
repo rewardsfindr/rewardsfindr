@@ -8,6 +8,7 @@ import {
   citiRecords,
   filterOffers,
   replaceCardOffers,
+  usBankRecords,
   wellsFargoRecords,
 } from './deviceCatalog.js';
 
@@ -702,4 +703,172 @@ test('an empty Citi merchantOffers payload is refused and leaves stored Citi row
     'chase:Nike',
     'citi:Old Citi',
   ]);
+});
+
+function usBankAdsFixture() {
+  return {
+    ads: [
+      {
+        offerId: '1000405330',
+        merchantName: 'Bonus Days',
+        activationState: 'ACTIVATED',
+        endDate: '2026-11-28T04:59:59Z',
+        headline: 'Earn 2x cash back on all deals November 25-27th',
+        shortPreMessage: 'Earn bonus!',
+        rewardType: '',
+        rewardAmount: null,
+        maxRewardAmount: null,
+        minSpendAmount: null,
+      },
+      {
+        offerId: '1000399917',
+        merchantName: 'Chevron',
+        activationState: 'SERVED',
+        endDate: '2027-01-01T04:59:59Z',
+        headline: '2% cash back',
+        shortPreMessage: 'Earn 2% cash back!',
+        rewardType: 'PERCENT_AMOUNT_PURCHASE',
+        rewardAmount: 2,
+        maxRewardAmount: 2,
+        minSpendAmount: 0.2,
+      },
+      {
+        offerId: '1000399083',
+        merchantName: 'YouTube TV',
+        activationState: 'SERVED',
+        endDate: '2026-12-30T04:59:59Z',
+        headline: '$20 cash back',
+        shortPreMessage: 'Earn $20 cash back!',
+        rewardType: 'FIXED_AMOUNT_PURCHASE',
+        rewardAmount: 20,
+        maxRewardAmount: 20,
+        minSpendAmount: 39.99,
+      },
+    ],
+  };
+}
+
+test('maps a US Bank ads list into one card snapshot with activationState', () => {
+  const records = usBankRecords({ json: usBankAdsFixture(), now: NOW });
+  assert.equal(records.length, 3);
+  assert.equal(records[0].bank, 'us_bank');
+  assert.equal(records[0].cardName, 'US Bank');
+  assert.equal(records[0].phase, '');
+  const bonus = records.find(offer => offer.bankOfferId === '1000405330');
+  assert.equal(bonus.isActivated, true);
+  assert.match(bonus.offerDescription, /2x cash back/i);
+  const chevron = records.find(offer => offer.bankOfferId === '1000399917');
+  assert.equal(chevron.isActivated, false);
+  assert.equal(chevron.cashbackType, 'percent');
+  assert.equal(chevron.cashbackAmount, 2);
+  const youtube = records.find(offer => offer.bankOfferId === '1000399083');
+  assert.equal(youtube.cashbackType, 'fixed');
+  assert.equal(youtube.cashbackAmount, 20);
+  assert.equal(youtube.minimumSpend, 39.99);
+});
+
+test('a US Bank offer with no end date stays searchable and is not expiring soon', () => {
+  const records = usBankRecords({
+    json: {
+      ads: [{
+        offerId: 'NODATE0001',
+        merchantName: 'Uber',
+        activationState: 'SERVED',
+        endDate: '',
+        headline: '$2 cash back',
+        rewardType: 'FIXED_AMOUNT_PURCHASE',
+        rewardAmount: 2,
+      }],
+    },
+    now: NOW,
+  });
+  assert.equal(records[0].expiryPrecision, 'unknown');
+  assert.equal(records[0].expiryDate, null);
+  assert.equal(isCurrentOffer(records[0], NOW), true);
+  assert.deepEqual(filterOffers(records, 'uber', NOW).map(offer => offer.merchantName), ['Uber']);
+});
+
+test('replacing the US Bank card leaves Chase, Amex, Wells Fargo, and Citi rows', () => {
+  const existing = [
+    { id: 'c', bank: 'chase', cardName: 'Freedom', phase: '', merchantName: 'Nike' },
+    { id: 'a', bank: 'amex', cardName: 'Gold', phase: 'eligible', merchantName: 'Whole Foods' },
+    { id: 'w', bank: 'wells_fargo', cardName: 'Wells Fargo', phase: '', merchantName: 'Old Shop' },
+    { id: 'ci', bank: 'citi', cardName: 'Citi Strata® Card', phase: '', merchantName: 'Old Citi' },
+    { id: 'u', bank: 'us_bank', cardName: 'US Bank', phase: '', merchantName: 'Old US' },
+  ];
+  const records = usBankRecords({
+    json: {
+      ads: [{
+        offerId: 'NEWOFFER01',
+        merchantName: 'Target',
+        activationState: 'SERVED',
+        endDate: '2026-04-01T00:00:00Z',
+        headline: '$10 cash back',
+        rewardType: 'FIXED_AMOUNT_PURCHASE',
+        rewardAmount: 10,
+      }],
+    },
+    now: NOW,
+  });
+  const next = replaceCardOffers(existing, {
+    bank: 'us_bank',
+    cardName: 'US Bank',
+    phase: '',
+    records,
+  });
+  assert.deepEqual(next.map(offer => `${offer.bank}:${offer.merchantName}`), [
+    'chase:Nike',
+    'amex:Whole Foods',
+    'wells_fargo:Old Shop',
+    'citi:Old Citi',
+    'us_bank:Target',
+  ]);
+});
+
+test('an unrecognized or empty US Bank body is refused before storage is written', () => {
+  const storage = {
+    value: JSON.stringify([
+      { id: 'c', bank: 'chase', cardName: 'Freedom', phase: '', merchantName: 'Nike' },
+      { id: 'u', bank: 'us_bank', cardName: 'US Bank', phase: '', merchantName: 'Old US' },
+    ]),
+  };
+  function persist(json) {
+    const existing = JSON.parse(storage.value);
+    const records = buildSnapshotRecords({
+      bank: 'us_bank',
+      cardName: 'US Bank',
+      phase: '',
+      json,
+    });
+    const next = replaceCardOffers(existing, {
+      bank: 'us_bank',
+      cardName: 'US Bank',
+      phase: '',
+      records,
+    });
+    storage.value = JSON.stringify(next);
+  }
+
+  const before = storage.value;
+  assert.throws(
+    () => persist({ status: 'error', body: 'do-not-store' }),
+    (err) => err.code === 'SNAPSHOT_REFUSED' && /Nothing was changed/.test(err.message) && !/do-not-store/.test(err.message)
+  );
+  assert.throws(
+    () => persist({ ads: [] }),
+    (err) => err.code === 'SNAPSHOT_REFUSED' && /empty/.test(err.message)
+  );
+  assert.throws(
+    () => persist({
+      ads: [{
+        merchantName: 'Nike',
+        activationState: 'SERVED',
+        headline: '5% cash back',
+        rewardType: 'PERCENT_AMOUNT_PURCHASE',
+        rewardAmount: 5,
+      }],
+    }),
+    (err) => err.code === 'SNAPSHOT_REFUSED' && /no offer id/.test(err.message)
+  );
+  assert.equal(storage.value, before);
 });
