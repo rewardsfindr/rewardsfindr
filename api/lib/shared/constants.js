@@ -20,7 +20,7 @@ export const BANKS = {
   CITI: 'citi',
   BOFA: 'bofa',
   CAPITAL_ONE: 'capital_one',
-  DISCOVER: 'discover',
+  US_BANK: 'us_bank',
   WELLS_FARGO: 'wells_fargo',
 };
 

@@ -33,7 +33,7 @@ export const CONNECT_BANK_COPY = {
   chaseCta: 'Sync Chase',
   amexCta: 'Sync Amex',
   skip: 'Skip for now →',
-  footnote: 'Capital One, Discover & more coming soon',
+  footnote: 'Capital One, US Bank & more coming soon',
 };
 
 export function getOnboardingCta(index, pages = ONBOARDING_PAGES) {

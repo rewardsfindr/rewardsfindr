@@ -20,7 +20,8 @@ test('onboarding has exactly three product-aligned pages', () => {
 test('connect-bank copy names live banks only', () => {
   assert.equal(CONNECT_BANK_COPY.chaseCta, 'Sync Chase');
   assert.equal(CONNECT_BANK_COPY.amexCta, 'Sync Amex');
-  assert.match(CONNECT_BANK_COPY.footnote, /Capital One, Discover/);
+  assert.match(CONNECT_BANK_COPY.footnote, /Capital One, US Bank/);
+  assert.equal(CONNECT_BANK_COPY.footnote.includes('Discover'), false);
   assert.equal(CONNECT_BANK_COPY.footnote.includes('Citi'), false);
 });
 

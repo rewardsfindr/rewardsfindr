@@ -22,7 +22,7 @@ const BANK_COLORS = {
   amex:        '#007ac1',
   capital_one: '#c0392b',
   citi:        '#003b8e',
-  discover:    '#e65c00',
+  us_bank:     '#0c2074',
   wells_fargo: '#c0392b',
   bofa:        '#e31837',
   bilt:        '#1a1a1a',
@@ -55,7 +55,7 @@ const bankLabel = (bank) => {
   if (!bank) return '';
   const map = {
     chase: 'CHASE', amex: 'AMEX', capital_one: 'CAPITAL ONE',
-    citi: 'CITI', discover: 'DISCOVER', wells_fargo: 'WELLS FARGO',
+    citi: 'CITI', us_bank: 'US BANK', wells_fargo: 'WELLS FARGO',
     bofa: 'BOFA', bilt: 'BILT',
   };
   return map[bank] || bank.toUpperCase();
