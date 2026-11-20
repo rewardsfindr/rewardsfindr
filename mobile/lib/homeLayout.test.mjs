@@ -61,3 +61,16 @@ test('home screen wires brand, banks, account tab, and safe-area top without Hom
   assert.equal(bankGrid.includes('SYNC YOUR BANKS'), false);
   assert.equal(bankGrid.includes('Sync your banks'), false);
 });
+
+test('home no longer mounts Popular Stores or Example Rewards', () => {
+  const index = fs.readFileSync(path.join(root, 'app/index.js'), 'utf8');
+  const searchBar = fs.readFileSync(path.join(root, 'components/SearchBar.js'), 'utf8');
+  const constants = fs.readFileSync(path.join(root, 'shared/constants.js'), 'utf8');
+  assert.equal(index.includes('ExampleRewards'), false);
+  assert.equal(fs.existsSync(path.join(root, 'components/ExampleRewards.js')), false);
+  assert.equal(searchBar.includes('POPULAR STORES'), false);
+  assert.equal(searchBar.includes('POPULAR_STORES'), false);
+  assert.equal(searchBar.includes('onChipPress'), false);
+  assert.equal(constants.includes('POPULAR_STORES'), false);
+  assert.equal(constants.includes('EXAMPLE_REWARDS'), false);
+});
