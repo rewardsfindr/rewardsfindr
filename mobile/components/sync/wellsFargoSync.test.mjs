@@ -87,6 +87,10 @@ test('Wells Fargo opens the sign-on page and syncs from the deals portal', () =>
   for (const id of ['capital_one', 'us_bank', 'bofa', 'bilt']) {
     assert.equal(BANK_LIST.find(bank => bank.id === id).supported, false);
   }
+  assert.equal(BANK_LIST.some(bank => bank.id === 'discover'), false);
+  const usBank = BANK_LIST.find(bank => bank.id === 'us_bank');
+  assert.equal(usBank.label, 'US Bank');
+  assert.equal(usBank.supported, false);
   assert.equal(BANK_LIST.find(bank => bank.id === 'citi').supported, true);
   const config = BANK_CONFIG.wells_fargo;
   assert.equal(
@@ -103,7 +107,9 @@ test('Wells Fargo opens the sign-on page and syncs from the deals portal', () =>
   assert.match(supported, /Wells Fargo/);
   assert.equal(comingSoon.includes('Wells Fargo'), false);
   assert.match(faq.a, /Capital One/);
+  assert.match(faq.a, /US Bank/);
   assert.match(faq.a, /Bilt/);
+  assert.equal(faq.a.includes('Discover'), false);
 });
 
 test('a missing Wells Fargo expiration is not labeled expiring soon', () => {

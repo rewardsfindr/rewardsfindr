@@ -16,17 +16,7 @@ import { chaseOfferUrl } from '../../api/lib/offers/chaseSnapshot.js';
 import { getAuthInstance } from '../lib/firebaseClient.js';
 import { searchStoredOffers } from '../lib/offerStore.js';
 import { formatOfferExpiry } from '../lib/savedOffers.js';
-
-const BANK_COLORS = {
-  chase:       '#1a3a6b',
-  amex:        '#007ac1',
-  capital_one: '#c0392b',
-  citi:        '#003b8e',
-  us_bank:     '#0c2074',
-  wells_fargo: '#c0392b',
-  bofa:        '#e31837',
-  bilt:        '#1a1a1a',
-};
+import { BANK_COLORS, bankLabel } from '../lib/resultsBankDisplay.js';
 
 const formatReward = (amount, type) => {
   if (!amount) return 'Offer';
@@ -49,16 +39,6 @@ const formatDesc = (offer) => {
   return offer.cashbackType === 'percent'
     ? `${offer.cashbackAmount}% cash back`
     : `$${offer.cashbackAmount} cash back`;
-};
-
-const bankLabel = (bank) => {
-  if (!bank) return '';
-  const map = {
-    chase: 'CHASE', amex: 'AMEX', capital_one: 'CAPITAL ONE',
-    citi: 'CITI', us_bank: 'US BANK', wells_fargo: 'WELLS FARGO',
-    bofa: 'BOFA', bilt: 'BILT',
-  };
-  return map[bank] || bank.toUpperCase();
 };
 
 const openChaseOffer = (offer) => {
