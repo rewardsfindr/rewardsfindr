@@ -153,16 +153,6 @@ export const STORES = [
   { storeName: 'Hulu',             category: CATEGORIES.SUBSCRIPTION, aliases: [] },
 ];
 
-export const POPULAR_STORES = [
-  'Starbucks', 'Amazon', 'Whole Foods', 'Uber', 'Target', 'Costco', "McDonald's", 'Netflix',
-];
-
-export const EXAMPLE_REWARDS = [
-  { reward: '6% Back',   store: 'Whole Foods', cardName: 'Blue Cash Preferred', last4: '6612', bank: 'AMEX' },
-  { reward: '4% Back',   store: 'Chipotle',    cardName: 'Savor Cash Rewards',  last4: '2278', bank: 'CAPITAL ONE' },
-  { reward: '3x Points', store: 'Starbucks',   cardName: 'Sapphire Preferred',  last4: '4821', bank: 'CHASE' },
-];
-
 export const BANK_LIST = [
   { id: 'chase',       label: 'Chase',           supported: true  },
   { id: 'amex',        label: 'Amex',            supported: true  },

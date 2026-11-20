@@ -13,12 +13,11 @@ import { useSearch } from '../hooks/useSearch.js';
 import { searchStoredOffers } from '../lib/offerStore.js';
 import { resultsRouteParams, summarizeSyncCards } from '../lib/savedOffers.js';
 
-import HomeHeader     from '../components/HomeHeader.js';
-import SearchBar      from '../components/SearchBar.js';
-import ExampleRewards from '../components/ExampleRewards.js';
-import BankGrid       from '../components/BankGrid.js';
-import SyncWebView    from '../components/SyncWebView.js';
-import { colors }     from '../shared/theme.js';
+import HomeHeader  from '../components/HomeHeader.js';
+import SearchBar   from '../components/SearchBar.js';
+import BankGrid    from '../components/BankGrid.js';
+import SyncWebView from '../components/SyncWebView.js';
+import { colors }  from '../shared/theme.js';
 
 const getSyncKey = (uid) => `rewardsfindr_synced_banks_${uid}`;
 
@@ -91,10 +90,6 @@ export default function HomeScreen() {
     await runSearch(searchTerm);
   };
 
-  const onChipPress = async (storeName) => {
-    await runSearch(storeName);
-  };
-
   const handleSyncSuccess = (totalSynced, cardResults, bank) => {
     const summary = summarizeSyncCards(cardResults);
     setSyncedBanks(prev => ({
@@ -105,7 +100,7 @@ export default function HomeScreen() {
     Alert.alert(
       totalSynced > 0 ? 'Offers saved on this phone' : 'No offers saved',
       totalSynced > 0
-        ? `${lines}\n\nSearch a store name from that card. The sample rewards on the home screen stay as examples.`
+        ? `${lines}\n\nSearch a store name from that card.`
         : 'The sheet closed without storing offers. Open the bank again and tap Sync Offers.',
     );
   };
@@ -120,11 +115,9 @@ export default function HomeScreen() {
           value={searchTerm}
           onChange={(val) => { setSearchTerm(val); clearSearch(); }}
           onSubmit={onSearchSubmit}
-          onChipPress={onChipPress}
           isSearching={isSearching}
           error={error}
         />
-        <ExampleRewards />
         <BankGrid
           syncedBanks={syncedBanks}
           syncingBank={syncBank}

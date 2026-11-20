@@ -1,6 +1,6 @@
 // ─────────────────────────────────────────────
 // SEARCH BAR
-// Search input + popular store chips.
+// Search input for store names.
 // ─────────────────────────────────────────────
 import React from 'react';
 import {
@@ -8,14 +8,12 @@ import {
   ActivityIndicator, StyleSheet,
 } from 'react-native';
 import { colors, radii, shadow } from '../shared/theme.js';
-import { POPULAR_STORES } from '../shared/constants.js';
 
-export default function SearchBar({ value, onChange, onSubmit, onChipPress, isSearching, error }) {
+export default function SearchBar({ value, onChange, onSubmit, isSearching, error }) {
   return (
     <View style={s.wrap}>
       <Text style={s.subtitle}>Use the right card, every time.</Text>
 
-      {/* Input */}
       <View style={s.inputRow}>
         <Text style={s.inputIcon}>🔍</Text>
         <TextInput
@@ -41,16 +39,6 @@ export default function SearchBar({ value, onChange, onSubmit, onChipPress, isSe
           <Text style={s.errorText}>⚠️ {error}</Text>
         </View>
       )}
-
-      {/* Popular stores */}
-      <Text style={s.chipsLabel}>POPULAR STORES</Text>
-      <View style={s.chips}>
-        {POPULAR_STORES.map(name => (
-          <TouchableOpacity key={name} style={s.chip} onPress={() => onChipPress(name)} disabled={isSearching}>
-            <Text style={s.chipText}>{name}</Text>
-          </TouchableOpacity>
-        ))}
-      </View>
     </View>
   );
 }
@@ -69,11 +57,4 @@ const s = StyleSheet.create({
   errorBox:     { backgroundColor: colors.errorBg, borderRadius: radii.sm,
                   padding: 10, marginBottom: 10 },
   errorText:    { color: colors.error, fontSize: 13 },
-  chipsLabel:   { fontSize: 11, fontWeight: '700', color: colors.textMuted,
-                  letterSpacing: 0.8, marginBottom: 8, marginTop: 8 },
-  chips:        { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
-  chip:         { backgroundColor: colors.bgCard, borderRadius: radii.full,
-                  paddingHorizontal: 14, paddingVertical: 7,
-                  borderWidth: 1, borderColor: colors.border },
-  chipText:     { color: colors.textPrimary, fontSize: 13, fontWeight: '500' },
 });
