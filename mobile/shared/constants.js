@@ -168,7 +168,7 @@ export const BANK_LIST = [
   { id: 'amex',        label: 'Amex',            supported: true  },
   { id: 'capital_one', label: 'Capital One',     supported: false },
   { id: 'citi',        label: 'Citi',            supported: true  },
-  { id: 'us_bank',     label: 'US Bank',         supported: false },
+  { id: 'us_bank',     label: 'US Bank',         supported: true  },
   { id: 'wells_fargo', label: 'Wells Fargo',     supported: true  },
   { id: 'bofa',        label: 'Bank of America', supported: false },
   { id: 'bilt',        label: 'Bilt',            supported: false },
@@ -181,7 +181,7 @@ export const FAQ_ITEMS = [
   },
   {
     q: 'Which banks are supported?',
-    a: 'Currently Chase, American Express, Wells Fargo, and Citi. Capital One, US Bank, Bank of America, and Bilt are coming soon.',
+    a: 'Currently Chase, American Express, Wells Fargo, Citi, and US Bank. Capital One, Bank of America, and Bilt are coming soon.',
   },
   {
     q: 'Is my data secure?',

@@ -372,12 +372,105 @@ export function citiRecords({ cardName, cardLast4, json, now = new Date() }) {
   return records;
 }
 
+const US_BANK_CARD_NAME = 'US Bank';
+
+function usBankOffersReady(json) {
+  if (!json || typeof json !== 'object' || Array.isArray(json)) return false;
+  return Array.isArray(json.ads);
+}
+
+function mapUsBankReward(ad) {
+  const rewardType = String(ad?.rewardType ?? '').trim().toUpperCase();
+  const raw = ad?.rewardAmount;
+  let amount = NaN;
+  if (typeof raw === 'number') amount = raw;
+  else if (raw != null && String(raw).trim() !== '') {
+    amount = parseFloat(String(raw).replace(/[$,\s]/g, ''));
+  }
+  const hasAmount = Number.isFinite(amount);
+  const headline = String(ad?.headline ?? '').trim();
+  const shortPre = String(ad?.shortPreMessage ?? '').trim();
+  const offerDescription = headline || shortPre;
+  let cashbackType = 'percent';
+  if (rewardType === 'FIXED_AMOUNT_PURCHASE') cashbackType = 'fixed';
+  else if (rewardType === 'PERCENT_AMOUNT_PURCHASE') cashbackType = 'percent';
+  else if (/\$/.test(offerDescription) && !/%/.test(offerDescription)) cashbackType = 'fixed';
+  const minSpend = typeof ad?.minSpendAmount === 'number' && Number.isFinite(ad.minSpendAmount)
+    ? ad.minSpendAmount
+    : 0;
+  return {
+    hasReward: hasAmount || offerDescription !== '',
+    cashbackAmount: hasAmount ? amount : 0,
+    cashbackType,
+    offerDescription,
+    minimumSpend: minSpend,
+  };
+}
+
+export function usBankRecords({ json, now = new Date() }) {
+  if (!usBankOffersReady(json)) {
+    refuseSnapshot('US Bank offers were not recognized. Nothing was changed.');
+  }
+
+  const seen = new Set();
+  const records = [];
+  let considered = 0;
+  let sawOfferId = false;
+
+  for (const item of json.ads) {
+    considered += 1;
+    const bankOfferId = String(item?.offerId ?? '').trim();
+    if (bankOfferId) sawOfferId = true;
+    const merchantName = String(item?.merchantName ?? '').trim();
+    if (!bankOfferId || !merchantName || seen.has(bankOfferId)) continue;
+    seen.add(bankOfferId);
+    const reward = mapUsBankReward(item);
+    if (!reward.hasReward) continue;
+    const expiry = mapWellsExpiry(item?.endDate);
+    const activation = String(item?.activationState ?? '').trim().toUpperCase();
+    const offerToken = bankOfferId.replace(/[/\s]/g, '');
+    records.push({
+      id: `us_bank_${slug(US_BANK_CARD_NAME)}_${offerToken}`.slice(0, 700),
+      bankOfferId,
+      userId: null,
+      merchantName,
+      merchantNameLower: merchantName.toLowerCase().trim(),
+      offerDescription: reward.offerDescription,
+      cashbackAmount: reward.cashbackAmount,
+      cashbackType: reward.cashbackType,
+      minimumSpend: reward.minimumSpend,
+      category: 'other',
+      expiryDate: expiry.expiryDate,
+      expiryPrecision: expiry.expiryPrecision,
+      expiresAt: expiry.expiresAt,
+      isActivated: activation === 'ACTIVATED',
+      offerDeepLink: null,
+      bank: 'us_bank',
+      cardName: US_BANK_CARD_NAME,
+      cardLast4: null,
+      phase: '',
+      syncedAt: now.toISOString(),
+    });
+  }
+
+  if (records.length === 0) {
+    if (considered === 0) {
+      refuseSnapshot('US Bank offers were empty. Nothing was changed.');
+    }
+    refuseSnapshot(sawOfferId
+      ? 'US Bank offers were incomplete. Nothing was changed.'
+      : 'US Bank offers had no offer id. Nothing was changed.');
+  }
+  return records;
+}
+
 export function buildSnapshotRecords(input) {
   if (input.bank === 'chase') return chaseRecords(input);
   if (input.bank === 'amex') return amexRecords(input);
   if (input.bank === 'wells_fargo') return wellsFargoRecords(input);
   if (input.bank === 'citi') return citiRecords(input);
-  throw new Error('bank must be chase, amex, wells_fargo, or citi');
+  if (input.bank === 'us_bank') return usBankRecords(input);
+  throw new Error('bank must be chase, amex, wells_fargo, citi, or us_bank');
 }
 
 export function replaceCardOffers(existing, { bank, cardName, phase, records }) {

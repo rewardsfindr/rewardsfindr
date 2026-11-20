@@ -14,7 +14,7 @@ export const ONBOARDING_PAGES = [
   {
     key: 'sync',
     title: 'Sync your bank offers',
-    body: 'Securely pull Chase, Amex, Wells Fargo, and Citi offers in the app. No manual entry. We never store your bank password.',
+    body: 'Securely pull Chase, Amex, Wells Fargo, Citi, and US Bank offers in the app. No manual entry. We never store your bank password.',
     visual: 'banks',
     cta: 'Next',
   },
@@ -33,7 +33,7 @@ export const CONNECT_BANK_COPY = {
   chaseCta: 'Sync Chase',
   amexCta: 'Sync Amex',
   skip: 'Skip for now →',
-  footnote: 'Capital One, US Bank & more coming soon',
+  footnote: 'Capital One & more coming soon',
 };
 
 export function getOnboardingCta(index, pages = ONBOARDING_PAGES) {

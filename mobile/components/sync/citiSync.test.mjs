@@ -163,13 +163,11 @@ test('Citi opens Merchant Offers and is marked supported', () => {
   const citi = BANK_LIST.find(bank => bank.id === 'citi');
   assert.equal(citi.supported, true);
   assert.equal(citi.label, 'Citi');
-  for (const id of ['capital_one', 'us_bank', 'bofa', 'bilt']) {
+  for (const id of ['capital_one', 'bofa', 'bilt']) {
     assert.equal(BANK_LIST.find(bank => bank.id === id).supported, false);
   }
   assert.equal(BANK_LIST.some(bank => bank.id === 'discover'), false);
-  const usBank = BANK_LIST.find(bank => bank.id === 'us_bank');
-  assert.equal(usBank.label, 'US Bank');
-  assert.equal(usBank.supported, false);
+  assert.equal(BANK_LIST.find(bank => bank.id === 'us_bank').supported, true);
   const config = BANK_CONFIG.citi;
   assert.equal(
     config.url,
