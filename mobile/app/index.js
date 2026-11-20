@@ -13,11 +13,13 @@ import { useSearch } from '../hooks/useSearch.js';
 import { searchStoredOffers } from '../lib/offerStore.js';
 import { resultsRouteParams, summarizeSyncCards } from '../lib/savedOffers.js';
 
-import HomeHeader  from '../components/HomeHeader.js';
-import SearchBar   from '../components/SearchBar.js';
-import BankGrid    from '../components/BankGrid.js';
-import SyncWebView from '../components/SyncWebView.js';
-import { colors }  from '../shared/theme.js';
+import HomeHeader       from '../components/HomeHeader.js';
+import HomeBrand        from '../components/HomeBrand.js';
+import SearchBar        from '../components/SearchBar.js';
+import BankGrid         from '../components/BankGrid.js';
+import HomeBottomTabBar from '../components/HomeBottomTabBar.js';
+import SyncWebView      from '../components/SyncWebView.js';
+import { colors }       from '../shared/theme.js';
 
 const getSyncKey = (uid) => `rewardsfindr_synced_banks_${uid}`;
 
@@ -110,20 +112,29 @@ export default function HomeScreen() {
   return (
     <View style={s.safe}>
       <HomeHeader user={user} onAvatarPress={handleAvatarPress} />
-      <ScrollView contentContainerStyle={s.scroll} keyboardShouldPersistTaps="handled">
-        <SearchBar
-          value={searchTerm}
-          onChange={(val) => { setSearchTerm(val); clearSearch(); }}
-          onSubmit={onSearchSubmit}
-          isSearching={isSearching}
-          error={error}
-        />
+      <ScrollView
+        style={s.scroll}
+        contentContainerStyle={s.scrollContent}
+        keyboardShouldPersistTaps="handled"
+      >
+        <View style={s.midCluster}>
+          <HomeBrand />
+          <SearchBar
+            value={searchTerm}
+            onChange={(val) => { setSearchTerm(val); clearSearch(); }}
+            onSubmit={onSearchSubmit}
+            isSearching={isSearching}
+            error={error}
+          />
+        </View>
         <BankGrid
           syncedBanks={syncedBanks}
           syncingBank={syncBank}
           onSyncPress={setSyncBank}
         />
       </ScrollView>
+
+      <HomeBottomTabBar />
 
       <SyncWebView
         visible={syncBank !== null}
@@ -139,6 +150,8 @@ export default function HomeScreen() {
 }
 
 const s = StyleSheet.create({
-  safe:   { flex: 1, backgroundColor: colors.bgHeader },
-  scroll: { backgroundColor: colors.bgPage, paddingBottom: 40 },
+  safe:         { flex: 1, backgroundColor: colors.bgHeader },
+  scroll:       { flex: 1, backgroundColor: colors.bgPage },
+  scrollContent:{ flexGrow: 1, justifyContent: 'space-between', paddingBottom: 12 },
+  midCluster:   { flexGrow: 1, justifyContent: 'center', paddingTop: 24, paddingBottom: 16 },
 });

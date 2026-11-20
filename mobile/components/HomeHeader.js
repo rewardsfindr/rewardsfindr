@@ -1,11 +1,11 @@
 // ─────────────────────────────────────────────
 // HOME HEADER
-// Dark green bar with logo + profile avatar.
+// Slim dark top bar with profile avatar only (no wordmark).
 // Uses useSafeAreaInsets to sit below the status bar.
 // Avatar shows user initials if signed in.
 // ─────────────────────────────────────────────
 import React from 'react';
-import { View, Text, Image, TouchableOpacity, StyleSheet } from 'react-native';
+import { View, Text, TouchableOpacity, StyleSheet } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { colors } from '../shared/theme.js';
 
@@ -22,16 +22,14 @@ export default function HomeHeader({ user, onAvatarPress }) {
   const initials = getInitials(user);
 
   return (
-    <View style={[s.header, { paddingTop: insets.top + 10 }]}>
-      <View style={s.logoRow}>
-        <Image
-          source={require('../assets/logo.png')}
-          style={s.logoIcon}
-          accessible={false}
-        />
-        <Text style={s.logoText}>RewardsFindr</Text>
-      </View>
-      <TouchableOpacity style={s.avatar} onPress={onAvatarPress}>
+    <View style={[s.header, { paddingTop: insets.top + 8 }]}>
+      <View style={s.spacer} />
+      <TouchableOpacity
+        style={s.avatar}
+        onPress={onAvatarPress}
+        accessibilityRole="button"
+        accessibilityLabel="Account"
+      >
         {initials
           ? <Text style={s.avatarText}>{initials}</Text>
           : <Text style={s.avatarIcon}>👤</Text>}
@@ -41,11 +39,9 @@ export default function HomeHeader({ user, onAvatarPress }) {
 }
 
 const s = StyleSheet.create({
-  header:     { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
-                backgroundColor: colors.bgHeader, paddingHorizontal: 16, paddingBottom: 14 },
-  logoRow:    { flexDirection: 'row', alignItems: 'center', gap: 8 },
-  logoIcon:   { width: 28, height: 28 },
-  logoText:   { fontSize: 20, fontWeight: '800', color: colors.textOnDark },
+  header:     { flexDirection: 'row', alignItems: 'center', justifyContent: 'flex-end',
+                backgroundColor: colors.bgHeader, paddingHorizontal: 16, paddingBottom: 10 },
+  spacer:     { flex: 1 },
   avatar:     { width: 36, height: 36, borderRadius: 18, backgroundColor: 'rgba(255,255,255,0.15)',
                 alignItems: 'center', justifyContent: 'center' },
   avatarText: { fontSize: 14, fontWeight: '700', color: colors.textOnDark },

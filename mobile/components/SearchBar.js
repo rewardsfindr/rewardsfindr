@@ -44,8 +44,8 @@ export default function SearchBar({ value, onChange, onSubmit, isSearching, erro
 }
 
 const s = StyleSheet.create({
-  wrap:         { paddingHorizontal: 16, paddingTop: 20, paddingBottom: 8 },
-  subtitle:     { fontSize: 14, color: colors.textSecondary, marginBottom: 12 },
+  wrap:         { paddingHorizontal: 16, paddingTop: 8, paddingBottom: 8 },
+  subtitle:     { fontSize: 14, color: colors.textSecondary, marginBottom: 12, textAlign: 'center' },
   inputRow:     { flexDirection: 'row', alignItems: 'center', backgroundColor: colors.bgCard,
                   borderRadius: radii.full, paddingHorizontal: 14, paddingVertical: 4,
                   marginBottom: 12, ...shadow.sm },
