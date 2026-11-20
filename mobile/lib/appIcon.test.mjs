@@ -107,15 +107,15 @@ function assertNear(actual, expected, tol, label) {
   }
 }
 
-test('login and home brand use logo.png; header has no wordmark', () => {
+test('login and home brand use logo.png; home has no header wordmark', () => {
   const login = fs.readFileSync(path.join(root, 'app/login.js'), 'utf8');
   const brand = fs.readFileSync(path.join(root, 'components/HomeBrand.js'), 'utf8');
-  const header = fs.readFileSync(path.join(root, 'components/HomeHeader.js'), 'utf8');
+  const index = fs.readFileSync(path.join(root, 'app/index.js'), 'utf8');
   assert.match(login, /require\(\s*['"]\.\.\/assets\/logo\.png['"]\s*\)/);
   assert.match(brand, /require\(\s*['"]\.\.\/assets\/logo\.png['"]\s*\)/);
   assert.match(brand, /RewardsFindr/);
-  assert.equal(header.includes('logo.png'), false);
-  assert.equal(header.includes('RewardsFindr'), false);
+  assert.equal(index.includes('HomeHeader'), false);
+  assert.equal(fs.existsSync(path.join(root, 'components/HomeHeader.js')), false);
 });
 
 test('android adaptive icon background matches the web brand green', () => {

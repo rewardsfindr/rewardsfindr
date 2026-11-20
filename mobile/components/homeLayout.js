@@ -5,10 +5,12 @@ export const HOME_TAB_SLOTS = [
   { id: 'offers', label: 'Offers', icon: 'pricetag', iconOutline: 'pricetag-outline', placeholder: true },
   { id: 'cards', label: 'Cards', icon: 'card', iconOutline: 'card-outline', placeholder: true },
   { id: 'activity', label: 'Activity', icon: 'time', iconOutline: 'time-outline', placeholder: true },
-  { id: 'profile', label: 'Profile', icon: 'person', iconOutline: 'person-outline', placeholder: true },
+  { id: 'account', label: 'Account', icon: 'person', iconOutline: 'person-outline', placeholder: false },
 ];
 
 export const HOME_TAB_COMING_SOON_MESSAGE = 'Coming soon';
+
+export const ACCOUNT_TAB_INDEX = 4;
 
 /** Selected tab index on the home route (`/`). */
 export function selectedHomeTabIndex() {
@@ -18,4 +20,8 @@ export function selectedHomeTabIndex() {
 export function isPlaceholderTab(index) {
   const slot = HOME_TAB_SLOTS[index];
   return Boolean(slot?.placeholder);
+}
+
+export function isAccountTab(index) {
+  return index === ACCOUNT_TAB_INDEX || HOME_TAB_SLOTS[index]?.id === 'account';
 }

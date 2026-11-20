@@ -6,6 +6,7 @@
 import React, { useState, useEffect } from 'react';
 import { ScrollView, Alert, StyleSheet, View } from 'react-native';
 import { useRouter } from 'expo-router';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { signOut } from 'firebase/auth';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { getAuthInstance } from '../lib/firebaseClient.js';
@@ -13,7 +14,6 @@ import { useSearch } from '../hooks/useSearch.js';
 import { searchStoredOffers } from '../lib/offerStore.js';
 import { resultsRouteParams, summarizeSyncCards } from '../lib/savedOffers.js';
 
-import HomeHeader       from '../components/HomeHeader.js';
 import HomeBrand        from '../components/HomeBrand.js';
 import SearchBar        from '../components/SearchBar.js';
 import BankGrid         from '../components/BankGrid.js';
@@ -25,6 +25,7 @@ const getSyncKey = (uid) => `rewardsfindr_synced_banks_${uid}`;
 
 export default function HomeScreen() {
   const router = useRouter();
+  const insets = useSafeAreaInsets();
   const { searchTerm, setSearchTerm, searching, error, clearSearch } = useSearch();
   const [localSearching, setLocalSearching] = useState(false);
   const [syncBank, setSyncBank] = useState(null);
@@ -44,7 +45,7 @@ export default function HomeScreen() {
     AsyncStorage.setItem(getSyncKey(user.uid), JSON.stringify(syncedBanks)).catch(() => {});
   }, [syncedBanks]);
 
-  const handleAvatarPress = () => {
+  const handleAccountPress = () => {
     if (!user) return;
     Alert.alert(
       'Sign Out',
@@ -110,8 +111,7 @@ export default function HomeScreen() {
   const isSearching = searching || localSearching;
 
   return (
-    <View style={s.safe}>
-      <HomeHeader user={user} onAvatarPress={handleAvatarPress} />
+    <View style={[s.safe, { paddingTop: insets.top }]}>
       <ScrollView
         style={s.scroll}
         contentContainerStyle={s.scrollContent}
@@ -134,7 +134,7 @@ export default function HomeScreen() {
         />
       </ScrollView>
 
-      <HomeBottomTabBar />
+      <HomeBottomTabBar onAccountPress={handleAccountPress} />
 
       <SyncWebView
         visible={syncBank !== null}

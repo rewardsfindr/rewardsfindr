@@ -6,8 +6,10 @@ import { fileURLToPath } from 'node:url';
 import {
   HOME_TAB_SLOTS,
   HOME_TAB_COMING_SOON_MESSAGE,
+  ACCOUNT_TAB_INDEX,
   selectedHomeTabIndex,
   isPlaceholderTab,
+  isAccountTab,
 } from '../components/homeLayout.js';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -19,21 +21,43 @@ test('home bottom bar has exactly 5 slots with Home first', () => {
   assert.equal(selectedHomeTabIndex(), 0);
 });
 
-test('tabs 1–4 are placeholders that use Coming soon copy', () => {
+test('tabs 1–3 are Coming soon placeholders; tab 4 is Account', () => {
   assert.equal(HOME_TAB_COMING_SOON_MESSAGE, 'Coming soon');
-  for (let i = 1; i < HOME_TAB_SLOTS.length; i++) {
+  for (let i = 1; i <= 3; i++) {
     assert.equal(isPlaceholderTab(i), true);
     assert.equal(HOME_TAB_SLOTS[i].placeholder, true);
   }
   assert.equal(isPlaceholderTab(0), false);
+  assert.equal(ACCOUNT_TAB_INDEX, 4);
+  assert.equal(HOME_TAB_SLOTS[4].id, 'account');
+  assert.equal(HOME_TAB_SLOTS[4].label, 'Account');
+  assert.equal(HOME_TAB_SLOTS[4].icon, 'person');
+  assert.equal(HOME_TAB_SLOTS[4].iconOutline, 'person-outline');
+  assert.equal(HOME_TAB_SLOTS[4].placeholder, false);
+  assert.equal(isPlaceholderTab(4), false);
+  assert.equal(isAccountTab(4), true);
+  assert.equal(isAccountTab(0), false);
 });
 
-test('home screen wires brand, banks, and bottom tabs without top wordmark', () => {
+test('home screen wires brand, banks, account tab, and safe-area top without HomeHeader', () => {
   const index = fs.readFileSync(path.join(root, 'app/index.js'), 'utf8');
+  const tabBar = fs.readFileSync(path.join(root, 'components/HomeBottomTabBar.js'), 'utf8');
+  const bankGrid = fs.readFileSync(path.join(root, 'components/BankGrid.js'), 'utf8');
   assert.match(index, /HomeBrand/);
   assert.match(index, /HomeBottomTabBar/);
   assert.match(index, /BankGrid/);
   assert.match(index, /SearchBar/);
-  assert.match(index, /HomeHeader/);
   assert.match(index, /SyncWebView/);
+  assert.match(index, /useSafeAreaInsets/);
+  assert.match(index, /paddingTop:\s*insets\.top/);
+  assert.match(index, /onAccountPress/);
+  assert.match(index, /Sign Out/);
+  assert.match(index, /signOut/);
+  assert.equal(index.includes('HomeHeader'), false);
+  assert.equal(fs.existsSync(path.join(root, 'components/HomeHeader.js')), false);
+  assert.match(tabBar, /onAccountPress/);
+  assert.match(tabBar, /isAccountTab/);
+  assert.equal(tabBar.includes('initials'), false);
+  assert.equal(bankGrid.includes('SYNC YOUR BANKS'), false);
+  assert.equal(bankGrid.includes('Sync your banks'), false);
 });

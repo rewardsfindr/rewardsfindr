@@ -1,7 +1,8 @@
 // ─────────────────────────────────────────────
 // HOME BOTTOM TAB BAR
 // Custom 5-slot Instagram-style bar on home only.
-// Slot 0 = Home (selected). Slots 1–4 Alert "Coming soon".
+// Slot 0 = Home (selected). Slots 1–3 Alert "Coming soon".
+// Slot 4 = Account (person icon → sign-out confirm).
 // ─────────────────────────────────────────────
 import React from 'react';
 import { View, TouchableOpacity, Alert, StyleSheet } from 'react-native';
@@ -12,12 +13,20 @@ import {
   HOME_TAB_SLOTS,
   HOME_TAB_COMING_SOON_MESSAGE,
   selectedHomeTabIndex,
+  isAccountTab,
 } from './homeLayout.js';
 
-export default function HomeBottomTabBar({ selectedIndex = selectedHomeTabIndex() }) {
+export default function HomeBottomTabBar({
+  selectedIndex = selectedHomeTabIndex(),
+  onAccountPress,
+}) {
   const insets = useSafeAreaInsets();
 
   const onPress = (index) => {
+    if (isAccountTab(index)) {
+      onAccountPress?.();
+      return;
+    }
     if (index === selectedIndex) return;
     Alert.alert(HOME_TAB_COMING_SOON_MESSAGE);
   };

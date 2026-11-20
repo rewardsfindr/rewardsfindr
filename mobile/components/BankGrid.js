@@ -42,7 +42,6 @@ function getCardCount(syncData) {
 export default function BankGrid({ syncedBanks = {}, syncingBank = null, onSyncPress }) {
   return (
     <View style={s.wrap}>
-      <Text style={s.label}>SYNC YOUR BANKS</Text>
       <View style={s.grid}>
         {BANK_LIST.map((bank) => {
           const syncData = syncedBanks[bank.id];
@@ -90,8 +89,6 @@ export default function BankGrid({ syncedBanks = {}, syncingBank = null, onSyncP
 
 const s = StyleSheet.create({
   wrap:            { paddingHorizontal: 16, paddingBottom: 16 },
-  label:           { fontSize: 11, fontWeight: '700', color: colors.textMuted,
-                     letterSpacing: 0.8, marginBottom: 12 },
   grid:            { flexDirection: 'row', flexWrap: 'wrap', gap: 10 },
   cell:            { width: '22%', alignItems: 'center', backgroundColor: colors.bgCard,
                      borderRadius: radii.lg, paddingVertical: 12, paddingHorizontal: 4,
