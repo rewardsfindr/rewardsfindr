@@ -2,8 +2,8 @@
 
 export const HOME_TAB_SLOTS = [
   { id: 'home', label: 'Home', icon: 'home', iconOutline: 'home-outline', placeholder: false },
-  { id: 'offers', label: 'Offers', icon: 'pricetag', iconOutline: 'pricetag-outline', placeholder: false },
-  { id: 'cards', label: 'Cards', icon: 'card', iconOutline: 'card-outline', placeholder: true },
+  { id: 'offers', label: 'Offers', icon: 'gift', iconOutline: 'gift-outline', placeholder: false },
+  { id: 'cards', label: 'Cards', icon: 'grid', iconOutline: 'grid-outline', placeholder: true },
   { id: 'history', label: 'History', icon: 'time', iconOutline: 'time-outline', placeholder: false },
   { id: 'account', label: 'Account', icon: 'person', iconOutline: 'person-outline', placeholder: false },
 ];
