@@ -488,6 +488,51 @@ test('ignores a customer-offers response that started before the card click', as
   assert.equal(messages.at(-1).offers[0].merchantName, 'Nike');
 });
 
+test('ignores a fetch customer-offers body that arrives after the card click', async () => {
+  const { document } = chaseHub();
+  let releaseBody;
+  const bodyReady = new Promise(resolve => { releaseBody = resolve; });
+  let delayBody = true;
+  let bodyText = chaseOffersBody('Wander', 'FIGG:1');
+  const messages = [];
+  const window = {
+    XMLHttpRequest: FakeXHR,
+    fetch() {
+      const text = bodyText;
+      const delayed = delayBody;
+      return Promise.resolve({
+        ok: true,
+        clone() { return this; },
+        text() {
+          return delayed ? bodyReady.then(() => text) : Promise.resolve(text);
+        },
+      });
+    },
+    ReactNativeWebView: {
+      postMessage(raw) { messages.push(JSON.parse(raw)); },
+    },
+  };
+  new Function('window', 'document', buildChaseOfferCaptureJs())(window, document);
+
+  await window.fetch('https://secure.chase.com/svc/customer-offers');
+  window.__chaseArmNextCapture();
+  releaseBody();
+  await new Promise(resolve => setTimeout(resolve, 20));
+
+  postCapture(window, document);
+  assert.equal(messages.at(-1).type, 'CHASE_CAPTURE_UNAVAILABLE');
+  assert.equal(JSON.stringify(messages.at(-1)).includes('Wander'), false);
+
+  delayBody = false;
+  bodyText = chaseOffersBody('Nike', 'FIGG:2');
+  await window.fetch('https://secure.chase.com/svc/customer-offers');
+  await new Promise(resolve => setTimeout(resolve, 20));
+  postCapture(window, document);
+  assert.equal(messages.at(-1).type, 'CAPTURE_OFFERS');
+  assert.equal(messages.at(-1).offers[0].merchantName, 'Nike');
+  assert.equal(messages.at(-1).offers[0].bankOfferId, 'FIGG:2');
+});
+
 test('asks for another card request when the offers response was missed', () => {
   const button = new El('DIV', { id: 'select-credit-card-account', text: 'Sapphire Reserve (...2222)' });
   const messages = [];
