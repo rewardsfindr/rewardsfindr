@@ -7,12 +7,12 @@ import React, { useState, useEffect } from 'react';
 import { ScrollView, Alert, StyleSheet, View } from 'react-native';
 import { useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { signOut } from 'firebase/auth';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { getAuthInstance } from '../lib/firebaseClient.js';
 import { useSearch } from '../hooks/useSearch.js';
 import { searchStoredOffers } from '../lib/offerStore.js';
 import { resultsRouteParams, summarizeSyncCards } from '../lib/savedOffers.js';
+import { recordSearch } from '../lib/searchHistory.js';
 
 import HomeBrand        from '../components/HomeBrand.js';
 import SearchBar        from '../components/SearchBar.js';
@@ -20,6 +20,7 @@ import BankGrid         from '../components/BankGrid.js';
 import BankPickerSheet  from '../components/BankPickerSheet.js';
 import HomeBottomTabBar from '../components/HomeBottomTabBar.js';
 import SyncWebView      from '../components/SyncWebView.js';
+import { HOME_TAB_INDEX } from '../components/homeLayout.js';
 import { colors }       from '../shared/theme.js';
 
 const getSyncKey = (uid) => `rewardsfindr_synced_banks_${uid}`;
@@ -47,29 +48,6 @@ export default function HomeScreen() {
     AsyncStorage.setItem(getSyncKey(user.uid), JSON.stringify(syncedBanks)).catch(() => {});
   }, [syncedBanks]);
 
-  const handleAccountPress = () => {
-    if (!user) return;
-    Alert.alert(
-      'Sign Out',
-      'Are you sure you want to sign out?',
-      [
-        { text: 'Cancel', style: 'cancel' },
-        {
-          text: 'Sign Out',
-          style: 'destructive',
-          onPress: async () => {
-            try {
-              await signOut(getAuthInstance());
-              setSyncedBanks({});
-            } catch {
-              Alert.alert('Error', 'Could not sign out. Please try again.');
-            }
-          },
-        },
-      ]
-    );
-  };
-
   const navigateToResults = (data, query) => {
     router.push(resultsRouteParams(query, data.offers));
   };
@@ -91,8 +69,12 @@ export default function HomeScreen() {
   };
 
   const onSearchSubmit = async () => {
-    if (!searchTerm.trim()) return;
-    await runSearch(searchTerm);
+    const query = searchTerm.trim();
+    if (!query) return;
+    if (user?.uid) {
+      await recordSearch(user.uid, query).catch(() => {});
+    }
+    await runSearch(query);
   };
 
   const handleSyncSuccess = (totalSynced, cardResults, bank) => {
@@ -137,7 +119,7 @@ export default function HomeScreen() {
         />
       </ScrollView>
 
-      <HomeBottomTabBar onAccountPress={handleAccountPress} />
+      <HomeBottomTabBar selectedIndex={HOME_TAB_INDEX} />
 
       <BankPickerSheet
         visible={pickerOpen}

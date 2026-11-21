@@ -1,11 +1,11 @@
 // ─────────────────────────────────────────────
 // HOME BOTTOM TAB BAR
-// Custom 5-slot Instagram-style bar on home only.
-// Slot 0 = Home (selected). Slots 1–3 Alert "Coming soon".
-// Slot 4 = Account (person icon → sign-out confirm).
+// Custom 5-slot bar on Home / Offers / History / Account.
+// Cards → Coming soon. Real tabs → router.replace.
 // ─────────────────────────────────────────────
 import React from 'react';
 import { View, TouchableOpacity, Alert, StyleSheet } from 'react-native';
+import { useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { colors } from '../shared/theme.js';
@@ -13,22 +13,24 @@ import {
   HOME_TAB_SLOTS,
   HOME_TAB_COMING_SOON_MESSAGE,
   selectedHomeTabIndex,
-  isAccountTab,
+  isPlaceholderTab,
+  routeForTabIndex,
 } from './homeLayout.js';
 
 export default function HomeBottomTabBar({
   selectedIndex = selectedHomeTabIndex(),
-  onAccountPress,
 }) {
   const insets = useSafeAreaInsets();
+  const router = useRouter();
 
   const onPress = (index) => {
-    if (isAccountTab(index)) {
-      onAccountPress?.();
+    if (isPlaceholderTab(index)) {
+      Alert.alert(HOME_TAB_COMING_SOON_MESSAGE);
       return;
     }
     if (index === selectedIndex) return;
-    Alert.alert(HOME_TAB_COMING_SOON_MESSAGE);
+    const path = routeForTabIndex(index);
+    if (path) router.replace(path);
   };
 
   return (
