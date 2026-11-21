@@ -225,6 +225,67 @@ test('card detection falls back to every option when product options are absent'
   assert.equal(messages[0].cards[0].testId, 'offer-filter');
 });
 
+class DeferredXHR {
+  constructor() {
+    this.status = 200;
+    this.responseText = '';
+    this.listeners = {};
+  }
+
+  open(_method, url) { this.url = url; }
+
+  send() {}
+
+  flush() {
+    (this.listeners.load || []).forEach(listener => listener());
+  }
+
+  addEventListener(name, listener) {
+    this.listeners[name] = this.listeners[name] || [];
+    this.listeners[name].push(listener);
+  }
+}
+
+test('a card click ignores offer responses that started on the previous card', async () => {
+  const menu = amexMenu({ expanded: true, includeOption: true });
+  const messages = [];
+  const window = {
+    XMLHttpRequest: DeferredXHR,
+    ReactNativeWebView: {
+      postMessage(raw) { messages.push(JSON.parse(raw)); },
+    },
+  };
+  new Function('window', 'document', buildAmexJsonCaptureJs())(window, menu.document);
+  window.__amexJsonCaptureArmed = true;
+
+  const previous = new window.XMLHttpRequest();
+  previous.open('GET', 'https://example.com/ReadOffersHubPresentation');
+  previous.responseText = offerPayload('REPLACE', 8);
+  previous.send();
+
+  new Function('window', 'document', buildAmexSwitchCardJs(menu.testId, 20))(window, menu.document);
+
+  const smaller = new window.XMLHttpRequest();
+  smaller.open('GET', 'https://example.com/ReadOffersHubPresentation');
+  smaller.responseText = offerPayload('REPLACE', 2);
+  smaller.send();
+
+  const fuller = new window.XMLHttpRequest();
+  fuller.open('GET', 'https://example.com/ReadOffersHubPresentation');
+  fuller.responseText = offerPayload('UPDATE', 5);
+  fuller.send();
+
+  previous.flush();
+  smaller.flush();
+  fuller.flush();
+
+  await wait(950);
+  const captured = messages.filter(message => message.type === 'CAPTURE_JSON');
+  assert.equal(captured.length, 1);
+  assert.equal(captured[0].json.recommendedOffers.offersList.page1.length, 5);
+  assert.equal(captured[0].cardLabel, 'Blue Cash (...1008)');
+});
+
 test('Amex capture keeps the fullest response and posts it once', async () => {
   const display = new El({ 'data-testid': 'simple_switcher_selected_option_display' }, [
     new El({ 'data-testid': 'simple_switcher_display_name', text: 'Platinum' }),

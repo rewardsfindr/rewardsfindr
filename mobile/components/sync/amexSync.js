@@ -100,6 +100,11 @@ export const buildAmexSwitchCardJs = (testId, timeoutMs = 3500) => `
           window.ReactNativeWebView.postMessage(JSON.stringify({ type: 'CARD_SWITCH_ERROR', message: 'Could not open the next Amex card. Nothing else was changed.' }));
           return;
         }
+        // Responses already in flight belong to the card we are leaving.
+        // Bump the generation before the click so only this card's replies are saved.
+        window.__amexCaptureGeneration = (window.__amexCaptureGeneration || 0) + 1;
+        window.__amexBest = null;
+        clearTimeout(window.__amexQuietTimer);
         option.click();
         setTimeout(function() {
           var displayEl = document.querySelector('[data-testid="simple_switcher_selected_option_display"]');
@@ -204,7 +209,11 @@ export const buildAmexJsonCaptureJs = () => `
       // Amex can send the same card more than once while a page of offers
       // arrives or a filter refresh finishes. Keep the fullest payload and
       // post it once, after the responses go quiet.
-      function fireCapture(jsonText) {
+      // sentGen is the capture generation when the request started. A reply
+      // from the previous card must not replace this card's offers.
+      function fireCapture(jsonText, sentGen) {
+        var currentGen = window.__amexCaptureGeneration || 0;
+        if (sentGen != null && sentGen !== currentGen) return;
         ++window.__amexCallCounter;
         try {
           var parsed = JSON.parse(jsonText);
@@ -238,9 +247,10 @@ export const buildAmexJsonCaptureJs = () => `
           };
           var origSend = xhr.send.bind(xhr);
           xhr.send = function() {
+            var sentGen = window.__amexCaptureGeneration || 0;
             if (_url.includes('ReadOffersHubPresentation')) {
               xhr.addEventListener('load', function() {
-                if (xhr.status >= 200 && xhr.status < 300) fireCapture(xhr.responseText, 'XHR');
+                if (xhr.status >= 200 && xhr.status < 300) fireCapture(xhr.responseText, sentGen);
               });
             }
             return origSend.apply(xhr, arguments);
@@ -256,12 +266,13 @@ export const buildAmexJsonCaptureJs = () => `
         var origFetch = window.fetch;
         window.fetch = function(input, init) {
           var url = (typeof input === 'string' ? input : (input && input.url)) || '';
+          var sentGen = window.__amexCaptureGeneration || 0;
           var p = origFetch.apply(window, arguments);
           if (url.includes('ReadOffersHubPresentation')) {
             p = p.then(function(response) {
               var cloned = response.clone();
               cloned.text().then(function(text) {
-                if (response.ok) fireCapture(text, 'fetch');
+                if (response.ok) fireCapture(text, sentGen);
               });
               return response;
             });
