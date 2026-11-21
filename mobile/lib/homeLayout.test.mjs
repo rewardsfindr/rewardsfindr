@@ -7,9 +7,14 @@ import {
   HOME_TAB_SLOTS,
   HOME_TAB_COMING_SOON_MESSAGE,
   ACCOUNT_TAB_INDEX,
+  HOME_TAB_INDEX,
+  OFFERS_TAB_INDEX,
+  HISTORY_TAB_INDEX,
   selectedHomeTabIndex,
   isPlaceholderTab,
   isAccountTab,
+  tabIndexForRoute,
+  routeForTabIndex,
 } from '../components/homeLayout.js';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -19,15 +24,29 @@ test('home bottom bar has exactly 5 slots with Home first', () => {
   assert.equal(HOME_TAB_SLOTS[0].id, 'home');
   assert.equal(HOME_TAB_SLOTS[0].placeholder, false);
   assert.equal(selectedHomeTabIndex(), 0);
+  assert.equal(HOME_TAB_INDEX, 0);
 });
 
-test('tabs 1–3 are Coming soon placeholders; tab 4 is Account', () => {
+test('Offers and History are real tabs; Cards stays Coming soon; Account unchanged', () => {
   assert.equal(HOME_TAB_COMING_SOON_MESSAGE, 'Coming soon');
-  for (let i = 1; i <= 3; i++) {
-    assert.equal(isPlaceholderTab(i), true);
-    assert.equal(HOME_TAB_SLOTS[i].placeholder, true);
-  }
-  assert.equal(isPlaceholderTab(0), false);
+
+  assert.equal(HOME_TAB_SLOTS[1].id, 'offers');
+  assert.equal(HOME_TAB_SLOTS[1].icon, 'pricetag');
+  assert.equal(HOME_TAB_SLOTS[1].iconOutline, 'pricetag-outline');
+  assert.equal(HOME_TAB_SLOTS[1].placeholder, false);
+  assert.equal(isPlaceholderTab(OFFERS_TAB_INDEX), false);
+
+  assert.equal(HOME_TAB_SLOTS[2].id, 'cards');
+  assert.equal(HOME_TAB_SLOTS[2].placeholder, true);
+  assert.equal(isPlaceholderTab(2), true);
+
+  assert.equal(HOME_TAB_SLOTS[3].id, 'history');
+  assert.equal(HOME_TAB_SLOTS[3].label, 'History');
+  assert.equal(HOME_TAB_SLOTS[3].icon, 'time');
+  assert.equal(HOME_TAB_SLOTS[3].iconOutline, 'time-outline');
+  assert.equal(HOME_TAB_SLOTS[3].placeholder, false);
+  assert.equal(isPlaceholderTab(HISTORY_TAB_INDEX), false);
+
   assert.equal(ACCOUNT_TAB_INDEX, 4);
   assert.equal(HOME_TAB_SLOTS[4].id, 'account');
   assert.equal(HOME_TAB_SLOTS[4].label, 'Account');
@@ -37,6 +56,23 @@ test('tabs 1–3 are Coming soon placeholders; tab 4 is Account', () => {
   assert.equal(isPlaceholderTab(4), false);
   assert.equal(isAccountTab(4), true);
   assert.equal(isAccountTab(0), false);
+});
+
+test('tabIndexForRoute and routeForTabIndex map Home / Offers / History', () => {
+  assert.equal(tabIndexForRoute('/'), HOME_TAB_INDEX);
+  assert.equal(tabIndexForRoute('index'), HOME_TAB_INDEX);
+  assert.equal(tabIndexForRoute('offers'), OFFERS_TAB_INDEX);
+  assert.equal(tabIndexForRoute('/offers'), OFFERS_TAB_INDEX);
+  assert.equal(tabIndexForRoute('history'), HISTORY_TAB_INDEX);
+  assert.equal(tabIndexForRoute('/history'), HISTORY_TAB_INDEX);
+  assert.equal(tabIndexForRoute('results'), -1);
+  assert.equal(tabIndexForRoute('login'), -1);
+
+  assert.equal(routeForTabIndex(0), '/');
+  assert.equal(routeForTabIndex(1), '/offers');
+  assert.equal(routeForTabIndex(3), '/history');
+  assert.equal(routeForTabIndex(2), null);
+  assert.equal(routeForTabIndex(4), null);
 });
 
 test('home screen wires brand, banks, picker, account tab, and safe-area top without HomeHeader', () => {
@@ -54,15 +90,36 @@ test('home screen wires brand, banks, picker, account tab, and safe-area top wit
   assert.match(index, /onAccountPress/);
   assert.match(index, /Sign Out/);
   assert.match(index, /signOut/);
+  assert.match(index, /recordSearch/);
   assert.equal(index.includes('HomeHeader'), false);
   assert.equal(fs.existsSync(path.join(root, 'components/HomeHeader.js')), false);
   assert.match(tabBar, /onAccountPress/);
   assert.match(tabBar, /isAccountTab/);
+  assert.match(tabBar, /routeForTabIndex/);
+  assert.match(tabBar, /router\.replace/);
   assert.equal(tabBar.includes('initials'), false);
   assert.equal(bankGrid.includes('SYNC YOUR BANKS'), false);
   assert.equal(bankGrid.includes('Sync your banks'), false);
   assert.match(bankGrid, /Sync Bank/);
   assert.equal(/Coming Soon/.test(bankGrid), false);
+});
+
+test('offers and history screens exist with tab bar; layout registers routes; no tabs group', () => {
+  const offers = fs.readFileSync(path.join(root, 'app/offers.js'), 'utf8');
+  const history = fs.readFileSync(path.join(root, 'app/history.js'), 'utf8');
+  const layout = fs.readFileSync(path.join(root, 'app/_layout.js'), 'utf8');
+  assert.match(offers, /HomeBottomTabBar/);
+  assert.match(offers, /OFFERS_TAB_INDEX/);
+  assert.match(offers, /loadOffers/);
+  assert.match(offers, /classifyOfferCategory|filterOffersForChips|OFFER_CATEGORY_CHIPS/);
+  assert.match(history, /HomeBottomTabBar/);
+  assert.match(history, /HISTORY_TAB_INDEX/);
+  assert.match(history, /loadSearchHistory/);
+  assert.match(history, /Clear/);
+  assert.match(layout, /name="offers"/);
+  assert.match(layout, /name="history"/);
+  assert.equal(layout.includes('(tabs)'), false);
+  assert.equal(fs.existsSync(path.join(root, 'app/(tabs)')), false);
 });
 
 test('home no longer mounts Popular Stores or Example Rewards', () => {
