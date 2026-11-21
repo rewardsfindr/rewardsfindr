@@ -92,6 +92,14 @@ export function classifyOfferCategory(offer) {
   return CATEGORIES.OTHER;
 }
 
+/** Classify once per catalog load; chip taps must not re-run heuristics. */
+export function enrichOffersWithCategoryKey(offers) {
+  return (offers || []).map((offer) => ({
+    ...offer,
+    categoryKey: categoryForChip(classifyOfferCategory(offer)),
+  }));
+}
+
 export function banksPresentInOffers(offers) {
   const seen = new Set();
   const ordered = [];
@@ -120,11 +128,30 @@ export function bankChipLabel(bank) {
   return BANK_CHIP_LABELS[bank] || String(bank).replace(/_/g, ' ');
 }
 
-export function offerMatchesFilters(offer, { category = 'all', bank = 'all' } = {}) {
-  if (bank !== 'all' && offer?.bank !== bank) return false;
+/** Empty / missing banks ⇒ no bank constraint. Accepts array or Set. */
+export function normalizeSelectedBanks(banks) {
+  if (!banks) return null;
+  if (banks instanceof Set) return banks.size > 0 ? banks : null;
+  if (Array.isArray(banks)) return banks.length > 0 ? new Set(banks) : null;
+  return null;
+}
+
+function resolveCategoryKey(offer) {
+  if (offer?.categoryKey) return offer.categoryKey;
+  return categoryForChip(classifyOfferCategory(offer));
+}
+
+/**
+ * Filter enriched (or raw) offers.
+ * @param {{ category?: string, banks?: string[]|Set, bank?: string }} filters
+ *   `banks` empty = all banks. Legacy `bank: 'all'|id` still accepted.
+ */
+export function offerMatchesFilters(offer, { category = 'all', banks, bank = 'all' } = {}) {
+  let bankSet = normalizeSelectedBanks(banks);
+  if (!bankSet && bank && bank !== 'all') bankSet = new Set([bank]);
+  if (bankSet && !bankSet.has(offer?.bank)) return false;
   if (category === 'all') return true;
-  const classified = categoryForChip(classifyOfferCategory(offer));
-  return classified === category;
+  return resolveCategoryKey(offer) === category;
 }
 
 export function filterOffersForChips(offers, filters) {

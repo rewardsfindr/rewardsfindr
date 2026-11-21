@@ -1,12 +1,14 @@
 // ─────────────────────────────────────────────
-// OFFERS TAB — on-device catalog with category + bank chips
+// OFFERS TAB — on-device catalog with category strip + Banks sheet
+// Classify once into categoryKey; chip taps only filter.
 // ─────────────────────────────────────────────
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState, startTransition } from 'react';
 import {
   View, Text, FlatList, TouchableOpacity, Alert, StyleSheet, ActivityIndicator,
 } from 'react-native';
 import { useFocusEffect, useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { Ionicons } from '@expo/vector-icons';
 import { signOut } from 'firebase/auth';
 import { getAuthInstance } from '../lib/firebaseClient.js';
 import { loadOffers, searchStoredOffers } from '../lib/offerStore.js';
@@ -15,38 +17,71 @@ import { BANK_COLORS, bankLabel } from '../lib/resultsBankDisplay.js';
 import {
   OFFER_CATEGORY_CHIPS,
   banksPresentInOffers,
-  bankChipLabel,
+  enrichOffersWithCategoryKey,
   filterOffersForChips,
   sortOffersForList,
   formatOfferReward,
 } from '../lib/offerFilters.js';
 import OffersFilterChips from '../components/OffersFilterChips.js';
+import OffersBankFilterSheet from '../components/OffersBankFilterSheet.js';
 import HomeBottomTabBar from '../components/HomeBottomTabBar.js';
 import { OFFERS_TAB_INDEX } from '../components/homeLayout.js';
 import { colors, radii } from '../shared/theme.js';
+
+function OfferListRow({ item, onPress }) {
+  const expiry = formatOfferExpiry(item);
+  return (
+    <TouchableOpacity
+      style={s.row}
+      onPress={() => onPress(item)}
+      accessibilityRole="button"
+      accessibilityLabel={`${item.merchantName} offer`}
+    >
+      <View style={s.rowMain}>
+        <Text style={s.merchant} numberOfLines={1}>{item.merchantName}</Text>
+        {!!item.cardName && (
+          <Text style={s.cardName} numberOfLines={1}>{item.cardName}</Text>
+        )}
+        {!!expiry && (
+          <Text style={s.expiry} numberOfLines={1}>{expiry}</Text>
+        )}
+      </View>
+      <View style={s.rowRight}>
+        <Text style={s.reward}>
+          {formatOfferReward(item.cashbackAmount, item.cashbackType)}
+        </Text>
+        <View style={[s.bankPill, { backgroundColor: BANK_COLORS[item.bank] || colors.primary }]}>
+          <Text style={s.bankPillText}>{bankLabel(item.bank)}</Text>
+        </View>
+      </View>
+    </TouchableOpacity>
+  );
+}
 
 export default function OffersScreen() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
   const user = getAuthInstance().currentUser;
 
-  const [offers, setOffers] = useState([]);
+  const [enriched, setEnriched] = useState([]);
   const [loading, setLoading] = useState(true);
   const [category, setCategory] = useState('all');
-  const [bank, setBank] = useState('all');
+  const [selectedBanks, setSelectedBanks] = useState([]);
+  const [bankSheetOpen, setBankSheetOpen] = useState(false);
 
   const refresh = useCallback(async () => {
     if (!user?.uid) {
-      setOffers([]);
+      setEnriched([]);
       setLoading(false);
       return;
     }
     setLoading(true);
     try {
       const rows = await loadOffers(user.uid);
-      setOffers(Array.isArray(rows) ? rows : []);
+      // Classify once per load — chip taps must not re-run heuristics.
+      setEnriched(enrichOffersWithCategoryKey(Array.isArray(rows) ? rows : []));
     } catch {
-      setOffers([]);
+      setEnriched([]);
     } finally {
       setLoading(false);
     }
@@ -58,25 +93,41 @@ export default function OffersScreen() {
     }, [refresh])
   );
 
-  useEffect(() => {
-    // If selected bank disappears after a refresh, reset that axis.
-    if (bank === 'all') return;
-    const present = banksPresentInOffers(offers);
-    if (!present.includes(bank)) setBank('all');
-  }, [offers, bank]);
+  const availableBanks = useMemo(
+    () => banksPresentInOffers(enriched),
+    [enriched]
+  );
 
-  const bankChips = useMemo(() => {
-    const present = banksPresentInOffers(offers);
-    return [
-      { key: 'all', label: 'All' },
-      ...present.map((id) => ({ key: id, label: bankChipLabel(id) })),
-    ];
-  }, [offers]);
+  useEffect(() => {
+    // Drop bank ids that disappeared after a catalog refresh.
+    setSelectedBanks((prev) => {
+      if (prev.length === 0) return prev;
+      const present = new Set(availableBanks);
+      const next = prev.filter((id) => present.has(id));
+      return next.length === prev.length ? prev : next;
+    });
+  }, [availableBanks]);
 
   const filtered = useMemo(
-    () => sortOffersForList(filterOffersForChips(offers, { category, bank })),
-    [offers, category, bank]
+    () => sortOffersForList(filterOffersForChips(enriched, { category, banks: selectedBanks })),
+    [enriched, category, selectedBanks]
   );
+
+  const onSelectCategory = (key) => {
+    startTransition(() => setCategory(key));
+  };
+
+  const toggleBank = (id) => {
+    startTransition(() => {
+      setSelectedBanks((prev) => (
+        prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]
+      ));
+    });
+  };
+
+  const clearBanks = () => {
+    startTransition(() => setSelectedBanks([]));
+  };
 
   const handleAccountPress = () => {
     if (!user) return;
@@ -111,8 +162,31 @@ export default function OffersScreen() {
     }
   };
 
-  const emptyCatalog = !loading && offers.length === 0;
-  const emptyFilters = !loading && offers.length > 0 && filtered.length === 0;
+  const emptyCatalog = !loading && enriched.length === 0;
+  const emptyFilters = !loading && enriched.length > 0 && filtered.length === 0;
+  const bankCount = selectedBanks.length;
+  const banksActive = bankCount > 0;
+
+  const banksTrailing = (
+    <TouchableOpacity
+      style={[s.banksBtn, banksActive ? s.banksBtnActive : s.banksBtnIdle]}
+      onPress={() => setBankSheetOpen(true)}
+      accessibilityRole="button"
+      accessibilityLabel={banksActive ? `Banks, ${bankCount} selected` : 'Banks'}
+    >
+      <Ionicons
+        name="business-outline"
+        size={14}
+        color={banksActive ? colors.textPrimary : colors.textOnDark}
+      />
+      <Text style={[s.banksBtnText, banksActive && s.banksBtnTextActive]}>Banks</Text>
+      {banksActive ? (
+        <View style={s.badge}>
+          <Text style={s.badgeText}>{bankCount}</Text>
+        </View>
+      ) : null}
+    </TouchableOpacity>
+  );
 
   return (
     <View style={[s.safe, { paddingTop: insets.top }]}>
@@ -125,12 +199,8 @@ export default function OffersScreen() {
         <OffersFilterChips
           chips={OFFER_CATEGORY_CHIPS}
           selectedKey={category}
-          onSelect={setCategory}
-        />
-        <OffersFilterChips
-          chips={bankChips}
-          selectedKey={bank}
-          onSelect={setBank}
+          onSelect={onSelectCategory}
+          trailing={banksTrailing}
         />
       </View>
 
@@ -155,40 +225,25 @@ export default function OffersScreen() {
             data={filtered}
             keyExtractor={(item, index) => item.id || `${item.bank}-${item.merchantName}-${index}`}
             contentContainerStyle={s.listContent}
-            renderItem={({ item }) => {
-              const expiry = formatOfferExpiry(item);
-              return (
-                <TouchableOpacity
-                  style={s.row}
-                  onPress={() => openOffer(item)}
-                  accessibilityRole="button"
-                  accessibilityLabel={`${item.merchantName} offer`}
-                >
-                  <View style={s.rowMain}>
-                    <Text style={s.merchant} numberOfLines={1}>{item.merchantName}</Text>
-                    {!!item.cardName && (
-                      <Text style={s.cardName} numberOfLines={1}>{item.cardName}</Text>
-                    )}
-                    {!!expiry && (
-                      <Text style={s.expiry} numberOfLines={1}>{expiry}</Text>
-                    )}
-                  </View>
-                  <View style={s.rowRight}>
-                    <Text style={s.reward}>
-                      {formatOfferReward(item.cashbackAmount, item.cashbackType)}
-                    </Text>
-                    <View style={[s.bankPill, { backgroundColor: BANK_COLORS[item.bank] || colors.primary }]}>
-                      <Text style={s.bankPillText}>{bankLabel(item.bank)}</Text>
-                    </View>
-                  </View>
-                </TouchableOpacity>
-              );
-            }}
+            renderItem={({ item }) => <OfferListRow item={item} onPress={openOffer} />}
+            initialNumToRender={12}
+            windowSize={7}
+            maxToRenderPerBatch={12}
+            removeClippedSubviews
           />
         )}
       </View>
 
       <HomeBottomTabBar selectedIndex={OFFERS_TAB_INDEX} onAccountPress={handleAccountPress} />
+
+      <OffersBankFilterSheet
+        visible={bankSheetOpen}
+        bankIds={availableBanks}
+        selectedBanks={selectedBanks}
+        onToggle={toggleBank}
+        onClear={clearBanks}
+        onClose={() => setBankSheetOpen(false)}
+      />
     </View>
   );
 }
@@ -199,6 +254,38 @@ const s = StyleSheet.create({
   title: { color: colors.textOnDark, fontSize: 18, fontWeight: '700' },
   subtitle: { color: colors.textOnDarkSub, fontSize: 12, marginTop: 2 },
   chipsBlock: { backgroundColor: colors.bgHeader, paddingBottom: 4 },
+  banksBtn: {
+    flexShrink: 0,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 5,
+    paddingVertical: 6,
+    paddingHorizontal: 10,
+    borderRadius: radii.full,
+  },
+  banksBtnIdle: {
+    backgroundColor: 'rgba(255,255,255,0.12)',
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: 'rgba(255,255,255,0.18)',
+  },
+  banksBtnActive: {
+    backgroundColor: colors.bgCard,
+    borderWidth: 1,
+    borderColor: colors.primaryLight,
+    paddingRight: 8,
+  },
+  banksBtnText: { fontSize: 11, fontWeight: '700', color: colors.textOnDark },
+  banksBtnTextActive: { color: colors.textPrimary },
+  badge: {
+    minWidth: 16,
+    height: 16,
+    paddingHorizontal: 4,
+    borderRadius: radii.full,
+    backgroundColor: colors.primaryLight,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  badgeText: { fontSize: 10, fontWeight: '800', color: colors.bgHeader },
   listWrap: { flex: 1, backgroundColor: colors.bgPage },
   listContent: { paddingHorizontal: 12, paddingTop: 8, paddingBottom: 16 },
   loader: { marginTop: 48 },

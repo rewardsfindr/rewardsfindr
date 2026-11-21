@@ -3,12 +3,14 @@ import assert from 'node:assert/strict';
 import {
   classifyOfferCategory,
   categoryForChip,
+  enrichOffersWithCategoryKey,
   offerMatchesFilters,
   filterOffersForChips,
   sortOffersForList,
   banksPresentInOffers,
   bankChipLabel,
   formatOfferReward,
+  normalizeSelectedBanks,
   OFFER_CATEGORY_CHIPS,
 } from './offerFilters.js';
 import { CATEGORIES } from '../shared/constants.js';
@@ -64,31 +66,44 @@ test('categoryForChip rolls drugstore/subscription into other', () => {
   assert.equal(categoryForChip(CATEGORIES.SUBSCRIPTION), 'other');
 });
 
-test('filterOffersForChips applies category AND bank', () => {
-  const offers = [
-    { merchantName: 'Starbucks', category: 'other', bank: 'chase', cashbackAmount: 5 },
-    { merchantName: 'Nike', category: 'other', bank: 'citi', cashbackAmount: 3 },
-    { merchantName: 'Chevron', category: 'gas', bank: 'wells_fargo', cashbackAmount: 5 },
-    { merchantName: 'Unknown Mart', category: 'other', bank: 'chase', cashbackAmount: 2 },
-  ];
-
-  const foodChase = filterOffersForChips(offers, { category: 'dining', bank: 'chase' });
-  assert.equal(foodChase.length, 1);
-  assert.equal(foodChase[0].merchantName, 'Starbucks');
-
-  const otherAll = filterOffersForChips(offers, { category: 'other', bank: 'all' });
-  assert.deepEqual(otherAll.map((o) => o.merchantName), ['Unknown Mart']);
-
-  const allWells = filterOffersForChips(offers, { category: 'all', bank: 'wells_fargo' });
-  assert.equal(allWells.length, 1);
-  assert.equal(allWells[0].merchantName, 'Chevron');
+test('enrichOffersWithCategoryKey classifies once into categoryKey', () => {
+  const enriched = enrichOffersWithCategoryKey([
+    { merchantName: 'Starbucks', category: 'other', bank: 'chase' },
+    { merchantName: 'Mystery', category: 'other', bank: 'citi' },
+  ]);
+  assert.equal(enriched[0].categoryKey, 'dining');
+  assert.equal(enriched[1].categoryKey, 'other');
+  // Same object fields preserved.
+  assert.equal(enriched[0].bank, 'chase');
 });
 
-test('offerMatchesFilters treats All as no-op on each axis', () => {
-  const offer = { merchantName: 'Nike', category: 'other', bank: 'citi' };
-  assert.equal(offerMatchesFilters(offer, { category: 'all', bank: 'all' }), true);
-  assert.equal(offerMatchesFilters(offer, { category: 'shopping', bank: 'all' }), true);
-  assert.equal(offerMatchesFilters(offer, { category: 'all', bank: 'chase' }), false);
+test('filterOffersForChips uses precomputed categoryKey without needing raw category', () => {
+  const enriched = [
+    { merchantName: 'A', categoryKey: 'dining', bank: 'chase', cashbackAmount: 5 },
+    { merchantName: 'B', categoryKey: 'shopping', bank: 'citi', cashbackAmount: 3 },
+    { merchantName: 'C', categoryKey: 'gas', bank: 'wells_fargo', cashbackAmount: 5 },
+    { merchantName: 'D', categoryKey: 'other', bank: 'chase', cashbackAmount: 2 },
+  ];
+
+  const foodChase = filterOffersForChips(enriched, { category: 'dining', banks: ['chase'] });
+  assert.equal(foodChase.length, 1);
+  assert.equal(foodChase[0].merchantName, 'A');
+
+  const multi = filterOffersForChips(enriched, { category: 'all', banks: ['chase', 'citi'] });
+  assert.deepEqual(multi.map((o) => o.merchantName), ['A', 'B', 'D']);
+
+  const emptyBanks = filterOffersForChips(enriched, { category: 'other', banks: [] });
+  assert.deepEqual(emptyBanks.map((o) => o.merchantName), ['D']);
+});
+
+test('offerMatchesFilters treats empty banks as all; supports multi-select', () => {
+  const offer = { merchantName: 'Nike', categoryKey: 'shopping', bank: 'citi' };
+  assert.equal(offerMatchesFilters(offer, { category: 'all', banks: [] }), true);
+  assert.equal(offerMatchesFilters(offer, { category: 'shopping', banks: [] }), true);
+  assert.equal(offerMatchesFilters(offer, { category: 'all', banks: ['chase'] }), false);
+  assert.equal(offerMatchesFilters(offer, { category: 'all', banks: ['chase', 'citi'] }), true);
+  assert.equal(normalizeSelectedBanks([]), null);
+  assert.equal(normalizeSelectedBanks(['chase']).has('chase'), true);
 });
 
 test('sortOffersForList is merchant A–Z then higher cashback', () => {

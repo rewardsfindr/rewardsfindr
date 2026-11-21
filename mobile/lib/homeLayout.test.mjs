@@ -113,7 +113,12 @@ test('offers and history screens exist with tab bar; layout registers routes; no
   assert.match(offers, /HomeBottomTabBar/);
   assert.match(offers, /OFFERS_TAB_INDEX/);
   assert.match(offers, /loadOffers/);
-  assert.match(offers, /classifyOfferCategory|filterOffersForChips|OFFER_CATEGORY_CHIPS/);
+  assert.match(offers, /enrichOffersWithCategoryKey|filterOffersForChips|OFFER_CATEGORY_CHIPS/);
+  assert.match(offers, /OffersBankFilterSheet/);
+  assert.match(offers, /startTransition/);
+  assert.equal(offers.includes('bankChips'), false);
+  assert.equal(HOME_TAB_SLOTS[1].icon, 'gift');
+  assert.equal(HOME_TAB_SLOTS[2].icon, 'grid');
   assert.match(history, /HomeBottomTabBar/);
   assert.match(history, /HISTORY_TAB_INDEX/);
   assert.match(history, /loadSearchHistory/);
