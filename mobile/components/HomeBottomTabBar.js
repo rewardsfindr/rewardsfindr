@@ -1,8 +1,7 @@
 // ─────────────────────────────────────────────
 // HOME BOTTOM TAB BAR
-// Custom 5-slot bar on Home / Offers / History.
-// Home, Offers, History → replace routes.
-// Cards → Coming soon. Account → sign-out confirm.
+// Custom 5-slot bar on Home / Offers / History / Account.
+// Cards → Coming soon. Real tabs → router.replace.
 // ─────────────────────────────────────────────
 import React from 'react';
 import { View, TouchableOpacity, Alert, StyleSheet } from 'react-native';
@@ -14,23 +13,17 @@ import {
   HOME_TAB_SLOTS,
   HOME_TAB_COMING_SOON_MESSAGE,
   selectedHomeTabIndex,
-  isAccountTab,
   isPlaceholderTab,
   routeForTabIndex,
 } from './homeLayout.js';
 
 export default function HomeBottomTabBar({
   selectedIndex = selectedHomeTabIndex(),
-  onAccountPress,
 }) {
   const insets = useSafeAreaInsets();
   const router = useRouter();
 
   const onPress = (index) => {
-    if (isAccountTab(index)) {
-      onAccountPress?.();
-      return;
-    }
     if (isPlaceholderTab(index)) {
       Alert.alert(HOME_TAB_COMING_SOON_MESSAGE);
       return;

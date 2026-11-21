@@ -60,24 +60,26 @@ test('Offers and History are real tabs; Cards stays Coming soon; Account unchang
   assert.equal(isAccountTab(0), false);
 });
 
-test('tabIndexForRoute and routeForTabIndex map Home / Offers / History', () => {
+test('tabIndexForRoute and routeForTabIndex map Home / Offers / History / Account', () => {
   assert.equal(tabIndexForRoute('/'), HOME_TAB_INDEX);
   assert.equal(tabIndexForRoute('index'), HOME_TAB_INDEX);
   assert.equal(tabIndexForRoute('offers'), OFFERS_TAB_INDEX);
   assert.equal(tabIndexForRoute('/offers'), OFFERS_TAB_INDEX);
   assert.equal(tabIndexForRoute('history'), HISTORY_TAB_INDEX);
   assert.equal(tabIndexForRoute('/history'), HISTORY_TAB_INDEX);
+  assert.equal(tabIndexForRoute('account'), ACCOUNT_TAB_INDEX);
+  assert.equal(tabIndexForRoute('/account'), ACCOUNT_TAB_INDEX);
   assert.equal(tabIndexForRoute('results'), -1);
   assert.equal(tabIndexForRoute('login'), -1);
 
   assert.equal(routeForTabIndex(0), '/');
   assert.equal(routeForTabIndex(1), '/offers');
   assert.equal(routeForTabIndex(3), '/history');
+  assert.equal(routeForTabIndex(4), '/account');
   assert.equal(routeForTabIndex(2), null);
-  assert.equal(routeForTabIndex(4), null);
 });
 
-test('home screen wires brand, banks, picker, account tab, and safe-area top without HomeHeader', () => {
+test('home screen wires brand, banks, picker, and safe-area top without HomeHeader', () => {
   const index = fs.readFileSync(path.join(root, 'app/index.js'), 'utf8');
   const tabBar = fs.readFileSync(path.join(root, 'components/HomeBottomTabBar.js'), 'utf8');
   const bankGrid = fs.readFileSync(path.join(root, 'components/BankGrid.js'), 'utf8');
@@ -89,14 +91,12 @@ test('home screen wires brand, banks, picker, account tab, and safe-area top wit
   assert.match(index, /SyncWebView/);
   assert.match(index, /useSafeAreaInsets/);
   assert.match(index, /paddingTop:\s*insets\.top/);
-  assert.match(index, /onAccountPress/);
-  assert.match(index, /Sign Out/);
-  assert.match(index, /signOut/);
   assert.match(index, /recordSearch/);
   assert.equal(index.includes('HomeHeader'), false);
   assert.equal(fs.existsSync(path.join(root, 'components/HomeHeader.js')), false);
-  assert.match(tabBar, /onAccountPress/);
-  assert.match(tabBar, /isAccountTab/);
+  assert.equal(index.includes('onAccountPress'), false);
+  assert.equal(index.includes('Sign Out'), false);
+  assert.equal(tabBar.includes('onAccountPress'), false);
   assert.match(tabBar, /routeForTabIndex/);
   assert.match(tabBar, /router\.replace/);
   assert.equal(tabBar.includes('initials'), false);
@@ -106,9 +106,10 @@ test('home screen wires brand, banks, picker, account tab, and safe-area top wit
   assert.equal(/Coming Soon/.test(bankGrid), false);
 });
 
-test('offers and history screens exist with tab bar; layout registers routes; no tabs group', () => {
+test('offers, history, and account screens exist with tab bar; layout registers routes; no tabs group', () => {
   const offers = fs.readFileSync(path.join(root, 'app/offers.js'), 'utf8');
   const history = fs.readFileSync(path.join(root, 'app/history.js'), 'utf8');
+  const account = fs.readFileSync(path.join(root, 'app/account.js'), 'utf8');
   const layout = fs.readFileSync(path.join(root, 'app/_layout.js'), 'utf8');
   assert.match(offers, /HomeBottomTabBar/);
   assert.match(offers, /OFFERS_TAB_INDEX/);
@@ -123,8 +124,13 @@ test('offers and history screens exist with tab bar; layout registers routes; no
   assert.match(history, /HISTORY_TAB_INDEX/);
   assert.match(history, /loadSearchHistory/);
   assert.match(history, /Clear/);
+  assert.match(account, /HomeBottomTabBar/);
+  assert.match(account, /ACCOUNT_TAB_INDEX/);
+  assert.match(account, /Log out/);
+  assert.equal(account.toLowerCase().includes('delete account'), false);
   assert.match(layout, /name="offers"/);
   assert.match(layout, /name="history"/);
+  assert.match(layout, /name="account"/);
   assert.equal(layout.includes('(tabs)'), false);
   assert.equal(fs.existsSync(path.join(root, 'app/(tabs)')), false);
 });

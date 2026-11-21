@@ -19,6 +19,7 @@ const ROUTE_BY_TAB = {
   0: '/',
   1: '/offers',
   3: '/history',
+  4: '/account',
 };
 
 const TAB_BY_SEGMENT = {
@@ -26,6 +27,7 @@ const TAB_BY_SEGMENT = {
   '': 0,
   offers: 1,
   history: 3,
+  account: 4,
 };
 
 /** Selected tab index on the home route (`/`). */
@@ -53,7 +55,7 @@ export function tabIndexForRoute(segmentOrPath) {
   return -1;
 }
 
-/** Stack path for a real (non-placeholder, non-account) tab, or null. */
+/** Stack path for a real (non-placeholder) tab, or null. */
 export function routeForTabIndex(index) {
   return ROUTE_BY_TAB[index] ?? null;
 }

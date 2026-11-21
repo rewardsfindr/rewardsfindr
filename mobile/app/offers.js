@@ -9,7 +9,6 @@ import {
 import { useFocusEffect, useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
-import { signOut } from 'firebase/auth';
 import { getAuthInstance } from '../lib/firebaseClient.js';
 import { loadOffers, searchStoredOffers } from '../lib/offerStore.js';
 import { resultsRouteParams, formatOfferExpiry } from '../lib/savedOffers.js';
@@ -129,28 +128,6 @@ export default function OffersScreen() {
     startTransition(() => setSelectedBanks([]));
   };
 
-  const handleAccountPress = () => {
-    if (!user) return;
-    Alert.alert(
-      'Sign Out',
-      'Are you sure you want to sign out?',
-      [
-        { text: 'Cancel', style: 'cancel' },
-        {
-          text: 'Sign Out',
-          style: 'destructive',
-          onPress: async () => {
-            try {
-              await signOut(getAuthInstance());
-            } catch {
-              Alert.alert('Error', 'Could not sign out. Please try again.');
-            }
-          },
-        },
-      ]
-    );
-  };
-
   const openOffer = async (offer) => {
     const query = String(offer?.merchantName || '').trim();
     if (!query || !user?.uid) return;
@@ -234,7 +211,7 @@ export default function OffersScreen() {
         )}
       </View>
 
-      <HomeBottomTabBar selectedIndex={OFFERS_TAB_INDEX} onAccountPress={handleAccountPress} />
+      <HomeBottomTabBar selectedIndex={OFFERS_TAB_INDEX} />
 
       <OffersBankFilterSheet
         visible={bankSheetOpen}

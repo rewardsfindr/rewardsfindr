@@ -7,7 +7,6 @@ import React, { useState, useEffect } from 'react';
 import { ScrollView, Alert, StyleSheet, View } from 'react-native';
 import { useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { signOut } from 'firebase/auth';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { getAuthInstance } from '../lib/firebaseClient.js';
 import { useSearch } from '../hooks/useSearch.js';
@@ -48,29 +47,6 @@ export default function HomeScreen() {
     if (!user?.uid || Object.keys(syncedBanks).length === 0) return;
     AsyncStorage.setItem(getSyncKey(user.uid), JSON.stringify(syncedBanks)).catch(() => {});
   }, [syncedBanks]);
-
-  const handleAccountPress = () => {
-    if (!user) return;
-    Alert.alert(
-      'Sign Out',
-      'Are you sure you want to sign out?',
-      [
-        { text: 'Cancel', style: 'cancel' },
-        {
-          text: 'Sign Out',
-          style: 'destructive',
-          onPress: async () => {
-            try {
-              await signOut(getAuthInstance());
-              setSyncedBanks({});
-            } catch {
-              Alert.alert('Error', 'Could not sign out. Please try again.');
-            }
-          },
-        },
-      ]
-    );
-  };
 
   const navigateToResults = (data, query) => {
     router.push(resultsRouteParams(query, data.offers));
@@ -143,7 +119,7 @@ export default function HomeScreen() {
         />
       </ScrollView>
 
-      <HomeBottomTabBar selectedIndex={HOME_TAB_INDEX} onAccountPress={handleAccountPress} />
+      <HomeBottomTabBar selectedIndex={HOME_TAB_INDEX} />
 
       <BankPickerSheet
         visible={pickerOpen}

@@ -8,7 +8,6 @@ import {
 import { useFocusEffect, useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
-import { signOut } from 'firebase/auth';
 import { getAuthInstance } from '../lib/firebaseClient.js';
 import { searchStoredOffers } from '../lib/offerStore.js';
 import { resultsRouteParams } from '../lib/savedOffers.js';
@@ -52,28 +51,6 @@ export default function HistoryScreen() {
       refresh();
     }, [refresh])
   );
-
-  const handleAccountPress = () => {
-    if (!user) return;
-    Alert.alert(
-      'Sign Out',
-      'Are you sure you want to sign out?',
-      [
-        { text: 'Cancel', style: 'cancel' },
-        {
-          text: 'Sign Out',
-          style: 'destructive',
-          onPress: async () => {
-            try {
-              await signOut(getAuthInstance());
-            } catch {
-              Alert.alert('Error', 'Could not sign out. Please try again.');
-            }
-          },
-        },
-      ]
-    );
-  };
 
   const onClear = () => {
     if (!user?.uid || entries.length === 0) return;
@@ -158,7 +135,7 @@ export default function HistoryScreen() {
         )}
       </View>
 
-      <HomeBottomTabBar selectedIndex={HISTORY_TAB_INDEX} onAccountPress={handleAccountPress} />
+      <HomeBottomTabBar selectedIndex={HISTORY_TAB_INDEX} />
     </View>
   );
 }
