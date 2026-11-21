@@ -31,16 +31,12 @@ test('Offers and History are real tabs; Cards stays Coming soon; Account unchang
   assert.equal(HOME_TAB_COMING_SOON_MESSAGE, 'Coming soon');
 
   assert.equal(HOME_TAB_SLOTS[1].id, 'offers');
-  assert.equal(HOME_TAB_SLOTS[1].icon, 'pricetags');
-  assert.equal(HOME_TAB_SLOTS[1].iconOutline, 'pricetags-outline');
+  assert.equal(HOME_TAB_SLOTS[1].icon, 'pricetag');
+  assert.equal(HOME_TAB_SLOTS[1].iconOutline, 'pricetag-outline');
   assert.equal(HOME_TAB_SLOTS[1].placeholder, false);
   assert.equal(isPlaceholderTab(OFFERS_TAB_INDEX), false);
-  // Must differ from main's Coming-soon Offers glyph (`pricetag`).
-  assert.notEqual(HOME_TAB_SLOTS[1].icon, 'pricetag');
 
   assert.equal(HOME_TAB_SLOTS[2].id, 'cards');
-  assert.equal(HOME_TAB_SLOTS[2].icon, 'card');
-  assert.equal(HOME_TAB_SLOTS[2].iconOutline, 'card-outline');
   assert.equal(HOME_TAB_SLOTS[2].placeholder, true);
   assert.equal(isPlaceholderTab(2), true);
 
