@@ -6,15 +6,13 @@ import React, { useCallback, useState } from 'react';
 import {
   View, Text, ScrollView, TouchableOpacity, Alert, StyleSheet, Linking,
 } from 'react-native';
-import { useFocusEffect } from 'expo-router';
+import { useFocusEffect, useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { signOut } from 'firebase/auth';
-import { getAuthInstance } from '../lib/firebaseClient.js';
+import { getAuthInstance } from '../../lib/firebaseClient.js';
 import {
-  SUPPORT_EMAIL,
-  SUPPORT_MAILTO,
   PRIVACY_URL,
   TERMS_URL,
   APP_VERSION,
@@ -22,10 +20,10 @@ import {
   accountInitials,
   syncedBanksSummary,
   formatAppVersion,
-} from '../lib/accountProfile.js';
-import HomeBottomTabBar from '../components/HomeBottomTabBar.js';
-import { ACCOUNT_TAB_INDEX } from '../components/homeLayout.js';
-import { colors, radii } from '../shared/theme.js';
+} from '../../lib/accountProfile.js';
+import HomeBottomTabBar from '../../components/HomeBottomTabBar.js';
+import { ACCOUNT_TAB_INDEX } from '../../components/homeLayout.js';
+import { colors, radii } from '../../shared/theme.js';
 
 const getSyncKey = (uid) => `rewardsfindr_synced_banks_${uid}`;
 
@@ -47,6 +45,7 @@ function ListRow({ title, subtitle, onPress, last }) {
 }
 
 export default function AccountScreen() {
+  const router = useRouter();
   const insets = useSafeAreaInsets();
   const user = getAuthInstance().currentUser;
   const [syncedBanks, setSyncedBanks] = useState({});
@@ -155,8 +154,8 @@ export default function AccountScreen() {
         <View style={s.listGroup}>
           <ListRow
             title="Contact support"
-            subtitle={SUPPORT_EMAIL}
-            onPress={() => openUrl(SUPPORT_MAILTO)}
+            subtitle="Opens a short form"
+            onPress={() => router.push('/account/support')}
           />
           <ListRow
             title="Privacy Policy"

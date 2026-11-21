@@ -72,13 +72,13 @@ test('syncedBanksSummary orders by BANK_LIST and handles zero', () => {
 });
 
 test('account screen and tab wiring exist', () => {
-  const account = fs.readFileSync(path.join(root, 'app/account.js'), 'utf8');
+  const account = fs.readFileSync(path.join(root, 'app/account/index.js'), 'utf8');
   const tabBar = fs.readFileSync(path.join(root, 'components/HomeBottomTabBar.js'), 'utf8');
   const layout = fs.readFileSync(path.join(root, 'app/_layout.js'), 'utf8');
   assert.match(account, /ACCOUNT_TAB_INDEX/);
   assert.match(account, /Log out/);
   assert.match(account, /signOut/);
-  assert.match(account, /SUPPORT_MAILTO|hello@rewardsfindr/);
+  assert.match(account, /\/account\/support/);
   assert.match(account, /PRIVACY_URL|TERMS_URL/);
   assert.equal(account.toLowerCase().includes('delete account'), false);
   assert.match(layout, /name="account"/);

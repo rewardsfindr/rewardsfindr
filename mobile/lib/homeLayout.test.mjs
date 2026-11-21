@@ -109,7 +109,7 @@ test('home screen wires brand, banks, picker, and safe-area top without HomeHead
 test('offers, history, and account screens exist with tab bar; layout registers routes; no tabs group', () => {
   const offers = fs.readFileSync(path.join(root, 'app/offers.js'), 'utf8');
   const history = fs.readFileSync(path.join(root, 'app/history.js'), 'utf8');
-  const account = fs.readFileSync(path.join(root, 'app/account.js'), 'utf8');
+  const account = fs.readFileSync(path.join(root, 'app/account/index.js'), 'utf8');
   const layout = fs.readFileSync(path.join(root, 'app/_layout.js'), 'utf8');
   assert.match(offers, /HomeBottomTabBar/);
   assert.match(offers, /OFFERS_TAB_INDEX/);
