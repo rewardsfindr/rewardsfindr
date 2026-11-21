@@ -17,6 +17,7 @@ import { resultsRouteParams, summarizeSyncCards } from '../lib/savedOffers.js';
 import HomeBrand        from '../components/HomeBrand.js';
 import SearchBar        from '../components/SearchBar.js';
 import BankGrid         from '../components/BankGrid.js';
+import BankPickerSheet  from '../components/BankPickerSheet.js';
 import HomeBottomTabBar from '../components/HomeBottomTabBar.js';
 import SyncWebView      from '../components/SyncWebView.js';
 import { colors }       from '../shared/theme.js';
@@ -29,6 +30,7 @@ export default function HomeScreen() {
   const { searchTerm, setSearchTerm, searching, error, clearSearch } = useSearch();
   const [localSearching, setLocalSearching] = useState(false);
   const [syncBank, setSyncBank] = useState(null);
+  const [pickerOpen, setPickerOpen] = useState(false);
   const [syncedBanks, setSyncedBanks] = useState({});
 
   const user = getAuthInstance().currentUser;
@@ -131,10 +133,21 @@ export default function HomeScreen() {
           syncedBanks={syncedBanks}
           syncingBank={syncBank}
           onSyncPress={setSyncBank}
+          onSyncBankPress={() => setPickerOpen(true)}
         />
       </ScrollView>
 
       <HomeBottomTabBar onAccountPress={handleAccountPress} />
+
+      <BankPickerSheet
+        visible={pickerOpen}
+        syncedBanks={syncedBanks}
+        onClose={() => setPickerOpen(false)}
+        onSelect={(bankId) => {
+          setPickerOpen(false);
+          setSyncBank(bankId);
+        }}
+      />
 
       <SyncWebView
         visible={syncBank !== null}

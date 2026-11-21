@@ -191,21 +191,22 @@ test('Citi opens Merchant Offers and is marked supported', () => {
 test('home BankGrid treats supported Citi as tappable (+ Add), not Coming Soon', () => {
   const citi = BANK_LIST.find(bank => bank.id === 'citi');
   assert.equal(citi.supported, true);
-
-  // Mirror BankGrid.js: disabled = !supported || syncing; Coming Soon only when !supported.
-  const syncingBank = null;
-  const disabled = !citi.supported || syncingBank === citi.id;
-  assert.equal(disabled, false);
   assert.equal(citi.supported ? '+ Add' : 'Coming Soon', '+ Add');
 
   const bankGridSource = readRepoFile('..', 'BankGrid.js');
-  assert.match(bankGridSource, /BANK_LIST/);
-  assert.match(bankGridSource, /!bank\.supported \|\| syncing/);
-  assert.match(bankGridSource, /Coming Soon/);
+  assert.match(bankGridSource, /visibleHomeBanks/);
+  assert.match(bankGridSource, /onSyncBankPress/);
+  assert.match(bankGridSource, /Sync Bank/);
   assert.match(bankGridSource, /onSyncPress\(bank\.id\)/);
+  assert.equal(bankGridSource.includes('Coming Soon'), false);
+
+  const homeBanksSource = readRepoFile('..', 'homeBanks.js');
+  assert.match(homeBanksSource, /pickerBanks/);
+  assert.equal(homeBanksSource.includes("id === 'citi'") || homeBanksSource.includes('BANK_LIST'), true);
 
   const homeSource = readRepoFile('..', '..', 'app', 'index.js');
   assert.match(homeSource, /BankGrid/);
+  assert.match(homeSource, /BankPickerSheet/);
   assert.match(homeSource, /SyncWebView/);
   assert.match(homeSource, /onSyncPress=\{setSyncBank\}/);
   assert.match(homeSource, /bank=\{syncBank\}/);

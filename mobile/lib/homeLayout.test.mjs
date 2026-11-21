@@ -39,13 +39,14 @@ test('tabs 1–3 are Coming soon placeholders; tab 4 is Account', () => {
   assert.equal(isAccountTab(0), false);
 });
 
-test('home screen wires brand, banks, account tab, and safe-area top without HomeHeader', () => {
+test('home screen wires brand, banks, picker, account tab, and safe-area top without HomeHeader', () => {
   const index = fs.readFileSync(path.join(root, 'app/index.js'), 'utf8');
   const tabBar = fs.readFileSync(path.join(root, 'components/HomeBottomTabBar.js'), 'utf8');
   const bankGrid = fs.readFileSync(path.join(root, 'components/BankGrid.js'), 'utf8');
   assert.match(index, /HomeBrand/);
   assert.match(index, /HomeBottomTabBar/);
   assert.match(index, /BankGrid/);
+  assert.match(index, /BankPickerSheet/);
   assert.match(index, /SearchBar/);
   assert.match(index, /SyncWebView/);
   assert.match(index, /useSafeAreaInsets/);
@@ -60,6 +61,8 @@ test('home screen wires brand, banks, account tab, and safe-area top without Hom
   assert.equal(tabBar.includes('initials'), false);
   assert.equal(bankGrid.includes('SYNC YOUR BANKS'), false);
   assert.equal(bankGrid.includes('Sync your banks'), false);
+  assert.match(bankGrid, /Sync Bank/);
+  assert.equal(/Coming Soon/.test(bankGrid), false);
 });
 
 test('home no longer mounts Popular Stores or Example Rewards', () => {
