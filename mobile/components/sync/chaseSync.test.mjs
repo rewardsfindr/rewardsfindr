@@ -3,8 +3,11 @@ import assert from 'node:assert/strict';
 import {
   buildCaptureOffersJs,
   buildChaseOfferCaptureJs,
+  buildChaseHookReadyProbeJs,
+  buildChasePauseCaptureJs,
   buildListCardsJs,
   buildSwitchCardJs,
+  CHASE_OFFER_HOOK_VERSION,
   mapChaseCustomerOffers,
   mergeDetectedCards,
   nextChaseCardPosition,
@@ -566,4 +569,42 @@ test('keeps a full card list when a later detection only sees the open card', ()
   const visibleOnly = [{ label: 'Sapphire Reserve (...2222)', index: 0 }];
   assert.equal(mergeDetectedCards(full, visibleOnly), full);
   assert.deepEqual(mergeDetectedCards([], visibleOnly), visibleOnly);
+});
+
+test('hook-ready probe posts CHASE_HOOK_READY only when version matches', () => {
+  const messages = [];
+  const window = {
+    __chaseOfferHookVersion: CHASE_OFFER_HOOK_VERSION,
+    ReactNativeWebView: { postMessage(raw) { messages.push(JSON.parse(raw)); } },
+  };
+  new Function('window', 'document', buildChaseHookReadyProbeJs())(window, {});
+  assert.equal(messages[0].type, 'CHASE_HOOK_READY');
+  assert.equal(messages[0].version, CHASE_OFFER_HOOK_VERSION);
+
+  messages.length = 0;
+  window.__chaseOfferHookVersion = 1;
+  new Function('window', 'document', buildChaseHookReadyProbeJs())(window, {});
+  assert.equal(messages.length, 0);
+});
+
+test('pause capture clears offer stash without touching generation', () => {
+  const window = {
+    __chaseCaptureGeneration: 3,
+    __chaseLastOfferCapture: { gridFound: true, offers: [{ merchantName: 'X' }] },
+    __chaseHookError: 'stale',
+  };
+  new Function('window', 'document', buildChasePauseCaptureJs())(window, {});
+  assert.equal(window.__chaseLastOfferCapture, null);
+  assert.equal(window.__chaseHookError, '');
+  assert.equal(window.__chaseCaptureGeneration, 3);
+});
+
+test('offer hook install still sets the current hook version', () => {
+  const window = {
+    XMLHttpRequest: function XHR() {},
+    fetch() { return Promise.resolve({ ok: true, clone() { return this; }, text() { return Promise.resolve('{}'); } }); },
+  };
+  window.XMLHttpRequest.prototype = { open() {}, send() {} };
+  new Function('window', 'document', buildChaseOfferCaptureJs())(window, {});
+  assert.equal(window.__chaseOfferHookVersion, CHASE_OFFER_HOOK_VERSION);
 });

@@ -7,6 +7,10 @@
 // The old mds-select markup is still handled.
 // ─────────────────────────────────────────────
 
+import { CHASE_OFFER_HOOK_VERSION } from './syncMode.js';
+
+export { CHASE_OFFER_HOOK_VERSION };
+
 export const CHASE_CREDIT_CARD_KEYWORDS = [
   'sapphire', 'freedom', 'flex', 'slate', 'ink', 'visa', 'united', 'marriott',
   'hyatt', 'southwest', 'amazon', 'prime', 'disney', 'starbucks', 'ihg',
@@ -204,12 +208,39 @@ export const mapChaseCustomerOffers = new Function(`
   return (${mapChaseCustomerOffersSource});
 `)();
 
+// Posts when the fetch/XHR offer hook is installed at the expected version.
+export const buildChaseHookReadyProbeJs = () => `
+  (function() {
+    try {
+      if (window.__chaseOfferHookVersion === ${CHASE_OFFER_HOOK_VERSION}) {
+        window.ReactNativeWebView.postMessage(JSON.stringify({
+          type: 'CHASE_HOOK_READY',
+          version: window.__chaseOfferHookVersion,
+        }));
+      }
+    } catch (e) {}
+  })();
+  true;
+`;
+
+// Clears the offer stash when capture pauses for MFA / NeedsInput so a
+// pre-pause generation cannot apply to the wrong card on resume.
+export const buildChasePauseCaptureJs = () => `
+  (function() {
+    try {
+      window.__chaseLastOfferCapture = null;
+      window.__chaseHookError = '';
+    } catch (e) {}
+  })();
+  true;
+`;
+
 // Installed before the offers page runs so the customer-offers response is
 // stored as offer fields only. Sync posts that stash; it does not read tiles.
 export const buildChaseOfferCaptureJs = () => `
   (function() {
     try {
-      if (window.__chaseOfferHookVersion === 7) return;
+      if (window.__chaseOfferHookVersion === ${CHASE_OFFER_HOOK_VERSION}) return;
       if (window.__chaseCaptureGeneration == null) window.__chaseCaptureGeneration = 0;
       var summarizeOfferTerms = ${summarizeOfferTermsSource};
       var mapChaseCustomerOffers = ${mapChaseCustomerOffersSource};
@@ -314,7 +345,7 @@ export const buildChaseOfferCaptureJs = () => `
           });
         };
       }
-      window.__chaseOfferHookVersion = 7;
+      window.__chaseOfferHookVersion = ${CHASE_OFFER_HOOK_VERSION};
     } catch (e) {
       window.__chaseHookError = String(e && e.message || e);
     }
