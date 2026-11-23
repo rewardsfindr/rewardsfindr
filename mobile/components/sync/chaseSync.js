@@ -304,6 +304,9 @@ export const buildChaseOfferCaptureJs = () => `
             if (currentGeneration() !== generation) return response;
             if (response.ok) {
               response.clone().text().then(function(text) {
+                // Headers can arrive before the click while the body is still
+                // downloading. Drop that body once the card generation moves on.
+                if (currentGeneration() !== generation) return;
                 try { remember(text); } catch (e) {}
               });
             }
