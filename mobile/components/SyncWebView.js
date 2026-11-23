@@ -68,6 +68,8 @@ import {
   nextSyncMode,
   isPartialAbort,
   partialAbortCopy,
+  shouldShowSyncCover,
+  planChaseNeedsInputResume,
 } from './sync/syncMode.js';
 import BankLogoIcon from './BankLogoIcon.js';
 
@@ -404,25 +406,33 @@ export default function SyncWebView({ visible, bank, onClose, onSuccess }) {
     startingChaseRef.current = false;
   };
 
-  /** Resume after MFA: retry current unsaved card, keep prior saves. */
+  /** Resume after MFA: re-arm capture on the current unsaved card (no same-card switch). */
   const resumeChaseCapture = () => {
     if (bank !== 'chase') return;
     if (startingChaseRef.current || syncStartedRef.current) return;
-    const cards = cardOptionsRef.current;
-    if (!cards.length || syncedCountRef.current >= cards.length) {
+    const plan = planChaseNeedsInputResume({
+      cardOptionsLength: cardOptionsRef.current.length,
+      syncedCount: syncedCountRef.current,
+      cardIndex: cardIndexRef.current,
+    });
+    if (plan.action === 'full_start') {
       startChaseCapture();
       return;
     }
     startingChaseRef.current = true;
     enterCapturing();
-    webViewRef.current?.injectJavaScript(buildChaseOfferCaptureJs());
-    const pos = cardIndexRef.current;
-    if (Number.isInteger(pos) && cards[pos]) {
-      switchChaseCard(pos);
-    } else {
-      captureArmed.current = true;
-      webViewRef.current?.injectJavaScript(buildCaptureOffersJs());
+    if (Number.isInteger(plan.position)) {
+      cardIndexRef.current = plan.position;
+      setCardIndexUi(plan.position);
+      const label = cardOptionsRef.current[plan.position]?.label;
+      if (label) setCurrentCard(label);
     }
+    // Do not switchChaseCard(current) — same-card menu click → CARD_SWITCH_ERROR → failed.
+    webViewRef.current?.injectJavaScript(buildChaseOfferCaptureJs());
+    webViewRef.current?.injectJavaScript(buildChaseHookReadyProbeJs());
+    captureArmed.current = true;
+    armStepTimer();
+    webViewRef.current?.injectJavaScript(buildCaptureOffersJs());
     startingChaseRef.current = false;
   };
 
@@ -1002,7 +1012,7 @@ export default function SyncWebView({ visible, bank, onClose, onSuccess }) {
   const totalCards   = cardCount || cardOptionsRef.current.length || 1;
   const phaseLabel   = syncPhaseUi === 'enrolled' ? 'activated' : 'eligible';
   const progressFrac = Math.min(1, Math.max(0, (syncedCountRef.current + (syncing || switching ? 0.45 : 0)) / totalCards));
-  const showCover    = syncMode === SYNC_MODES.CAPTURING;
+  const showCover    = shouldShowSyncCover({ bank, syncMode });
   const chaseFailed  = bank === 'chase' && syncMode === SYNC_MODES.FAILED;
   const chaseAuth    = bank === 'chase' && syncMode === SYNC_MODES.AUTH;
   const chaseNeeds   = bank === 'chase' && syncMode === SYNC_MODES.NEEDS_INPUT;
@@ -1033,7 +1043,7 @@ export default function SyncWebView({ visible, bank, onClose, onSuccess }) {
       );
     }
 
-    if (showCover && bank === 'chase') {
+    if (showCover) {
       return (
         <TouchableOpacity style={s.cancelBtn} onPress={requestClose}>
           <Text style={s.cancelBtnText}>Cancel</Text>

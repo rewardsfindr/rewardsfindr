@@ -100,3 +100,33 @@ export function partialAbortCopy({ syncedCount = 0, totalCards = 0 } = {}) {
   if (total > 0) return `Saved ${synced} of ${total} cards. You can sync again later for the rest.`;
   return `Saved ${synced} card${synced === 1 ? '' : 's'}. You can sync again later for the rest.`;
 }
+
+/**
+ * Capture cover is Chase-only in Slice 0+1. Non-Chase Sync Offers must not
+ * show a Chase-branded overlay (plan: other banks unchanged).
+ */
+export function shouldShowSyncCover({ bank, syncMode } = {}) {
+  return bank === 'chase' && syncMode === SYNC_MODES.CAPTURING;
+}
+
+/**
+ * After MFA / NeedsInput, plan the Chase resume action.
+ * Never same-card switch — buildSwitchCardJs posts CARD_SWITCH_ERROR when the
+ * menu stays on the current card, which would falsely enter failed.
+ */
+export function planChaseNeedsInputResume({
+  cardOptionsLength = 0,
+  syncedCount = 0,
+  cardIndex = 0,
+} = {}) {
+  const total = Number(cardOptionsLength) || 0;
+  const synced = Number(syncedCount) || 0;
+  if (total < 1 || synced >= total) {
+    return { action: 'full_start' };
+  }
+  const pos = Number.isInteger(cardIndex) ? cardIndex : 0;
+  if (pos < 0 || pos >= total) {
+    return { action: 'arm_capture', position: 0 };
+  }
+  return { action: 'arm_capture', position: pos };
+}

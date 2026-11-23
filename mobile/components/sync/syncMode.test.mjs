@@ -1,5 +1,8 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
+import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import {
   SYNC_MODES,
   STEP_TIMEOUT_MS,
@@ -7,7 +10,11 @@ import {
   nextSyncMode,
   isPartialAbort,
   partialAbortCopy,
+  shouldShowSyncCover,
+  planChaseNeedsInputResume,
 } from './syncMode.js';
+
+const HERE = dirname(fileURLToPath(import.meta.url));
 
 const readyGate = {
   bank: 'chase',
@@ -124,4 +131,72 @@ test('partial abort retains synced cards and is not full', () => {
   assert.equal(isPartialAbort({ syncedCount: 4, totalCards: 4 }), false);
   assert.equal(isPartialAbort({ syncedCount: 0, totalCards: 4 }), false);
   assert.match(partialAbortCopy({ syncedCount: 1, totalCards: 4 }), /Saved 1 of 4/);
+});
+
+test('capture cover is Chase-only; non-Chase capturing stays uncovered', () => {
+  assert.equal(
+    shouldShowSyncCover({ bank: 'chase', syncMode: SYNC_MODES.CAPTURING }),
+    true,
+  );
+  assert.equal(
+    shouldShowSyncCover({ bank: 'chase', syncMode: SYNC_MODES.AUTH }),
+    false,
+  );
+  for (const bank of ['amex', 'wells_fargo', 'citi', 'us_bank']) {
+    assert.equal(
+      shouldShowSyncCover({ bank, syncMode: SYNC_MODES.CAPTURING }),
+      false,
+      `${bank} must not show Chase capture cover`,
+    );
+  }
+});
+
+test('NeedsInput resume arms capture on current card without switching', () => {
+  assert.deepEqual(
+    planChaseNeedsInputResume({
+      cardOptionsLength: 4,
+      syncedCount: 1,
+      cardIndex: 1,
+    }),
+    { action: 'arm_capture', position: 1 },
+  );
+  assert.notEqual(
+    planChaseNeedsInputResume({
+      cardOptionsLength: 4,
+      syncedCount: 1,
+      cardIndex: 1,
+    }).action,
+    'switch_card',
+  );
+});
+
+test('NeedsInput resume falls back to full_start when walk is done or empty', () => {
+  assert.deepEqual(
+    planChaseNeedsInputResume({
+      cardOptionsLength: 4,
+      syncedCount: 4,
+      cardIndex: 3,
+    }),
+    { action: 'full_start' },
+  );
+  assert.deepEqual(
+    planChaseNeedsInputResume({
+      cardOptionsLength: 0,
+      syncedCount: 0,
+      cardIndex: 0,
+    }),
+    { action: 'full_start' },
+  );
+});
+
+test('SyncWebView gates cover and resume to Chase helpers (no same-card switch)', () => {
+  const src = readFileSync(join(HERE, '..', 'SyncWebView.js'), 'utf8');
+  assert.match(src, /shouldShowSyncCover/);
+  assert.match(src, /planChaseNeedsInputResume/);
+  assert.match(src, /Do not switchChaseCard\(current\)/);
+  assert.doesNotMatch(
+    src,
+    /resumeChaseCapture[\s\S]*?switchChaseCard\(pos\)/,
+  );
+  assert.match(src, /showCover\s*=\s*shouldShowSyncCover/);
 });
