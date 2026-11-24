@@ -209,10 +209,11 @@ export const mapChaseCustomerOffers = new Function(`
 export const buildChaseOfferCaptureJs = () => `
   (function() {
     try {
-      if (window.__chaseOfferHookVersion === 7) return;
+      if (window.__chaseOfferHookVersion === 8) return;
       if (window.__chaseCaptureGeneration == null) window.__chaseCaptureGeneration = 0;
       var summarizeOfferTerms = ${summarizeOfferTermsSource};
       var mapChaseCustomerOffers = ${mapChaseCustomerOffersSource};
+      var readChaseCardLabel = ${readChaseCardLabelSource};
 
       function remember(text) {
         var parsed = JSON.parse(text);
@@ -241,6 +242,60 @@ export const buildChaseOfferCaptureJs = () => `
         window.__chaseLastOfferCapture = null;
         window.__chaseHookError = '';
       };
+
+      // The sync script arms before it clicks. A manual pick on the card menu
+      // does not. Arm on pointerdown, before Chase starts the next request, so
+      // the previous card's in-flight body cannot be saved under the new card.
+      function last4Of(label) {
+        var text = String(label || '');
+        var start = text.lastIndexOf('(...');
+        if (start < 0) return '';
+        var end = text.indexOf(')', start);
+        if (end < 0) return '';
+        return text.slice(start + 4, end);
+      }
+
+      function armOnDifferentCard(event) {
+        try {
+          var node = event && event.target;
+          var option = null;
+          for (var i = 0; i < 8 && node; i++) {
+            var role = node.getAttribute && node.getAttribute('role');
+            var tag = String(node.tagName || '').toLowerCase();
+            if (role === 'option' || tag === 'mds-select-option') {
+              option = node;
+              break;
+            }
+            node = node.parentElement || node.parentNode;
+          }
+          if (!option) return;
+          var inside = false;
+          var parent = option;
+          for (var j = 0; j < 10 && parent; j++) {
+            var id = parent.id || '';
+            if (id === 'select-credit-card-account-menu' || id === 'select-credit-card-account') {
+              inside = true;
+              break;
+            }
+            parent = parent.parentElement || parent.parentNode;
+          }
+          if (!inside) return;
+          var pickedLabel = String(option.innerText || (option.getAttribute && option.getAttribute('label')) || '').replace(/\\s+/g, ' ').trim();
+          var currentLabel = String(readChaseCardLabel() || '').replace(/\\s+/g, ' ').trim();
+          var pickedLast4 = last4Of(pickedLabel);
+          var currentLast4 = last4Of(currentLabel);
+          if (pickedLast4 && currentLast4) {
+            if (pickedLast4 === currentLast4) return;
+          } else if (pickedLabel && currentLabel && pickedLabel === currentLabel) {
+            return;
+          }
+          if (window.__chaseArmNextCapture) window.__chaseArmNextCapture();
+        } catch (e) {}
+      }
+
+      if (document && document.addEventListener) {
+        document.addEventListener('pointerdown', armOnDifferentCard, true);
+      }
 
       function watchSend(xhr, url) {
         if (!watchUrl(url)) return;
@@ -314,7 +369,7 @@ export const buildChaseOfferCaptureJs = () => `
           });
         };
       }
-      window.__chaseOfferHookVersion = 7;
+      window.__chaseOfferHookVersion = 8;
     } catch (e) {
       window.__chaseHookError = String(e && e.message || e);
     }

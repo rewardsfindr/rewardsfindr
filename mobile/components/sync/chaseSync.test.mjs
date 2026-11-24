@@ -533,6 +533,71 @@ test('ignores a fetch customer-offers body that arrives after the card click', a
   assert.equal(messages.at(-1).offers[0].bankOfferId, 'FIGG:2');
 });
 
+test('a manual card pick drops the previous card response instead of saving it on the new card', () => {
+  const { document, button, menu } = chaseHub();
+  for (const option of menu.children) option.parentElement = menu;
+  const listeners = [];
+  document.addEventListener = (type, listener) => {
+    listeners.push({ type, listener });
+  };
+  const { window, messages } = installChaseHook(document, DelayedXHR);
+
+  const previous = new window.XMLHttpRequest();
+  previous.open('POST', 'https://secure.chase.com/svc/customer-offers');
+  previous.responseText = chaseOffersBody('Wander', 'FIGG:1');
+  previous.send();
+
+  const flex = menu.children[1];
+  assert.equal(flex.innerText, 'Flex (...1111)');
+  for (const entry of listeners) {
+    if (entry.type === 'pointerdown') entry.listener({ target: flex });
+  }
+  button.innerText = 'Flex (...1111)';
+
+  previous.flush();
+  postCapture(window, document);
+  assert.equal(messages.at(-1).type, 'CHASE_CAPTURE_UNAVAILABLE');
+  assert.equal(JSON.stringify(messages.at(-1)).includes('Wander'), false);
+
+  const next = new window.XMLHttpRequest();
+  next.open('POST', 'https://secure.chase.com/svc/customer-offers');
+  next.responseText = chaseOffersBody('Nike', 'FIGG:2');
+  next.send();
+  next.flush();
+  postCapture(window, document);
+  assert.equal(messages.at(-1).type, 'CAPTURE_OFFERS');
+  assert.equal(messages.at(-1).cardLabel, 'Flex (...1111)');
+  assert.equal(messages.at(-1).offers[0].merchantName, 'Nike');
+  assert.equal(messages.at(-1).offers[0].bankOfferId, 'FIGG:2');
+});
+
+test('pressing the card already on screen keeps its captured offers', () => {
+  const { document, menu } = chaseHub();
+  for (const option of menu.children) option.parentElement = menu;
+  const listeners = [];
+  document.addEventListener = (type, listener) => {
+    listeners.push({ type, listener });
+  };
+  const { window, messages } = installChaseHook(document, DelayedXHR);
+
+  const current = new window.XMLHttpRequest();
+  current.open('POST', 'https://secure.chase.com/svc/customer-offers');
+  current.responseText = chaseOffersBody('Wander', 'FIGG:1');
+  current.send();
+  current.flush();
+
+  const sapphire = menu.children[2];
+  assert.equal(sapphire.innerText, 'Sapphire Reserve (...2222)');
+  for (const entry of listeners) {
+    if (entry.type === 'pointerdown') entry.listener({ target: sapphire });
+  }
+
+  postCapture(window, document);
+  assert.equal(messages.at(-1).type, 'CAPTURE_OFFERS');
+  assert.equal(messages.at(-1).cardLabel, 'Sapphire Reserve (...2222)');
+  assert.equal(messages.at(-1).offers[0].merchantName, 'Wander');
+});
+
 test('asks for another card request when the offers response was missed', () => {
   const button = new El('DIV', { id: 'select-credit-card-account', text: 'Sapphire Reserve (...2222)' });
   const messages = [];
