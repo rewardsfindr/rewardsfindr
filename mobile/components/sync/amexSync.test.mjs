@@ -2,9 +2,15 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
   AMEX_OPEN_AND_DETECT_JS,
+  AMEX_SWITCH_TIMEOUT_MS,
   buildAmexJsonCaptureJs,
   buildAmexSwitchCardJs,
 } from './amexSync.js';
+
+test('AMEX_SWITCH_TIMEOUT_MS is the prior shared Amex switch wait', () => {
+  assert.equal(AMEX_SWITCH_TIMEOUT_MS, 3500);
+  assert.ok(buildAmexSwitchCardJs('CARD_PRODUCT_1').includes(String(AMEX_SWITCH_TIMEOUT_MS)));
+});
 
 class El {
   constructor(attrs = {}, children = []) {

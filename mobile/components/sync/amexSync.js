@@ -80,7 +80,10 @@ export const AMEX_OPEN_AND_DETECT_JS = `
   true;
 `;
 
-export const buildAmexSwitchCardJs = (testId, timeoutMs = 3500) => `
+// Wait after clicking an Amex card option before posting CARD_SWITCHED.
+export const AMEX_SWITCH_TIMEOUT_MS = 3500;
+
+export const buildAmexSwitchCardJs = (testId, timeoutMs = AMEX_SWITCH_TIMEOUT_MS) => `
   (function() {
     try {
       var combobox = document.querySelector('[data-testid="simple_switcher_combobox"]');

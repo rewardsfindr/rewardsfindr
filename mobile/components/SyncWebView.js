@@ -54,6 +54,7 @@ import {
 } from './sync/chaseSync.js';
 import {
   AMEX_OPEN_AND_DETECT_JS,
+  AMEX_SWITCH_TIMEOUT_MS,
   buildAmexSwitchCardJs,
   buildAmexJsonCaptureJs,
   buildAmexClearFiltersJs,
@@ -300,7 +301,7 @@ export default function SyncWebView({ visible, bank, onClose, onSuccess }) {
     captureArmed.current = true;
     webViewRef.current?.injectJavaScript(`clearTimeout(window.__amexQuietTimer); window.__amexBest = null; window.__amexJsonCaptureArmed = true; true;`);
     webViewRef.current?.injectJavaScript(buildAmexClearFiltersJs());
-    webViewRef.current?.injectJavaScript(buildAmexSwitchCardJs(next.testId, SWITCH_TIMEOUT_MS));
+    webViewRef.current?.injectJavaScript(buildAmexSwitchCardJs(next.testId, AMEX_SWITCH_TIMEOUT_MS));
     return true;
   };
 
