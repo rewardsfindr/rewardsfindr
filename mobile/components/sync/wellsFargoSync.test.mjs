@@ -7,6 +7,10 @@ import { wellsFargoRecords } from '../../../api/lib/offers/deviceCatalog.js';
 import {
   buildWellsFargoOfferCaptureJs,
   buildWellsFargoReadJs,
+  buildWellsAppPromoDismissJs,
+  buildWellsCaptureWhenReadyJs,
+  WELLS_CAPTURE_READY_TIMEOUT_MS,
+  WELLS_CAPTURE_POLL_MS,
 } from './wellsFargoSync.js';
 
 const NOW = new Date('2026-01-01T00:00:00.000Z');
@@ -703,4 +707,119 @@ test('hooks getDeals on fetch and ignores a non-2xx response', async () => {
   assert.equal(message.type, 'WELLS_DEALS');
   assert.equal(message.deals.availableDeals.cardlyticsEligibleDeals[0].merchantDealDetails.dealAmount, 10);
   assert.equal(message.deals.availableDeals.cardlyticsEligibleDeals[0].merchantDealDetails.amountType, '%');
+});
+
+test('capture-when-ready posts as soon as the getDeals stash lands', async () => {
+  assert.ok(WELLS_CAPTURE_POLL_MS <= 150);
+  assert.ok(WELLS_CAPTURE_READY_TIMEOUT_MS >= 2000);
+
+  const messages = [];
+  const window = {
+    __wellsLastDeals: null,
+    ReactNativeWebView: { postMessage(raw) { messages.push(JSON.parse(raw)); } },
+  };
+  new Function('window', 'document', buildWellsCaptureWhenReadyJs(500, 40))(window, {});
+  await new Promise(r => setTimeout(r, 80));
+  assert.equal(messages.length, 0);
+
+  window.__wellsLastDeals = {
+    availableDeals: {
+      cardlyticsEligibleDeals: [{
+        isActivated: false,
+        merchantDealDetails: {
+          merchantOfferId: 'READYOFFER1',
+          merchantName: 'Ready Cafe',
+          dealAmount: 5,
+          amountType: '%',
+          shortDescription: '5% cash back',
+        },
+      }],
+      activatedDeals: [],
+    },
+    earnedDeals: { deals: [] },
+  };
+  await new Promise(r => setTimeout(r, 120));
+  assert.equal(messages.at(-1)?.type, 'WELLS_DEALS');
+  assert.equal(
+    messages.at(-1)?.deals.availableDeals.cardlyticsEligibleDeals[0].merchantDealDetails.merchantOfferId,
+    'READYOFFER1',
+  );
+});
+
+test('capture-when-ready times out with WELLS_CAPTURE_UNAVAILABLE when stash never lands', async () => {
+  const messages = [];
+  const window = {
+    ReactNativeWebView: { postMessage(raw) { messages.push(JSON.parse(raw)); } },
+  };
+  new Function('window', 'document', buildWellsCaptureWhenReadyJs(120, 40))(window, {});
+  await new Promise(r => setTimeout(r, 220));
+  assert.equal(messages.at(-1)?.type, 'WELLS_CAPTURE_UNAVAILABLE');
+});
+
+test('app promo dismiss clicks Close Dialog when already present, never Download', () => {
+  const dismissJs = buildWellsAppPromoDismissJs();
+  assert.match(dismissJs, /close\\s\*dialog/i);
+  assert.match(dismissJs, /download\\s\*now/i);
+  assert.match(dismissJs, /bank\\s\*easy/i);
+  assert.doesNotMatch(dismissJs, /setInterval|MutationObserver|DOMContentLoaded/);
+
+  let closeClicks = 0;
+  let downloadClicks = 0;
+  const closeBtn = {
+    id: '',
+    getAttribute(name) {
+      if (name === 'aria-label') return 'Close Dialog';
+      return '';
+    },
+    click() { closeClicks += 1; },
+  };
+  const downloadBtn = {
+    id: 'downloadNativeAppButton',
+    innerText: 'Download now',
+    textContent: 'Download now',
+    getAttribute(name) {
+      if (name === 'id') return this.id;
+      return '';
+    },
+    click() { downloadClicks += 1; },
+  };
+  const dialog = {
+    innerText: 'Bank easy\nGet the app loved by millions.\nDownload now',
+    textContent: 'Bank easy\nGet the app loved by millions.\nDownload now',
+    parentElement: null,
+  };
+  closeBtn.parentElement = dialog;
+  downloadBtn.parentElement = dialog;
+
+  const document = {
+    body: {
+      innerText: dialog.innerText,
+      textContent: dialog.textContent,
+    },
+    querySelectorAll(sel) {
+      if (String(sel).includes('button')) return [closeBtn, downloadBtn];
+      return [];
+    },
+  };
+
+  new Function('window', 'document', dismissJs)({}, document);
+  assert.equal(closeClicks, 1);
+  assert.equal(downloadClicks, 0);
+});
+
+test('app promo dismiss is a no-op when promo is absent', () => {
+  let clicks = 0;
+  const otherClose = {
+    getAttribute(name) {
+      if (name === 'aria-label') return 'Close Dialog';
+      return '';
+    },
+    click() { clicks += 1; },
+  };
+  const document = {
+    body: { innerText: 'Sign On', textContent: 'Sign On' },
+    querySelectorAll() { return [otherClose]; },
+  };
+  new Function('window', 'document', buildWellsAppPromoDismissJs())({}, document);
+  assert.equal(clicks, 0);
 });

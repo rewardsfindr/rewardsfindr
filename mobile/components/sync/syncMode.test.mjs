@@ -8,6 +8,7 @@ import {
   STEP_TIMEOUT_MS,
   AUTH_REPROBE_MS,
   shouldAutoStartChase,
+  shouldAutoStartWells,
   nextSyncMode,
   isPartialAbort,
   partialAbortCopy,
@@ -169,22 +170,97 @@ test('partial abort retains synced cards and is not full', () => {
   assert.match(partialAbortCopy({ syncedCount: 1, totalCards: 4 }), /Saved 1 of 4/);
 });
 
-test('capture cover is Chase-only; non-Chase capturing stays uncovered', () => {
+test('capture cover is Chase + Wells; other Sync Offers banks stay uncovered', () => {
   assert.equal(
     shouldShowSyncCover({ bank: 'chase', syncMode: SYNC_MODES.CAPTURING }),
+    true,
+  );
+  assert.equal(
+    shouldShowSyncCover({ bank: 'wells_fargo', syncMode: SYNC_MODES.CAPTURING }),
     true,
   );
   assert.equal(
     shouldShowSyncCover({ bank: 'chase', syncMode: SYNC_MODES.AUTH }),
     false,
   );
-  for (const bank of ['amex', 'wells_fargo', 'citi', 'us_bank']) {
+  assert.equal(
+    shouldShowSyncCover({ bank: 'wells_fargo', syncMode: SYNC_MODES.AUTH }),
+    false,
+  );
+  for (const bank of ['amex', 'citi', 'us_bank']) {
     assert.equal(
       shouldShowSyncCover({ bank, syncMode: SYNC_MODES.CAPTURING }),
       false,
-      `${bank} must not show Chase capture cover`,
+      `${bank} must not show auto-sync capture cover`,
     );
   }
+});
+
+const wellsReadyGate = {
+  bank: 'wells_fargo',
+  syncMode: SYNC_MODES.AUTH,
+  onOffersPage: true,
+  onLoginPage: false,
+  syncStarted: false,
+  autoStartConsumed: false,
+  visible: true,
+};
+
+test('Wells gate false if login', () => {
+  assert.equal(shouldAutoStartWells({ ...wellsReadyGate, onLoginPage: true }), false);
+});
+
+test('Wells gate false without positive deals surface', () => {
+  assert.equal(shouldAutoStartWells({ ...wellsReadyGate, onOffersPage: false }), false);
+  assert.equal(
+    shouldAutoStartWells({ ...wellsReadyGate, onOffersPage: false, onLoginPage: false }),
+    false,
+    'never auto-start on !onLoginPage alone',
+  );
+});
+
+test('Wells gate false when already syncing', () => {
+  assert.equal(shouldAutoStartWells({ ...wellsReadyGate, syncStarted: true }), false);
+});
+
+test('Wells gate true once in auth; consumed blocks second start', () => {
+  assert.equal(shouldAutoStartWells(wellsReadyGate), true);
+  assert.equal(
+    shouldAutoStartWells({ ...wellsReadyGate, autoStartConsumed: true }),
+    false,
+  );
+});
+
+test('Wells needsInput resume allows start even if consumed', () => {
+  assert.equal(
+    shouldAutoStartWells({
+      ...wellsReadyGate,
+      syncMode: SYNC_MODES.NEEDS_INPUT,
+      autoStartConsumed: true,
+    }),
+    true,
+  );
+});
+
+test('non-Wells banks never pass shouldAutoStartWells', () => {
+  for (const bank of ['chase', 'amex', 'citi', 'us_bank', 'capital_one']) {
+    assert.equal(shouldAutoStartWells({ ...wellsReadyGate, bank }), false);
+  }
+});
+
+test('Wells mode: capturing + login → needsInput; timeout/unavailable → failed', () => {
+  assert.equal(
+    nextSyncMode(SYNC_MODES.CAPTURING, 'login_detected'),
+    SYNC_MODES.NEEDS_INPUT,
+  );
+  assert.equal(
+    nextSyncMode(SYNC_MODES.CAPTURING, 'step_timeout'),
+    SYNC_MODES.FAILED,
+  );
+  assert.equal(
+    nextSyncMode(SYNC_MODES.CAPTURING, 'capture_error'),
+    SYNC_MODES.FAILED,
+  );
 });
 
 test('NeedsInput resume arms capture on current card without switching', () => {
@@ -305,4 +381,39 @@ test('SyncWebView gates cover and resume to Chase helpers (no same-card switch)'
     src,
     /onLoadStart[\s\S]*?if \(bank === 'chase'\) setChaseHookReady\(false\)/,
   );
+});
+
+test('SyncWebView wires Wells auto-start without Chase-only gates', () => {
+  const src = readFileSync(join(HERE, '..', 'SyncWebView.js'), 'utf8');
+  assert.match(src, /shouldAutoStartWells/);
+  assert.match(src, /startWellsCapture/);
+  assert.match(src, /\[wells-auto-start\]/);
+  assert.match(src, /Syncing Wells Fargo offers/);
+  assert.match(src, /WELLS_CAPTURE_UNAVAILABLE[\s\S]{0,240}failWellsCapture/);
+  assert.match(src, /failWellsCapture[\s\S]{0,400}SYNC_MODES\.FAILED/);
+  // First capture uses when-ready poll (not one-shot read) to avoid deals race.
+  assert.match(src, /buildWellsCaptureWhenReadyJs/);
+  assert.match(src, /WELLS_CAPTURE_READY_TIMEOUT_MS/);
+  const startWellsBlock = src.match(
+    /const startWellsCapture = \(\) => \{[\s\S]*?startingWellsRef\.current = false;\n  \};/,
+  )?.[0] || '';
+  assert.match(startWellsBlock, /buildWellsCaptureWhenReadyJs/);
+  assert.doesNotMatch(startWellsBlock, /buildWellsFargoReadJs\(\)/);
+  // Mobile-app promo overlay is dismissed via Close Dialog inject (never Download).
+  assert.match(src, /buildWellsAppPromoDismissJs/);
+  assert.match(src, /serviceType=dealsportal|BANK_CONFIG|config\.url/);
+  // Wells gate must not require Chase cards/hook readiness.
+  const wellsGateBlock = src.match(
+    /shouldAutoStartWells\(\{[\s\S]*?\}\)/,
+  )?.[0] || '';
+  assert.match(wellsGateBlock, /shouldAutoStartWells/);
+  assert.doesNotMatch(wellsGateBlock, /hasCards/);
+  assert.doesNotMatch(wellsGateBlock, /hookReady/);
+  assert.doesNotMatch(wellsGateBlock, /chaseHookReady/);
+  // AUTH_REPROBE interval stays Chase-only.
+  const reprobeEffect = src.match(
+    /While AUTH\/NeedsInput, keep re-probing[\s\S]*?AUTH_REPROBE_MS[\s\S]*?\}, \[visible, bank, syncMode/,
+  )?.[0] || '';
+  assert.match(reprobeEffect, /bank !== 'chase'/);
+  assert.doesNotMatch(reprobeEffect, /wells_fargo/);
 });
