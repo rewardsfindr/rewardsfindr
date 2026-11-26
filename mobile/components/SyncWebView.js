@@ -66,7 +66,14 @@ import {
   buildWellsCaptureWhenReadyJs,
   WELLS_CAPTURE_READY_TIMEOUT_MS,
   WELLS_CAPTURE_POLL_MS,
-} from './sync/wellsFargoSync.js';import { buildCitiOfferCaptureJs, buildCitiOffersVisibleJs, buildCitiReadJs } from './sync/citiSync.js';
+} from './sync/wellsFargoSync.js';import {
+  buildCitiOfferCaptureJs,
+  buildCitiOffersVisibleJs,
+  buildCitiReadJs,
+  buildCitiCaptureWhenReadyJs,
+  CITI_CAPTURE_READY_TIMEOUT_MS,
+  CITI_CAPTURE_POLL_MS,
+} from './sync/citiSync.js';
 import { buildUsBankOfferCaptureJs, buildUsBankOffersVisibleJs, buildUsBankReadJs } from './sync/usBankSync.js';
 import { parseCardLabel }                                 from './sync/cardLabel.js';
 import {
@@ -536,8 +543,12 @@ export default function SyncWebView({ visible, bank, onClose, onSuccess }) {
     autoStartConsumedRef.current = true;
     setCurrentCard('Citi Card');
     enterCapturing();
+    // Install/refresh hook, then poll stash like Wells when-ready — first
+    // auto-start often races CITI_ON_OFFERS before merchant-offers stash lands.
     webViewRef.current?.injectJavaScript(buildCitiOfferCaptureJs());
-    webViewRef.current?.injectJavaScript(buildCitiReadJs());
+    webViewRef.current?.injectJavaScript(
+      buildCitiCaptureWhenReadyJs(CITI_CAPTURE_READY_TIMEOUT_MS, CITI_CAPTURE_POLL_MS),
+    );
     startingCitiRef.current = false;
   };
 

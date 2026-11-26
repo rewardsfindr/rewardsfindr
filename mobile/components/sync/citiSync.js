@@ -256,11 +256,15 @@ export const buildCitiOffersVisibleJs = () => `
   true;
 `;
 
-// Posts offer fields from the merchant-offers stash, or from a same-origin
-// window/frame that already holds the list. Raw bank JSON never leaves the page.
-export const buildCitiReadJs = () => `
-  (function() {
-    try {
+// Poll for stash / window / frames instead of a fixed sleep after signedIn.
+// Matches Wells/Chase capture-when-ready: auto-start often fires on
+// CITI_ON_OFFERS before the merchant-offers stash lands.
+export const CITI_CAPTURE_READY_TIMEOUT_MS = 2800;
+export const CITI_CAPTURE_POLL_MS = 120;
+
+// Shared helpers + runCitiCapture() for one-shot read and when-ready.
+// Raw bank JSON never leaves the page.
+const citiCaptureBodySource = `
       var stripCitiOffers = ${stripCitiOffersSource};
       var unwrapCitiPayload = ${unwrapCitiPayloadSource};
 
@@ -309,24 +313,75 @@ export const buildCitiReadJs = () => `
         return null;
       }
 
-      var stash = window.__citiLastOffers && Array.isArray(window.__citiLastOffers.merchantOffers)
-        ? stripCitiOffers(window.__citiLastOffers)
-        : null;
-      if (!stash || !hasOffers(stash)) {
-        try { stash = usable(window); } catch (e) { stash = null; }
-      }
-      if (!stash || !hasOffers(stash)) {
-        try { stash = fromFrames(window, document); } catch (e) { stash = null; }
+      function resolveStash() {
+        var stash = window.__citiLastOffers && Array.isArray(window.__citiLastOffers.merchantOffers)
+          ? stripCitiOffers(window.__citiLastOffers)
+          : null;
+        if (!stash || !hasOffers(stash)) {
+          try { stash = usable(window); } catch (e) { stash = null; }
+        }
+        if (!stash || !hasOffers(stash)) {
+          try { stash = fromFrames(window, document); } catch (e) { stash = null; }
+        }
+        return stash && hasOffers(stash) ? stash : null;
       }
 
-      if (!stash || !hasOffers(stash)) {
-        window.ReactNativeWebView.postMessage(JSON.stringify({ type: 'CITI_CAPTURE_UNAVAILABLE' }));
+      function citiCaptureReady() {
+        return !!resolveStash();
+      }
+
+      function runCitiCapture() {
+        var stash = resolveStash();
+        if (!stash) {
+          window.ReactNativeWebView.postMessage(JSON.stringify({ type: 'CITI_CAPTURE_UNAVAILABLE' }));
+          return;
+        }
+        window.ReactNativeWebView.postMessage(JSON.stringify({
+          type: 'CITI_OFFERS',
+          offers: stash,
+        }));
+      }
+`;
+
+// Posts offer fields from the merchant-offers stash, or from a same-origin
+// window/frame that already holds the list. Raw bank JSON never leaves the page.
+export const buildCitiReadJs = () => `
+  (function() {
+    try {
+      ${citiCaptureBodySource}
+      runCitiCapture();
+    } catch (e) {
+      window.ReactNativeWebView.postMessage(JSON.stringify({
+        type: 'CITI_CAPTURE_UNAVAILABLE',
+      }));
+    }
+  })();
+  true;
+`;
+
+// Poll until stash / window / frames are ready, then capture.
+// Posts the same CITI_OFFERS / CITI_CAPTURE_UNAVAILABLE messages as read.
+export const buildCitiCaptureWhenReadyJs = (
+  timeoutMs = CITI_CAPTURE_READY_TIMEOUT_MS,
+  intervalMs = CITI_CAPTURE_POLL_MS,
+) => `
+  (async function() {
+    try {
+      ${citiCaptureBodySource}
+      var started = Date.now();
+      while (Date.now() - started < ${timeoutMs}) {
+        if (citiCaptureReady()) {
+          runCitiCapture();
+          return;
+        }
+        await new Promise(function(resolve) { setTimeout(resolve, ${intervalMs}); });
+      }
+      if (citiCaptureReady()) {
+        runCitiCapture();
         return;
       }
-
       window.ReactNativeWebView.postMessage(JSON.stringify({
-        type: 'CITI_OFFERS',
-        offers: stash,
+        type: 'CITI_CAPTURE_UNAVAILABLE',
       }));
     } catch (e) {
       window.ReactNativeWebView.postMessage(JSON.stringify({

@@ -499,6 +499,13 @@ test('SyncWebView wires Citi auto-start with honest signedIn gate', () => {
   assert.match(src, /CITI_CAPTURE_UNAVAILABLE[\s\S]{0,240}failCitiCapture/);
   assert.match(src, /failCitiCapture[\s\S]{0,400}SYNC_MODES\.FAILED/);
   assert.match(src, /Waiting for Merchant Offers to load for sync to begin/);
+  assert.match(src, /buildCitiCaptureWhenReadyJs/);
+  assert.match(src, /CITI_CAPTURE_READY_TIMEOUT_MS/);
+  const startCitiBlock = src.match(
+    /const startCitiCapture = \(\) => \{[\s\S]*?startingCitiRef\.current = false;\r?\n  \};/,
+  )?.[0] || '';
+  assert.match(startCitiBlock, /buildCitiCaptureWhenReadyJs/);
+  assert.doesNotMatch(startCitiBlock, /buildCitiReadJs\(\)/);
   // Gate requires signedIn === true (not URL alone).
   const citiGateBlock = src.match(
     /shouldAutoStartCiti\(\{[\s\S]*?\}\)/,
