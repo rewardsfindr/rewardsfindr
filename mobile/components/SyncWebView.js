@@ -1135,13 +1135,8 @@ export default function SyncWebView({ visible, bank, onClose, onSuccess }) {
       );
     }
 
-    if (chaseAuth) {
-      return (
-        <Text style={s.helperText}>
-          After sign-in, sync starts automatically — no Sync Offers tap
-        </Text>
-      );
-    }
+    // Chase Auth: no helper copy — auto-start is silent after Offers Hub loads.
+    if (chaseAuth) return null;
 
     if (syncStarted) {
       return (
@@ -1221,7 +1216,6 @@ export default function SyncWebView({ visible, bank, onClose, onSuccess }) {
                 <View style={s.progressTrack}>
                   <View style={[s.progressFill, { width: `${Math.round(progressFrac * 100)}%` }]} />
                 </View>
-                <Text style={s.coverHint}>WebView covered · taps blocked so card switches stay clean</Text>
               </View>
             ) : null}
           </View>
@@ -1262,7 +1256,6 @@ const s = StyleSheet.create({
   },
   coverTitle:      { marginTop: 18, fontSize: 18, fontWeight: '700', color: colors.textPrimary, textAlign: 'center' },
   coverSub:        { marginTop: 8, fontSize: 14, color: colors.textSecondary, textAlign: 'center' },
-  coverHint:       { marginTop: 14, fontSize: 12, color: colors.textMuted, textAlign: 'center' },
   progressTrack:   { marginTop: 18, alignSelf: 'stretch', height: 8, borderRadius: radii.full, backgroundColor: colors.border, overflow: 'hidden' },
   progressFill:    { height: '100%', backgroundColor: colors.primaryLight, borderRadius: radii.full },
   failBanner:      { marginBottom: 12 },
