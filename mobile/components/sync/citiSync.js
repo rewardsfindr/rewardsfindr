@@ -242,11 +242,13 @@ export const buildCitiOffersVisibleJs = () => `
       var text = document.body ? (document.body.innerText || '') : '';
       var onOffers = href.indexOf('/nga/products-offers/merchantoffers') !== -1
         || href.indexOf('merchantoffers') !== -1;
+      // Honest signed-in chrome only — never force true from URL match alone
+      // (auto-start must require signedIn === true; see citi-pr-67 guideline).
       var signedIn = /sign\\s*off/i.test(text) && !/sign\\s*on/i.test(text.slice(0, 800));
       if (onOffers && window.ReactNativeWebView) {
         window.ReactNativeWebView.postMessage(JSON.stringify({
           type: 'CITI_ON_OFFERS',
-          signedIn: signedIn || onOffers,
+          signedIn: !!signedIn,
         }));
       }
     } catch (e) {}

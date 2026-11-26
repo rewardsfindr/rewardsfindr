@@ -227,6 +227,18 @@ test('SyncWebView wires Citi capture/read/save the same way as Wells Fargo', () 
   assert.equal(BANK_CONFIG.citi.url, 'https://online.citi.com/US/nga/products-offers/merchantoffers');
 });
 
+test('Citi offers-visible posts honest signedIn (never force true from URL alone)', () => {
+  const visibleJs = buildCitiOffersVisibleJs();
+  assert.match(visibleJs, /signedIn:\s*!!signedIn/);
+  assert.doesNotMatch(visibleJs, /signedIn:\s*signedIn\s*\|\|\s*onOffers/);
+  assert.match(visibleJs, /sign\\s\*off/i);
+  // SyncWebView auto path must require signedIn === true before start.
+  const syncSource = readRepoFile('..', 'SyncWebView.js');
+  assert.match(syncSource, /shouldAutoStartCiti/);
+  assert.match(syncSource, /startCitiCapture/);
+  assert.match(syncSource, /data\.signedIn === true/);
+});
+
 test('stripCitiOffers keeps offer fields and the selected credit card only', () => {
   const fixture = loadFixtureWithSecrets();
   const stripped = stripCitiOffers(fixture);
