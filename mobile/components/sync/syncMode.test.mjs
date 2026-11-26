@@ -9,6 +9,7 @@ import {
   AUTH_REPROBE_MS,
   shouldAutoStartChase,
   shouldAutoStartWells,
+  shouldAutoStartCiti,
   nextSyncMode,
   isPartialAbort,
   partialAbortCopy,
@@ -170,13 +171,17 @@ test('partial abort retains synced cards and is not full', () => {
   assert.match(partialAbortCopy({ syncedCount: 1, totalCards: 4 }), /Saved 1 of 4/);
 });
 
-test('capture cover is Chase + Wells; other Sync Offers banks stay uncovered', () => {
+test('capture cover is Chase + Wells + Citi; other Sync Offers banks stay uncovered', () => {
   assert.equal(
     shouldShowSyncCover({ bank: 'chase', syncMode: SYNC_MODES.CAPTURING }),
     true,
   );
   assert.equal(
     shouldShowSyncCover({ bank: 'wells_fargo', syncMode: SYNC_MODES.CAPTURING }),
+    true,
+  );
+  assert.equal(
+    shouldShowSyncCover({ bank: 'citi', syncMode: SYNC_MODES.CAPTURING }),
     true,
   );
   assert.equal(
@@ -187,7 +192,11 @@ test('capture cover is Chase + Wells; other Sync Offers banks stay uncovered', (
     shouldShowSyncCover({ bank: 'wells_fargo', syncMode: SYNC_MODES.AUTH }),
     false,
   );
-  for (const bank of ['amex', 'citi', 'us_bank']) {
+  assert.equal(
+    shouldShowSyncCover({ bank: 'citi', syncMode: SYNC_MODES.AUTH }),
+    false,
+  );
+  for (const bank of ['amex', 'us_bank']) {
     assert.equal(
       shouldShowSyncCover({ bank, syncMode: SYNC_MODES.CAPTURING }),
       false,
@@ -261,6 +270,69 @@ test('Wells mode: capturing + login → needsInput; timeout/unavailable → fail
     nextSyncMode(SYNC_MODES.CAPTURING, 'capture_error'),
     SYNC_MODES.FAILED,
   );
+});
+
+const citiReadyGate = {
+  bank: 'citi',
+  syncMode: SYNC_MODES.AUTH,
+  onOffersPage: true,
+  onLoginPage: false,
+  signedIn: true,
+  syncStarted: false,
+  autoStartConsumed: false,
+  visible: true,
+};
+
+test('Citi gate false if login', () => {
+  assert.equal(shouldAutoStartCiti({ ...citiReadyGate, onLoginPage: true }), false);
+});
+
+test('Citi gate false without offers surface', () => {
+  assert.equal(shouldAutoStartCiti({ ...citiReadyGate, onOffersPage: false }), false);
+});
+
+test('Citi gate false when signedIn is not true (URL alone is not enough)', () => {
+  assert.equal(shouldAutoStartCiti({ ...citiReadyGate, signedIn: false }), false);
+  assert.equal(shouldAutoStartCiti({ ...citiReadyGate, signedIn: undefined }), false);
+  assert.equal(
+    shouldAutoStartCiti({
+      ...citiReadyGate,
+      signedIn: false,
+      onOffersPage: true,
+      onLoginPage: false,
+    }),
+    false,
+    'merchantoffers URL without honest signedIn must not auto-start',
+  );
+});
+
+test('Citi gate false when already syncing', () => {
+  assert.equal(shouldAutoStartCiti({ ...citiReadyGate, syncStarted: true }), false);
+});
+
+test('Citi gate true once when signedIn + offers; consumed blocks second start', () => {
+  assert.equal(shouldAutoStartCiti(citiReadyGate), true);
+  assert.equal(
+    shouldAutoStartCiti({ ...citiReadyGate, autoStartConsumed: true }),
+    false,
+  );
+});
+
+test('Citi needsInput resume allows start even if consumed', () => {
+  assert.equal(
+    shouldAutoStartCiti({
+      ...citiReadyGate,
+      syncMode: SYNC_MODES.NEEDS_INPUT,
+      autoStartConsumed: true,
+    }),
+    true,
+  );
+});
+
+test('non-Citi banks never pass shouldAutoStartCiti', () => {
+  for (const bank of ['chase', 'amex', 'wells_fargo', 'us_bank', 'capital_one']) {
+    assert.equal(shouldAutoStartCiti({ ...citiReadyGate, bank }), false);
+  }
 });
 
 test('NeedsInput resume arms capture on current card without switching', () => {
@@ -416,4 +488,34 @@ test('SyncWebView wires Wells auto-start without Chase-only gates', () => {
   )?.[0] || '';
   assert.match(reprobeEffect, /bank !== 'chase'/);
   assert.doesNotMatch(reprobeEffect, /wells_fargo/);
+});
+
+test('SyncWebView wires Citi auto-start with honest signedIn gate', () => {
+  const src = readFileSync(join(HERE, '..', 'SyncWebView.js'), 'utf8');
+  assert.match(src, /shouldAutoStartCiti/);
+  assert.match(src, /startCitiCapture/);
+  assert.match(src, /\[citi-auto-start\]/);
+  assert.match(src, /Syncing Citi offers/);
+  assert.match(src, /CITI_CAPTURE_UNAVAILABLE[\s\S]{0,240}failCitiCapture/);
+  assert.match(src, /failCitiCapture[\s\S]{0,400}SYNC_MODES\.FAILED/);
+  assert.match(src, /Waiting for Merchant Offers to load for sync to begin/);
+  // Gate requires signedIn === true (not URL alone).
+  const citiGateBlock = src.match(
+    /shouldAutoStartCiti\(\{[\s\S]*?\}\)/,
+  )?.[0] || '';
+  assert.match(citiGateBlock, /signedIn/);
+  assert.doesNotMatch(citiGateBlock, /hasCards/);
+  assert.doesNotMatch(citiGateBlock, /hookReady/);
+  assert.doesNotMatch(citiGateBlock, /chaseHookReady/);
+  // CITI_ON_OFFERS must key off data.signedIn === true.
+  assert.match(src, /data\.signedIn === true/);
+  // Cap One / US Bank auto-start must not appear in this PR.
+  assert.doesNotMatch(src, /shouldAutoStartUsBank/);
+  assert.doesNotMatch(src, /shouldAutoStartCapitalOne|capital_one.*autoStart/);
+  // AUTH_REPROBE stays Chase-only (not Citi).
+  const reprobeEffect = src.match(
+    /While AUTH\/NeedsInput, keep re-probing[\s\S]*?AUTH_REPROBE_MS[\s\S]*?\}, \[visible, bank, syncMode/,
+  )?.[0] || '';
+  assert.match(reprobeEffect, /bank !== 'chase'/);
+  assert.doesNotMatch(reprobeEffect, /bank === 'citi'/);
 });

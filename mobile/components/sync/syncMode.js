@@ -114,12 +114,12 @@ export function partialAbortCopy({ syncedCount = 0, totalCards = 0 } = {}) {
 }
 
 /**
- * Capture cover for banks with auto-start (Chase + Wells). Manual Sync Offers
- * banks (Amex / Citi / US Bank) stay uncovered.
+ * Capture cover for banks with auto-start (Chase + Wells + Citi). Manual Sync
+ * Offers banks (Amex / US Bank) stay uncovered until their auto slices land.
  */
 export function shouldShowSyncCover({ bank, syncMode } = {}) {
   return (
-    (bank === 'chase' || bank === 'wells_fargo')
+    (bank === 'chase' || bank === 'wells_fargo' || bank === 'citi')
     && syncMode === SYNC_MODES.CAPTURING
   );
 }
@@ -144,6 +144,34 @@ export function shouldAutoStartWells({
   if (syncStarted) return false;
   if (onLoginPage) return false;
   if (!onOffersPage) return false;
+
+  if (syncMode === SYNC_MODES.NEEDS_INPUT) return true;
+  if (syncMode === SYNC_MODES.AUTH) return !autoStartConsumed;
+  return false;
+}
+
+/**
+ * Citi auto-start / resume gate. Requires offers surface AND honest signedIn
+ * (Sign Off chrome) — never starts on merchantoffers URL alone.
+ * First start: syncMode === auth and !autoStartConsumed.
+ * Resume: syncMode === needsInput (consumed flag ignored).
+ */
+export function shouldAutoStartCiti({
+  bank,
+  syncMode,
+  onOffersPage,
+  onLoginPage,
+  signedIn,
+  syncStarted,
+  autoStartConsumed,
+  visible = true,
+} = {}) {
+  if (!visible) return false;
+  if (bank !== 'citi') return false;
+  if (syncStarted) return false;
+  if (onLoginPage) return false;
+  if (!onOffersPage) return false;
+  if (signedIn !== true) return false;
 
   if (syncMode === SYNC_MODES.NEEDS_INPUT) return true;
   if (syncMode === SYNC_MODES.AUTH) return !autoStartConsumed;
