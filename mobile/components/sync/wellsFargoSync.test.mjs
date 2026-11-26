@@ -7,6 +7,7 @@ import { wellsFargoRecords } from '../../../api/lib/offers/deviceCatalog.js';
 import {
   buildWellsFargoOfferCaptureJs,
   buildWellsFargoReadJs,
+  buildWellsAppPromoDismissJs,
   buildWellsCaptureWhenReadyJs,
   WELLS_CAPTURE_READY_TIMEOUT_MS,
   WELLS_CAPTURE_POLL_MS,
@@ -753,4 +754,72 @@ test('capture-when-ready times out with WELLS_CAPTURE_UNAVAILABLE when stash nev
   new Function('window', 'document', buildWellsCaptureWhenReadyJs(120, 40))(window, {});
   await new Promise(r => setTimeout(r, 220));
   assert.equal(messages.at(-1)?.type, 'WELLS_CAPTURE_UNAVAILABLE');
+});
+
+test('app promo dismiss clicks Close Dialog when already present, never Download', () => {
+  const dismissJs = buildWellsAppPromoDismissJs();
+  assert.match(dismissJs, /close\\s\*dialog/i);
+  assert.match(dismissJs, /download\\s\*now/i);
+  assert.match(dismissJs, /bank\\s\*easy/i);
+  assert.doesNotMatch(dismissJs, /setInterval|MutationObserver|DOMContentLoaded/);
+
+  let closeClicks = 0;
+  let downloadClicks = 0;
+  const closeBtn = {
+    id: '',
+    getAttribute(name) {
+      if (name === 'aria-label') return 'Close Dialog';
+      return '';
+    },
+    click() { closeClicks += 1; },
+  };
+  const downloadBtn = {
+    id: 'downloadNativeAppButton',
+    innerText: 'Download now',
+    textContent: 'Download now',
+    getAttribute(name) {
+      if (name === 'id') return this.id;
+      return '';
+    },
+    click() { downloadClicks += 1; },
+  };
+  const dialog = {
+    innerText: 'Bank easy\nGet the app loved by millions.\nDownload now',
+    textContent: 'Bank easy\nGet the app loved by millions.\nDownload now',
+    parentElement: null,
+  };
+  closeBtn.parentElement = dialog;
+  downloadBtn.parentElement = dialog;
+
+  const document = {
+    body: {
+      innerText: dialog.innerText,
+      textContent: dialog.textContent,
+    },
+    querySelectorAll(sel) {
+      if (String(sel).includes('button')) return [closeBtn, downloadBtn];
+      return [];
+    },
+  };
+
+  new Function('window', 'document', dismissJs)({}, document);
+  assert.equal(closeClicks, 1);
+  assert.equal(downloadClicks, 0);
+});
+
+test('app promo dismiss is a no-op when promo is absent', () => {
+  let clicks = 0;
+  const otherClose = {
+    getAttribute(name) {
+      if (name === 'aria-label') return 'Close Dialog';
+      return '';
+    },
+    click() { clicks += 1; },
+  };
+  const document = {
+    body: { innerText: 'Sign On', textContent: 'Sign On' },
+    querySelectorAll() { return [otherClose]; },
+  };
+  new Function('window', 'document', buildWellsAppPromoDismissJs())({}, document);
+  assert.equal(clicks, 0);
 });

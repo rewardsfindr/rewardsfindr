@@ -62,11 +62,11 @@ import {
 import {
   buildWellsFargoDealsVisibleJs,
   buildWellsFargoOfferCaptureJs,
+  buildWellsAppPromoDismissJs,
   buildWellsCaptureWhenReadyJs,
   WELLS_CAPTURE_READY_TIMEOUT_MS,
   WELLS_CAPTURE_POLL_MS,
-} from './sync/wellsFargoSync.js';
-import { buildCitiOfferCaptureJs, buildCitiOffersVisibleJs, buildCitiReadJs } from './sync/citiSync.js';
+} from './sync/wellsFargoSync.js';import { buildCitiOfferCaptureJs, buildCitiOffersVisibleJs, buildCitiReadJs } from './sync/citiSync.js';
 import { buildUsBankOfferCaptureJs, buildUsBankOffersVisibleJs, buildUsBankReadJs } from './sync/usBankSync.js';
 import { parseCardLabel }                                 from './sync/cardLabel.js';
 import {
@@ -403,6 +403,7 @@ export default function SyncWebView({ visible, bank, onClose, onSuccess }) {
 
     if (bank === 'wells_fargo') {
       webViewRef.current?.injectJavaScript(buildWellsFargoOfferCaptureJs());
+      webViewRef.current?.injectJavaScript(buildWellsAppPromoDismissJs());
       webViewRef.current?.injectJavaScript(buildWellsFargoDealsVisibleJs());
       if (!url) return;
       const onLogin = (config.loginPaths || []).some(p => url.includes(p.toLowerCase()));
@@ -1346,7 +1347,8 @@ export default function SyncWebView({ visible, bank, onClose, onSuccess }) {
               source={{ uri: config.url }}
               injectedJavaScriptBeforeContentLoaded={
                 bank === 'chase' ? buildChaseOfferCaptureJs()
-                : bank === 'wells_fargo' ? buildWellsFargoOfferCaptureJs()
+                : bank === 'wells_fargo'
+                  ? `${buildWellsFargoOfferCaptureJs()}\n${buildWellsAppPromoDismissJs()}`
                 : bank === 'citi' ? buildCitiOfferCaptureJs()
                 : bank === 'us_bank' ? buildUsBankOfferCaptureJs()
                 : undefined

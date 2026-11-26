@@ -399,6 +399,9 @@ test('SyncWebView wires Wells auto-start without Chase-only gates', () => {
   )?.[0] || '';
   assert.match(startWellsBlock, /buildWellsCaptureWhenReadyJs/);
   assert.doesNotMatch(startWellsBlock, /buildWellsFargoReadJs\(\)/);
+  // Mobile-app promo overlay is dismissed via Close Dialog inject (never Download).
+  assert.match(src, /buildWellsAppPromoDismissJs/);
+  assert.match(src, /serviceType=dealsportal|BANK_CONFIG|config\.url/);
   // Wells gate must not require Chase cards/hook readiness.
   const wellsGateBlock = src.match(
     /shouldAutoStartWells\(\{[\s\S]*?\}\)/,

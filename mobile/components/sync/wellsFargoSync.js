@@ -360,6 +360,91 @@ export const buildWellsFargoDealsVisibleJs = () => `
   true;
 `;
 
+// One-shot dismiss of the mobile-app marketing interstitial ("Bank easy" /
+// Download now) when it is already on screen. No wait/poll/observer — if
+// absent, no-op. Clicks Close Dialog / dialog X only — never Download.
+export const buildWellsAppPromoDismissJs = () => `
+  (function() {
+    try {
+      if (!document.body) return;
+
+      function labelOf(el) {
+        if (!el) return '';
+        var parts = [];
+        try {
+          if (el.getAttribute) {
+            parts.push(el.getAttribute('aria-label') || '');
+            parts.push(el.getAttribute('title') || '');
+            parts.push(el.getAttribute('name') || '');
+            parts.push(el.id || '');
+          }
+        } catch (e) {}
+        try { parts.push(el.innerText || el.textContent || ''); } catch (e) {}
+        return String(parts.join(' ')).replace(/\\s+/g, ' ').trim();
+      }
+
+      function isDownloadControl(el) {
+        if (!el) return true;
+        var t = labelOf(el).toLowerCase();
+        if (/download\\s*now/.test(t)) return true;
+        try {
+          var id = String(el.id || (el.getAttribute && el.getAttribute('id')) || '');
+          if (/downloadNativeApp/i.test(id)) return true;
+        } catch (e) {}
+        return false;
+      }
+
+      function nearAppPromo(el) {
+        var root = el;
+        for (var i = 0; i < 14 && root; i++) {
+          var text = '';
+          try { text = String(root.innerText || root.textContent || ''); } catch (e) {}
+          if (/bank\\s*easy/i.test(text) && /download\\s*now/i.test(text)) return true;
+          if (/wells fargo app/i.test(text) && /download\\s*now/i.test(text)) return true;
+          root = root.parentElement;
+        }
+        return false;
+      }
+
+      function promoPresent() {
+        var body = String(document.body.innerText || '');
+        return /bank\\s*easy/i.test(body) && /download\\s*now/i.test(body);
+      }
+
+      function isCloseDialog(el) {
+        if (!el || isDownloadControl(el)) return false;
+        var t = labelOf(el).toLowerCase();
+        if (/\\bclose\\s*dialog\\b/.test(t)) return true;
+        // Purple X / generic close only when inside the app-promo dialog.
+        if ((t === 'close' || t === 'x' || t === '✕' || t === '×') && nearAppPromo(el)) return true;
+        try {
+          var aria = String((el.getAttribute && el.getAttribute('aria-label')) || '').toLowerCase();
+          if (/\\bclose\\b/.test(aria) && nearAppPromo(el) && !/download/.test(aria)) return true;
+        } catch (e) {}
+        return false;
+      }
+
+      function findClose() {
+        var nodes = [];
+        try {
+          nodes = document.querySelectorAll('button, a, [role="button"], [aria-label], [title]');
+        } catch (e) { return null; }
+        for (var i = 0; i < nodes.length; i++) {
+          if (isCloseDialog(nodes[i])) return nodes[i];
+        }
+        return null;
+      }
+
+      // Already-present only: do not wait for the dialog to appear.
+      if (!promoPresent()) return;
+      var close = findClose();
+      if (!close || isDownloadControl(close)) return;
+      try { close.click(); } catch (e) {}
+    } catch (e) {}
+  })();
+  true;
+`;
+
 // Poll for stash / page deals instead of a fixed sleep after deals-ready.
 // Matches Chase capture-when-ready: auto-start often fires on WELLS_ON_DEALS
 // before getDeals stash or parseable tiles land.
