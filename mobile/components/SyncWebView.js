@@ -75,6 +75,7 @@ import {
   partialAbortCopy,
   shouldShowSyncCover,
   planChaseNeedsInputResume,
+  shouldForceChaseOffersRedirect,
   chaseCoverProgress,
   urlMatchesAnyPath,
 } from './sync/syncMode.js';
@@ -105,6 +106,9 @@ export default function SyncWebView({ visible, bank, onClose, onSuccess }) {
   const syncedCountRef      = useRef(0);
   const chaseRefreshRef     = useRef(false);
   const offersRedirectRef   = useRef(false);
+  const offersSeenRef       = useRef(false);
+  const onOffersPageRef     = useRef(false);
+  const onLoginPageRef      = useRef(false);
   const captureArmed        = useRef(false);
   const syncStartedRef      = useRef(false);
   const syncPhaseRef        = useRef('eligible');
@@ -229,6 +233,9 @@ export default function SyncWebView({ visible, bank, onClose, onSuccess }) {
       syncedCountRef.current      = 0;
       chaseRefreshRef.current     = false;
       offersRedirectRef.current   = false;
+      offersSeenRef.current       = false;
+      onOffersPageRef.current     = false;
+      onLoginPageRef.current      = false;
       captureArmed.current        = false;
       syncStartedRef.current      = false;
       syncPhaseRef.current        = 'eligible';
@@ -257,6 +264,15 @@ export default function SyncWebView({ visible, bank, onClose, onSuccess }) {
       setFailMessage('');
     }
   }, [visible]);
+
+  useEffect(() => {
+    onOffersPageRef.current = onOffersPage;
+    if (onOffersPage) offersSeenRef.current = true;
+  }, [onOffersPage]);
+
+  useEffect(() => {
+    onLoginPageRef.current = onLoginPage;
+  }, [onLoginPage]);
 
   // Chase: login mid-capture → NeedsInput (MFA pre-empts step timer).
   useEffect(() => {
@@ -324,6 +340,16 @@ export default function SyncWebView({ visible, bank, onClose, onSuccess }) {
     const onOffers = !onLogin && urlMatchesAnyPath(url, config.offersPaths);
     if (bank === 'chase') {
       webViewRef.current?.injectJavaScript(buildPageStateJs(config.loginPaths, config.offersPaths));
+      // While waiting to start, always mirror URL leave/return so auto-start
+      // cannot fire on a non-offers page (cards-detected signal alone was sticky).
+      const waiting =
+        syncModeRef.current === SYNC_MODES.AUTH
+        || syncModeRef.current === SYNC_MODES.NEEDS_INPUT;
+      if (waiting || onOffers || onLogin || !config.useCardsDetectedAsOffersSignal) {
+        setOnOffersPage(onOffers);
+        setOnLoginPage(onLogin && !onOffers);
+      }
+      return;
     }
     if (onOffers || onLogin || !config.useCardsDetectedAsOffersSignal) {
       setOnOffersPage(onOffers);
@@ -554,8 +580,8 @@ export default function SyncWebView({ visible, bank, onClose, onSuccess }) {
       const still = shouldAutoStartChase({
         bank,
         syncMode: syncModeRef.current,
-        onOffersPage,
-        onLoginPage,
+        onOffersPage: onOffersPageRef.current,
+        onLoginPage: onLoginPageRef.current,
         hasCards: stillHasCards,
         hookReady: chaseHookReady,
         syncStarted: syncStartedRef.current,
@@ -786,7 +812,18 @@ export default function SyncWebView({ visible, bank, onClose, onSuccess }) {
           pauseForNeedsInput();
           return;
         }
-        if (!data.onOffers && !data.onLogin && !data.onOffersUrl) goToOffers();
+        if (
+          bank === 'chase'
+          && shouldForceChaseOffersRedirect({
+            onOffers: !!data.onOffers,
+            onLogin: !!data.onLogin && !data.onOffers,
+            onOffersUrl: !!data.onOffersUrl,
+            offersSeen: offersSeenRef.current || !!data.onOffers,
+            syncStarted: syncStartedRef.current,
+          })
+        ) {
+          goToOffers();
+        }
         return;
       }
 
@@ -1135,8 +1172,13 @@ export default function SyncWebView({ visible, bank, onClose, onSuccess }) {
       );
     }
 
-    // Chase Auth: no helper copy — auto-start is silent after Offers Hub loads.
-    if (chaseAuth) return null;
+    if (chaseAuth) {
+      return (
+        <Text style={s.helperText}>
+          Waiting for the offers page to load for sync to begin
+        </Text>
+      );
+    }
 
     if (syncStarted) {
       return (
@@ -1183,16 +1225,21 @@ export default function SyncWebView({ visible, bank, onClose, onSuccess }) {
               onLoadStart={(event) => {
                 setPageLoaded(false);
                 if (bank === 'chase') {
-                  // Do not clear onOffersPage / chaseHookReady on every load.
-                  // Chase hub microapp churn was wiping auto-start gates while
-                  // the Offers Hub stayed visible (Auth hang).
+                  // Do not clear chaseHookReady on every load (Auth hang).
+                  // While AUTH/NeedsInput, clear onOffersPage when the URL leaves
+                  // the hub so capture cannot start on the wrong page.
                   const url = String(event?.nativeEvent?.url || currentUrl || '');
+                  const waiting =
+                    syncModeRef.current === SYNC_MODES.AUTH
+                    || syncModeRef.current === SYNC_MODES.NEEDS_INPUT;
                   if (urlMatchesAnyPath(url, config.loginPaths)) {
                     setOnLoginPage(true);
                     setOnOffersPage(false);
                   } else if (urlMatchesAnyPath(url, config.offersPaths)) {
                     setOnOffersPage(true);
                     setOnLoginPage(false);
+                  } else if (waiting && url) {
+                    setOnOffersPage(false);
                   }
                   return;
                 }

@@ -122,6 +122,24 @@ export function shouldShowSyncCover({ bank, syncMode } = {}) {
 }
 
 /**
+ * One-shot redirect onto the offers hub while AUTH. After the user has already
+ * been on offers (offersSeen), do not yank them back — stay interactive and
+ * wait for them to return before auto-start.
+ */
+export function shouldForceChaseOffersRedirect({
+  onOffers = false,
+  onLogin = false,
+  onOffersUrl = false,
+  offersSeen = false,
+  syncStarted = false,
+} = {}) {
+  if (syncStarted) return false;
+  if (onOffers || onLogin || onOffersUrl) return false;
+  if (offersSeen) return false;
+  return true;
+}
+
+/**
  * After MFA / NeedsInput, plan the Chase resume action.
  * Never same-card switch — buildSwitchCardJs posts CARD_SWITCH_ERROR when the
  * menu stays on the current card, which would falsely enter failed.

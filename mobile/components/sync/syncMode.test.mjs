@@ -13,6 +13,7 @@ import {
   partialAbortCopy,
   shouldShowSyncCover,
   planChaseNeedsInputResume,
+  shouldForceChaseOffersRedirect,
   chaseCoverProgress,
   urlMatchesAnyPath,
 } from './syncMode.js';
@@ -224,6 +225,46 @@ test('NeedsInput resume falls back to full_start when walk is done or empty', ()
   );
 });
 
+test('force offers redirect only before the hub has been seen', () => {
+  assert.equal(
+    shouldForceChaseOffersRedirect({
+      onOffers: false,
+      onLogin: false,
+      onOffersUrl: false,
+      offersSeen: false,
+      syncStarted: false,
+    }),
+    true,
+  );
+  assert.equal(
+    shouldForceChaseOffersRedirect({
+      onOffers: false,
+      onLogin: false,
+      onOffersUrl: false,
+      offersSeen: true,
+      syncStarted: false,
+    }),
+    false,
+    'after visiting offers, leaving must stay interactive',
+  );
+  assert.equal(
+    shouldForceChaseOffersRedirect({
+      onOffers: true,
+      offersSeen: false,
+      syncStarted: false,
+    }),
+    false,
+  );
+  assert.equal(
+    shouldForceChaseOffersRedirect({
+      onOffersUrl: true,
+      offersSeen: false,
+      syncStarted: false,
+    }),
+    false,
+  );
+});
+
 test('cover progress tracks saved cards and never needs a backward pulse', () => {
   assert.equal(chaseCoverProgress({ syncedCount: 0, totalCards: 5, inFlight: false }).rawFrac, 0);
   assert.equal(chaseCoverProgress({ syncedCount: 0, totalCards: 5, inFlight: true }).rawFrac, 0.1);
@@ -253,6 +294,13 @@ test('SyncWebView gates cover and resume to Chase helpers (no same-card switch)'
   assert.match(src, /showCover\s*=\s*shouldShowSyncCover/);
   assert.match(src, /AUTH_REPROBE_MS/);
   assert.match(src, /\[chase-auto-start\]/);
+  assert.match(src, /Waiting for the offers page to load for sync to begin/);
+  assert.match(src, /shouldForceChaseOffersRedirect/);
+  assert.match(src, /onOffersPageRef\.current/);
+  assert.doesNotMatch(
+    src,
+    /After sign-in, sync starts automatically/,
+  );
   assert.doesNotMatch(
     src,
     /onLoadStart[\s\S]*?if \(bank === 'chase'\) setChaseHookReady\(false\)/,
