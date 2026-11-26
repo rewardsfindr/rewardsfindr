@@ -2,9 +2,17 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
   buildCaptureOffersJs,
+  buildChaseCaptureWhenReadyJs,
   buildChaseOfferCaptureJs,
+  buildChaseHookReadyProbeJs,
+  buildChasePauseCaptureJs,
   buildListCardsJs,
   buildSwitchCardJs,
+  CHASE_OFFER_HOOK_VERSION,
+  CHASE_SWITCH_TIMEOUT_MS,
+  CHASE_CAPTURE_READY_TIMEOUT_MS,
+  CHASE_CAPTURE_POLL_MS,
+  CHASE_LEGACY_SWITCH_SETTLE_MS,
   mapChaseCustomerOffers,
   mergeDetectedCards,
   nextChaseCardPosition,
@@ -543,6 +551,33 @@ test('asks for another card request when the offers response was missed', () => 
   assert.equal(messages[0].type, 'CHASE_CAPTURE_UNAVAILABLE');
 });
 
+test('capture-when-ready posts as soon as the hooked stash lands', async () => {
+  assert.ok(CHASE_SWITCH_TIMEOUT_MS < 8000);
+  assert.ok(CHASE_CAPTURE_POLL_MS <= 150);
+  assert.ok(CHASE_CAPTURE_READY_TIMEOUT_MS >= 2000);
+  assert.ok(CHASE_LEGACY_SWITCH_SETTLE_MS < CHASE_SWITCH_TIMEOUT_MS);
+  assert.match(buildSwitchCardJs(0), /Math\.min\(900,/);
+
+  const button = new El('DIV', { id: 'select-credit-card-account', text: 'Sapphire Reserve (...2222)' });
+  const messages = [];
+  const window = {
+    __chaseLastOfferCapture: null,
+    ReactNativeWebView: { postMessage(raw) { messages.push(JSON.parse(raw)); } },
+  };
+  // Injected script is an async IIFE ending in `true;` — start it, then land the stash.
+  new Function('window', 'document', buildChaseCaptureWhenReadyJs(500, 40))(window, page([button]));
+  await new Promise(r => setTimeout(r, 80));
+  window.__chaseLastOfferCapture = {
+    gridFound: true,
+    partial: false,
+    tileCount: 1,
+    offers: [{ merchantName: 'Target', bankOfferId: 'FIGG:9' }],
+  };
+  await new Promise(r => setTimeout(r, 120));
+  assert.equal(messages.at(-1)?.type, 'CAPTURE_OFFERS');
+  assert.equal(messages.at(-1)?.offers[0]?.merchantName, 'Target');
+});
+
 test('walks every card once, starting from the card already on screen', () => {
   let position = 4;
   let synced = 0;
@@ -566,4 +601,42 @@ test('keeps a full card list when a later detection only sees the open card', ()
   const visibleOnly = [{ label: 'Sapphire Reserve (...2222)', index: 0 }];
   assert.equal(mergeDetectedCards(full, visibleOnly), full);
   assert.deepEqual(mergeDetectedCards([], visibleOnly), visibleOnly);
+});
+
+test('hook-ready probe posts CHASE_HOOK_READY only when version matches', () => {
+  const messages = [];
+  const window = {
+    __chaseOfferHookVersion: CHASE_OFFER_HOOK_VERSION,
+    ReactNativeWebView: { postMessage(raw) { messages.push(JSON.parse(raw)); } },
+  };
+  new Function('window', 'document', buildChaseHookReadyProbeJs())(window, {});
+  assert.equal(messages[0].type, 'CHASE_HOOK_READY');
+  assert.equal(messages[0].version, CHASE_OFFER_HOOK_VERSION);
+
+  messages.length = 0;
+  window.__chaseOfferHookVersion = 1;
+  new Function('window', 'document', buildChaseHookReadyProbeJs())(window, {});
+  assert.equal(messages.length, 0);
+});
+
+test('pause capture clears offer stash without touching generation', () => {
+  const window = {
+    __chaseCaptureGeneration: 3,
+    __chaseLastOfferCapture: { gridFound: true, offers: [{ merchantName: 'X' }] },
+    __chaseHookError: 'stale',
+  };
+  new Function('window', 'document', buildChasePauseCaptureJs())(window, {});
+  assert.equal(window.__chaseLastOfferCapture, null);
+  assert.equal(window.__chaseHookError, '');
+  assert.equal(window.__chaseCaptureGeneration, 3);
+});
+
+test('offer hook install still sets the current hook version', () => {
+  const window = {
+    XMLHttpRequest: function XHR() {},
+    fetch() { return Promise.resolve({ ok: true, clone() { return this; }, text() { return Promise.resolve('{}'); } }); },
+  };
+  window.XMLHttpRequest.prototype = { open() {}, send() {} };
+  new Function('window', 'document', buildChaseOfferCaptureJs())(window, {});
+  assert.equal(window.__chaseOfferHookVersion, CHASE_OFFER_HOOK_VERSION);
 });

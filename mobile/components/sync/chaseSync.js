@@ -7,6 +7,10 @@
 // The old mds-select markup is still handled.
 // ─────────────────────────────────────────────
 
+import { CHASE_OFFER_HOOK_VERSION } from './syncMode.js';
+
+export { CHASE_OFFER_HOOK_VERSION };
+
 export const CHASE_CREDIT_CARD_KEYWORDS = [
   'sapphire', 'freedom', 'flex', 'slate', 'ink', 'visa', 'united', 'marriott',
   'hyatt', 'southwest', 'amazon', 'prime', 'disney', 'starbucks', 'ihg',
@@ -204,12 +208,39 @@ export const mapChaseCustomerOffers = new Function(`
   return (${mapChaseCustomerOffersSource});
 `)();
 
+// Posts when the fetch/XHR offer hook is installed at the expected version.
+export const buildChaseHookReadyProbeJs = () => `
+  (function() {
+    try {
+      if (window.__chaseOfferHookVersion === ${CHASE_OFFER_HOOK_VERSION}) {
+        window.ReactNativeWebView.postMessage(JSON.stringify({
+          type: 'CHASE_HOOK_READY',
+          version: window.__chaseOfferHookVersion,
+        }));
+      }
+    } catch (e) {}
+  })();
+  true;
+`;
+
+// Clears the offer stash when capture pauses for MFA / NeedsInput so a
+// pre-pause generation cannot apply to the wrong card on resume.
+export const buildChasePauseCaptureJs = () => `
+  (function() {
+    try {
+      window.__chaseLastOfferCapture = null;
+      window.__chaseHookError = '';
+    } catch (e) {}
+  })();
+  true;
+`;
+
 // Installed before the offers page runs so the customer-offers response is
 // stored as offer fields only. Sync posts that stash; it does not read tiles.
 export const buildChaseOfferCaptureJs = () => `
   (function() {
     try {
-      if (window.__chaseOfferHookVersion === 7) return;
+      if (window.__chaseOfferHookVersion === ${CHASE_OFFER_HOOK_VERSION}) return;
       if (window.__chaseCaptureGeneration == null) window.__chaseCaptureGeneration = 0;
       var summarizeOfferTerms = ${summarizeOfferTermsSource};
       var mapChaseCustomerOffers = ${mapChaseCustomerOffersSource};
@@ -314,13 +345,20 @@ export const buildChaseOfferCaptureJs = () => `
           });
         };
       }
-      window.__chaseOfferHookVersion = 7;
+      window.__chaseOfferHookVersion = ${CHASE_OFFER_HOOK_VERSION};
     } catch (e) {
       window.__chaseHookError = String(e && e.message || e);
     }
   })();
   true;
 `;
+
+// Default switch / capture waits. Switch exits early once tiles are stable;
+// capture-when-ready exits as soon as the hooked customer-offers stash lands.
+export const CHASE_SWITCH_TIMEOUT_MS = 4500;
+export const CHASE_CAPTURE_READY_TIMEOUT_MS = 2800;
+export const CHASE_CAPTURE_POLL_MS = 120;
+export const CHASE_LEGACY_SWITCH_SETTLE_MS = 900;
 
 // Posts the last customer-offers response. The raw response never leaves the page.
 export const buildCaptureOffersJs = () => `
@@ -343,6 +381,46 @@ export const buildCaptureOffersJs = () => `
         offers: stash.offers,
         cardLabel: readChaseCardLabel() || stash.cardLabel,
       }));
+    } catch (e) {
+      window.ReactNativeWebView.postMessage(JSON.stringify({ type: 'ERROR', message: e.message }));
+    }
+  })();
+  true;
+`;
+
+// Poll for the hooked stash instead of a fixed post-switch sleep. Posts the same
+// CAPTURE_OFFERS / CHASE_CAPTURE_UNAVAILABLE messages as buildCaptureOffersJs.
+export const buildChaseCaptureWhenReadyJs = (
+  timeoutMs = CHASE_CAPTURE_READY_TIMEOUT_MS,
+  intervalMs = CHASE_CAPTURE_POLL_MS,
+) => `
+  (async function() {
+    try {
+      var readChaseCardLabel = ${readChaseCardLabelSource};
+      var started = Date.now();
+      var posted = false;
+      while (Date.now() - started < ${timeoutMs}) {
+        var stash = window.__chaseLastOfferCapture;
+        if (stash && stash.gridFound) {
+          window.ReactNativeWebView.postMessage(JSON.stringify({
+            type: 'CAPTURE_OFFERS',
+            gridFound: true,
+            partial: stash.partial === true,
+            tileCount: stash.tileCount,
+            offers: stash.offers,
+            cardLabel: readChaseCardLabel() || stash.cardLabel,
+          }));
+          posted = true;
+          break;
+        }
+        await new Promise(function(resolve) { setTimeout(resolve, ${intervalMs}); });
+      }
+      if (!posted) {
+        window.ReactNativeWebView.postMessage(JSON.stringify({
+          type: 'CHASE_CAPTURE_UNAVAILABLE',
+          hookError: window.__chaseHookError || '',
+        }));
+      }
     } catch (e) {
       window.ReactNativeWebView.postMessage(JSON.stringify({ type: 'ERROR', message: e.message }));
     }
@@ -455,7 +533,7 @@ export const buildListCardsJs = () => `
   true;
 `;
 
-export const buildSwitchCardJs = (index, timeoutMs = 3500) => `
+export const buildSwitchCardJs = (index, timeoutMs = CHASE_SWITCH_TIMEOUT_MS) => `
   (async function() {
     ${chaseMenuHelpers()}
     try {
@@ -470,7 +548,8 @@ export const buildSwitchCardJs = (index, timeoutMs = 3500) => `
         if (window.__chaseArmNextCapture) window.__chaseArmNextCapture();
         legacyTarget.click();
         legacy.dispatchEvent(new Event('change', { bubbles: true }));
-        await new Promise(function(resolve) { setTimeout(resolve, ${timeoutMs}); });
+        // Legacy select has no tile stability signal — short settle, not full timeout.
+        await new Promise(function(resolve) { setTimeout(resolve, Math.min(${CHASE_LEGACY_SWITCH_SETTLE_MS}, ${timeoutMs})); });
         var updated = legacy.querySelector('mds-select-option[selected="true"]');
         post({
           type: 'CARD_SWITCHED',
@@ -504,7 +583,7 @@ export const buildSwitchCardJs = (index, timeoutMs = 3500) => `
       var stable = 0;
       var lastSig = beforeSig;
       while (Date.now() - started < ${timeoutMs}) {
-        await new Promise(function(resolve) { setTimeout(resolve, 200); });
+        await new Promise(function(resolve) { setTimeout(resolve, 150); });
         var current = menuButton();
         label = current ? norm(current.innerText) : '';
         var sig = tileSig();
