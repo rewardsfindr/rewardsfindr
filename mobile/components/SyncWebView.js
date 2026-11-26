@@ -63,6 +63,7 @@ import {
   SYNC_MODES,
   STEP_TIMEOUT_MS,
   AUTO_START_DEBOUNCE_MS,
+  AUTH_REPROBE_MS,
   CHASE_OFFER_HOOK_VERSION,
   shouldAutoStartChase,
   nextSyncMode,
@@ -70,6 +71,7 @@ import {
   partialAbortCopy,
   shouldShowSyncCover,
   planChaseNeedsInputResume,
+  urlMatchesAnyPath,
 } from './sync/syncMode.js';
 import BankLogoIcon from './BankLogoIcon.js';
 
@@ -309,8 +311,8 @@ export default function SyncWebView({ visible, bank, onClose, onSuccess }) {
     setCurrentUrl(navState.url);
     if (config.useAmexCardSwitcher) return;
     const url      = navState.url.toLowerCase();
-    const onLogin  = (config.loginPaths  || []).some(p => url.includes(p.toLowerCase()));
-    const onOffers = !onLogin && (config.offersPaths || []).some(p => url.includes(p.toLowerCase()));
+    const onLogin  = urlMatchesAnyPath(url, config.loginPaths);
+    const onOffers = !onLogin && urlMatchesAnyPath(url, config.offersPaths);
     if (bank === 'chase') {
       webViewRef.current?.injectJavaScript(buildPageStateJs(config.loginPaths, config.offersPaths));
     }
@@ -506,7 +508,7 @@ export default function SyncWebView({ visible, bank, onClose, onSuccess }) {
     clearAutoStartDebounce();
 
     const hasCards = cardCount > 0 || cardOptionsRef.current.length > 0;
-    const gate = shouldAutoStartChase({
+    const gateInput = {
       bank,
       syncMode,
       onOffersPage,
@@ -516,8 +518,22 @@ export default function SyncWebView({ visible, bank, onClose, onSuccess }) {
       syncStarted: syncStartedRef.current,
       autoStartConsumed: autoStartConsumedRef.current,
       visible,
-    });
-    if (!gate) return;
+    };
+    const gate = shouldAutoStartChase(gateInput);
+    if (!gate) {
+      if (syncMode === SYNC_MODES.AUTH || syncMode === SYNC_MODES.NEEDS_INPUT) {
+        console.log('[chase-auto-start] waiting', {
+          syncMode,
+          onOffersPage,
+          onLoginPage,
+          hasCards,
+          hookReady: chaseHookReady,
+          autoStartConsumed: autoStartConsumedRef.current,
+          syncStarted: syncStartedRef.current,
+        });
+      }
+      return;
+    }
 
     autoStartDebounceRef.current = setTimeout(() => {
       const stillHasCards = cardCount > 0 || cardOptionsRef.current.length > 0;
@@ -533,6 +549,7 @@ export default function SyncWebView({ visible, bank, onClose, onSuccess }) {
         visible: true,
       });
       if (!still) return;
+      console.log('[chase-auto-start] firing', { syncMode: syncModeRef.current });
       if (syncModeRef.current === SYNC_MODES.NEEDS_INPUT) {
         resumeChaseCapture();
       } else {
@@ -551,6 +568,29 @@ export default function SyncWebView({ visible, bank, onClose, onSuccess }) {
     chaseHookReady,
     pageLoaded,
   ]);
+
+  // While AUTH/NeedsInput, keep re-probing hook + page + cards until gates open.
+  // Chase SPA/microapp loads can miss a one-shot inject on first loadEnd.
+  useEffect(() => {
+    if (!visible || bank !== 'chase') return;
+    if (syncMode !== SYNC_MODES.AUTH && syncMode !== SYNC_MODES.NEEDS_INPUT) return;
+    if (syncStartedRef.current) return;
+
+    const reprobe = () => {
+      if (syncStartedRef.current) return;
+      if (syncModeRef.current !== SYNC_MODES.AUTH && syncModeRef.current !== SYNC_MODES.NEEDS_INPUT) {
+        return;
+      }
+      webViewRef.current?.injectJavaScript(buildChaseOfferCaptureJs());
+      webViewRef.current?.injectJavaScript(buildChaseHookReadyProbeJs());
+      webViewRef.current?.injectJavaScript(buildPageStateJs(config.loginPaths, config.offersPaths));
+      webViewRef.current?.injectJavaScript(DETECT_CARDS_JS);
+    };
+
+    reprobe();
+    const id = setInterval(reprobe, AUTH_REPROBE_MS);
+    return () => clearInterval(id);
+  }, [visible, bank, syncMode, config.loginPaths, config.offersPaths]);
 
   const switchChaseCard = (position) => {
     cardIndexRef.current = position;
@@ -1107,11 +1147,24 @@ export default function SyncWebView({ visible, bank, onClose, onSuccess }) {
               }
               onMessage={handleMessage}
               onNavigationStateChange={handleNavigationStateChange}
-              onLoadStart={() => {
+              onLoadStart={(event) => {
                 setPageLoaded(false);
+                if (bank === 'chase') {
+                  // Do not clear onOffersPage / chaseHookReady on every load.
+                  // Chase hub microapp churn was wiping auto-start gates while
+                  // the Offers Hub stayed visible (Auth hang).
+                  const url = String(event?.nativeEvent?.url || currentUrl || '');
+                  if (urlMatchesAnyPath(url, config.loginPaths)) {
+                    setOnLoginPage(true);
+                    setOnOffersPage(false);
+                  } else if (urlMatchesAnyPath(url, config.offersPaths)) {
+                    setOnOffersPage(true);
+                    setOnLoginPage(false);
+                  }
+                  return;
+                }
                 setOnOffersPage(false);
                 setOnLoginPage(false);
-                if (bank === 'chase') setChaseHookReady(false);
               }}
               onLoadEnd={handleLoadEnd}
               style={s.webview}

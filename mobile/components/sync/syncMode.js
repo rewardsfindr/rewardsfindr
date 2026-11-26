@@ -13,7 +13,19 @@ export const SYNC_MODES = Object.freeze({
 
 export const STEP_TIMEOUT_MS = 60_000;
 export const AUTO_START_DEBOUNCE_MS = 400;
+/** While AUTH, re-inject hook/page/card probes until auto-start can fire. */
+export const AUTH_REPROBE_MS = 1_500;
 export const CHASE_OFFER_HOOK_VERSION = 7;
+
+/** True when href contains any of the configured Chase offers path needles. */
+export function urlMatchesAnyPath(url, paths = []) {
+  const href = String(url || '').toLowerCase();
+  if (!href) return false;
+  return (paths || []).some((p) => {
+    const needle = String(p || '').toLowerCase();
+    return needle.length > 0 && href.includes(needle);
+  });
+}
 
 /**
  * Chase auto-start / resume gate. Never starts solely because !onLoginPage.

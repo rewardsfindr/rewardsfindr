@@ -6,13 +6,16 @@ import { fileURLToPath } from 'node:url';
 import {
   SYNC_MODES,
   STEP_TIMEOUT_MS,
+  AUTH_REPROBE_MS,
   shouldAutoStartChase,
   nextSyncMode,
   isPartialAbort,
   partialAbortCopy,
   shouldShowSyncCover,
   planChaseNeedsInputResume,
+  urlMatchesAnyPath,
 } from './syncMode.js';
+import { BANK_CONFIG } from './bankConfig.js';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 
@@ -30,6 +33,37 @@ const readyGate = {
 
 test('STEP_TIMEOUT_MS is 60 seconds', () => {
   assert.equal(STEP_TIMEOUT_MS, 60_000);
+});
+
+test('AUTH_REPROBE_MS is 1.5 seconds', () => {
+  assert.equal(AUTH_REPROBE_MS, 1_500);
+});
+
+test('Chase offersPaths match classic and live CPO hub URLs', () => {
+  const paths = BANK_CONFIG.chase.offersPaths;
+  assert.equal(
+    urlMatchesAnyPath(
+      'https://secure.chase.com/web/auth/dashboard#/dashboard/merchantOffers/offer-hub',
+      paths,
+    ),
+    true,
+  );
+  assert.equal(
+    urlMatchesAnyPath(
+      'https://secure.chase.com/web/.../cpo/offerAndShopping/chaseOffers/offerHub',
+      paths,
+    ),
+    true,
+  );
+  assert.equal(
+    urlMatchesAnyPath('https://secure.chase.com/web/auth/#/logon/logon/chaseOnlinePassword', paths),
+    false,
+  );
+});
+
+test('urlMatchesAnyPath is case-insensitive and ignores empty needles', () => {
+  assert.equal(urlMatchesAnyPath('https://x/OfferHub', ['offerHub']), true);
+  assert.equal(urlMatchesAnyPath('https://x/foo', ['', null, 'bar']), false);
 });
 
 test('gate false if login', () => {
@@ -199,4 +233,10 @@ test('SyncWebView gates cover and resume to Chase helpers (no same-card switch)'
     /resumeChaseCapture[\s\S]*?switchChaseCard\(pos\)/,
   );
   assert.match(src, /showCover\s*=\s*shouldShowSyncCover/);
+  assert.match(src, /AUTH_REPROBE_MS/);
+  assert.match(src, /\[chase-auto-start\]/);
+  assert.doesNotMatch(
+    src,
+    /onLoadStart[\s\S]*?if \(bank === 'chase'\) setChaseHookReady\(false\)/,
+  );
 });

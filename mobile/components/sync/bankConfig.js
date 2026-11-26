@@ -20,7 +20,16 @@ export const BANK_CONFIG = {
     offersUrl: 'https://secure.chase.com/web/auth/dashboard#/dashboard/merchantOffers/offer-hub',
     label: 'Chase Offers',
     color: '#1a3a6b',
-    offersPaths: ['/cardmember-offers', 'merchantOffers'],
+    // merchantOffers / cardmember-offers = classic hash hub.
+    // chaseOffers / offerHub / offer-hub = live CPO hub
+    // (/cpo/offerAndShopping/chaseOffers/offerHub).
+    offersPaths: [
+      '/cardmember-offers',
+      'merchantOffers',
+      'chaseOffers',
+      'offerHub',
+      'offer-hub',
+    ],
     loginPaths: ['/sign-in', '/logon', '/login', '/sso', '/identify', '/challenge'],
     useCardsDetectedAsOffersSignal: true,
   },
