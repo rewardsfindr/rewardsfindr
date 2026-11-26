@@ -114,12 +114,12 @@ export function partialAbortCopy({ syncedCount = 0, totalCards = 0 } = {}) {
 }
 
 /**
- * Capture cover for banks with auto-start (Chase + Wells + Citi). Manual Sync
- * Offers banks (Amex / US Bank) stay uncovered until their auto slices land.
+ * Capture cover for banks with auto-start (Chase + Wells + Citi + Amex).
+ * Manual Sync Offers banks (US Bank) stay uncovered until their auto slice lands.
  */
 export function shouldShowSyncCover({ bank, syncMode } = {}) {
   return (
-    (bank === 'chase' || bank === 'wells_fargo' || bank === 'citi')
+    (bank === 'chase' || bank === 'wells_fargo' || bank === 'citi' || bank === 'amex')
     && syncMode === SYNC_MODES.CAPTURING
   );
 }
@@ -172,6 +172,35 @@ export function shouldAutoStartCiti({
   if (onLoginPage) return false;
   if (!onOffersPage) return false;
   if (signedIn !== true) return false;
+
+  if (syncMode === SYNC_MODES.NEEDS_INPUT) return true;
+  if (syncMode === SYNC_MODES.AUTH) return !autoStartConsumed;
+  return false;
+}
+
+/**
+ * Amex auto-start / resume gate. Requires offers surface AND amexCardsReady
+ * (AMEX_CARDS_DETECTED with cards) — never Chase hasCards+hookReady, never
+ * !onLoginPage alone.
+ * First start: syncMode === auth and !autoStartConsumed.
+ * Resume: syncMode === needsInput (consumed flag ignored).
+ */
+export function shouldAutoStartAmex({
+  bank,
+  syncMode,
+  onOffersPage,
+  onLoginPage,
+  amexCardsReady,
+  syncStarted,
+  autoStartConsumed,
+  visible = true,
+} = {}) {
+  if (!visible) return false;
+  if (bank !== 'amex') return false;
+  if (syncStarted) return false;
+  if (onLoginPage) return false;
+  if (!onOffersPage) return false;
+  if (!amexCardsReady) return false;
 
   if (syncMode === SYNC_MODES.NEEDS_INPUT) return true;
   if (syncMode === SYNC_MODES.AUTH) return !autoStartConsumed;
@@ -272,4 +301,33 @@ export function chaseCoverProgress({ syncedCount = 0, totalCards = 1, inFlight =
     rawFrac,
     coverIndex: Math.min(total, synced < total ? synced + 1 : Math.max(synced, 1)),
   };
+}
+
+/** Amex multi-card cover progress — same math as Chase; UI adds phase label. */
+export function amexCoverProgress(args) {
+  return chaseCoverProgress(args);
+}
+
+/**
+ * After MFA / NeedsInput, plan Amex resume without Chase walk semantics.
+ * Continue the current eligible→enrolled walk from the next unsaved card;
+ * never claim planChaseNeedsInputResume.
+ */
+export function planAmexNeedsInputResume({
+  cardOptionsLength = 0,
+  visitedCount = 0,
+  syncPhase = 'eligible',
+} = {}) {
+  const total = Number(cardOptionsLength) || 0;
+  const visited = Number(visitedCount) || 0;
+  if (total < 1) {
+    return { action: 'full_start' };
+  }
+  if (visited < total) {
+    return { action: 'continue_walk', phase: syncPhase || 'eligible' };
+  }
+  if (syncPhase === 'eligible') {
+    return { action: 'phase_to_enrolled' };
+  }
+  return { action: 'full_start' };
 }

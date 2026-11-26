@@ -314,5 +314,5 @@ export const amexHandleLoadEnd = ({
     injectJavaScript(AMEX_OPEN_AND_DETECT_JS);
   }
 
-  return { onOffersPage, detectedPhase };
+  return { onOffersPage, onLogin: !!onLogin, detectedPhase };
 };

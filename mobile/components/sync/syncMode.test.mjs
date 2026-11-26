@@ -10,18 +10,22 @@ import {
   shouldAutoStartChase,
   shouldAutoStartWells,
   shouldAutoStartCiti,
+  shouldAutoStartAmex,
   nextSyncMode,
   isPartialAbort,
   partialAbortCopy,
   shouldShowSyncCover,
   planChaseNeedsInputResume,
+  planAmexNeedsInputResume,
   shouldForceChaseOffersRedirect,
   shouldForceCitiLogin,
   shouldForceCitiOffersRedirect,
   chaseCoverProgress,
+  amexCoverProgress,
   urlMatchesAnyPath,
 } from './syncMode.js';
 import { BANK_CONFIG } from './bankConfig.js';
+import { AMEX_SWITCH_TIMEOUT_MS } from './amexSync.js';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 
@@ -173,7 +177,7 @@ test('partial abort retains synced cards and is not full', () => {
   assert.match(partialAbortCopy({ syncedCount: 1, totalCards: 4 }), /Saved 1 of 4/);
 });
 
-test('capture cover is Chase + Wells + Citi; other Sync Offers banks stay uncovered', () => {
+test('capture cover is Chase + Wells + Citi + Amex; US Bank stays uncovered', () => {
   assert.equal(
     shouldShowSyncCover({ bank: 'chase', syncMode: SYNC_MODES.CAPTURING }),
     true,
@@ -184,6 +188,10 @@ test('capture cover is Chase + Wells + Citi; other Sync Offers banks stay uncove
   );
   assert.equal(
     shouldShowSyncCover({ bank: 'citi', syncMode: SYNC_MODES.CAPTURING }),
+    true,
+  );
+  assert.equal(
+    shouldShowSyncCover({ bank: 'amex', syncMode: SYNC_MODES.CAPTURING }),
     true,
   );
   assert.equal(
@@ -198,13 +206,15 @@ test('capture cover is Chase + Wells + Citi; other Sync Offers banks stay uncove
     shouldShowSyncCover({ bank: 'citi', syncMode: SYNC_MODES.AUTH }),
     false,
   );
-  for (const bank of ['amex', 'us_bank']) {
-    assert.equal(
-      shouldShowSyncCover({ bank, syncMode: SYNC_MODES.CAPTURING }),
-      false,
-      `${bank} must not show auto-sync capture cover`,
-    );
-  }
+  assert.equal(
+    shouldShowSyncCover({ bank: 'amex', syncMode: SYNC_MODES.AUTH }),
+    false,
+  );
+  assert.equal(
+    shouldShowSyncCover({ bank: 'us_bank', syncMode: SYNC_MODES.CAPTURING }),
+    false,
+    'us_bank must not show auto-sync capture cover',
+  );
 });
 
 const wellsReadyGate = {
@@ -682,4 +692,159 @@ test('SyncWebView wires Citi auto-start with honest signedIn gate', () => {
     src,
     /Citi SPA can paint merchantoffers before Sign Off[\s\S]*?bank !== 'citi'[\s\S]*?buildCitiOffersVisibleJs\(\)[\s\S]*?AUTH_REPROBE_MS/,
   );
+});
+
+const amexReadyGate = {
+  bank: 'amex',
+  syncMode: SYNC_MODES.AUTH,
+  onOffersPage: true,
+  onLoginPage: false,
+  amexCardsReady: true,
+  syncStarted: false,
+  autoStartConsumed: false,
+  visible: true,
+};
+
+test('Amex gate false if login', () => {
+  assert.equal(shouldAutoStartAmex({ ...amexReadyGate, onLoginPage: true }), false);
+});
+
+test('Amex gate false without offers surface', () => {
+  assert.equal(shouldAutoStartAmex({ ...amexReadyGate, onOffersPage: false }), false);
+  assert.equal(
+    shouldAutoStartAmex({ ...amexReadyGate, onOffersPage: false, onLoginPage: false }),
+    false,
+    'never auto-start on !onLoginPage alone',
+  );
+});
+
+test('Amex gate false without amexCardsReady (not Chase hasCards+hook)', () => {
+  assert.equal(shouldAutoStartAmex({ ...amexReadyGate, amexCardsReady: false }), false);
+});
+
+test('Amex gate false when already syncing', () => {
+  assert.equal(shouldAutoStartAmex({ ...amexReadyGate, syncStarted: true }), false);
+});
+
+test('Amex gate true once when cards ready + offers; consumed blocks second start', () => {
+  assert.equal(shouldAutoStartAmex(amexReadyGate), true);
+  assert.equal(
+    shouldAutoStartAmex({ ...amexReadyGate, autoStartConsumed: true }),
+    false,
+  );
+});
+
+test('Amex needsInput resume allows start even if consumed', () => {
+  assert.equal(
+    shouldAutoStartAmex({
+      ...amexReadyGate,
+      syncMode: SYNC_MODES.NEEDS_INPUT,
+      autoStartConsumed: true,
+    }),
+    true,
+  );
+});
+
+test('non-Amex banks never pass shouldAutoStartAmex', () => {
+  for (const bank of ['chase', 'wells_fargo', 'citi', 'us_bank', 'capital_one']) {
+    assert.equal(shouldAutoStartAmex({ ...amexReadyGate, bank }), false);
+  }
+});
+
+test('Amex NeedsInput resume continues walk without Chase planner', () => {
+  assert.deepEqual(
+    planAmexNeedsInputResume({
+      cardOptionsLength: 4,
+      visitedCount: 1,
+      syncPhase: 'eligible',
+    }),
+    { action: 'continue_walk', phase: 'eligible' },
+  );
+  assert.deepEqual(
+    planAmexNeedsInputResume({
+      cardOptionsLength: 4,
+      visitedCount: 4,
+      syncPhase: 'eligible',
+    }),
+    { action: 'phase_to_enrolled' },
+  );
+  assert.deepEqual(
+    planAmexNeedsInputResume({
+      cardOptionsLength: 0,
+      visitedCount: 0,
+      syncPhase: 'eligible',
+    }),
+    { action: 'full_start' },
+  );
+  assert.notEqual(
+    planAmexNeedsInputResume({
+      cardOptionsLength: 4,
+      visitedCount: 1,
+      syncPhase: 'eligible',
+    }).action,
+    'arm_capture',
+  );
+});
+
+test('amexCoverProgress matches Chase math; AMEX_SWITCH_TIMEOUT_MS stays 3500', () => {
+  assert.equal(AMEX_SWITCH_TIMEOUT_MS, 3500);
+  assert.equal(
+    amexCoverProgress({ syncedCount: 2, totalCards: 8, inFlight: true }).rawFrac,
+    chaseCoverProgress({ syncedCount: 2, totalCards: 8, inFlight: true }).rawFrac,
+  );
+  assert.equal(
+    amexCoverProgress({ syncedCount: 0, totalCards: 4, inFlight: true }).coverIndex,
+    1,
+  );
+});
+
+test('SyncWebView wires Amex auto-start with cards-ready gate and arm-before-switch', () => {
+  const src = readFileSync(join(HERE, '..', 'SyncWebView.js'), 'utf8');
+  assert.match(src, /shouldAutoStartAmex/);
+  assert.match(src, /startAmexCapture/);
+  assert.match(src, /resumeAmexCapture/);
+  assert.match(src, /planAmexNeedsInputResume/);
+  assert.match(src, /\[amex-auto-start\]/);
+  assert.match(src, /Syncing Amex offers/);
+  assert.match(src, /Waiting for Amex cards to load for sync to begin/);
+  assert.match(src, /failAmexCapture[\s\S]{0,400}SYNC_MODES\.FAILED/);
+  assert.match(src, /AMEX_SWITCH_TIMEOUT_MS/);
+  assert.match(src, /amexCoverProgress/);
+  assert.match(src, /abortAmexCaptureConfirmed/);
+  // Gate requires amexCardsReady — not Chase hasCards/hookReady.
+  const amexGateBlock = src.match(
+    /shouldAutoStartAmex\(\{[\s\S]*?\}\)/,
+  )?.[0] || '';
+  assert.match(amexGateBlock, /amexCardsReady/);
+  assert.doesNotMatch(amexGateBlock, /hookReady/);
+  assert.doesNotMatch(amexGateBlock, /chaseHookReady/);
+  assert.doesNotMatch(amexGateBlock, /hasCards/);
+  // Start path preserves arm-before-switch and re-injects JSON capture.
+  const startAmexBlock = src.match(
+    /const startAmexCapture = \(\) => \{[\s\S]*?startingAmexRef\.current = false;\r?\n  \};/,
+  )?.[0] || '';
+  assert.match(startAmexBlock, /buildAmexJsonCaptureJs/);
+  assert.match(startAmexBlock, /switchToNextAmexCard/);
+  assert.match(startAmexBlock, /__amexJsonCaptureArmed = false/);
+  assert.match(startAmexBlock, /AMEX_OPEN_AND_DETECT_JS/);
+  // NeedsInput resume must not call Chase planner.
+  const resumeAmexBlock = src.match(
+    /const resumeAmexCapture = \(\) => \{[\s\S]*?startingAmexRef\.current = false;\r?\n  \};/,
+  )?.[0] || '';
+  assert.match(resumeAmexBlock, /planAmexNeedsInputResume/);
+  assert.doesNotMatch(resumeAmexBlock, /planChaseNeedsInputResume/);
+  // Cap One / US Bank auto-start must not appear.
+  assert.doesNotMatch(src, /shouldAutoStartUsBank/);
+  assert.doesNotMatch(src, /shouldAutoStartCapitalOne|capital_one.*autoStart/);
+  // Amex gets its own open+detect re-probe (Chase/Citi stay separate).
+  assert.match(
+    src,
+    /Amex SPA can paint offers before the card combobox[\s\S]*?bank !== 'amex'[\s\S]*?AMEX_OPEN_AND_DETECT_JS[\s\S]*?AUTH_REPROBE_MS/,
+  );
+  // Chase AUTH_REPROBE stays Chase-only.
+  const chaseReprobeEffect = src.match(
+    /While AUTH\/NeedsInput, keep re-probing[\s\S]*?AUTH_REPROBE_MS[\s\S]*?\}, \[visible, bank, syncMode/,
+  )?.[0] || '';
+  assert.match(chaseReprobeEffect, /bank !== 'chase'/);
+  assert.doesNotMatch(chaseReprobeEffect, /AMEX_OPEN_AND_DETECT/);
 });
