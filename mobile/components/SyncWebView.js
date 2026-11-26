@@ -66,7 +66,14 @@ import {
   buildWellsCaptureWhenReadyJs,
   WELLS_CAPTURE_READY_TIMEOUT_MS,
   WELLS_CAPTURE_POLL_MS,
-} from './sync/wellsFargoSync.js';import { buildCitiOfferCaptureJs, buildCitiOffersVisibleJs, buildCitiReadJs } from './sync/citiSync.js';
+} from './sync/wellsFargoSync.js';import {
+  buildCitiOfferCaptureJs,
+  buildCitiOffersVisibleJs,
+  buildCitiReadJs,
+  buildCitiCaptureWhenReadyJs,
+  CITI_CAPTURE_READY_TIMEOUT_MS,
+  CITI_CAPTURE_POLL_MS,
+} from './sync/citiSync.js';
 import { buildUsBankOfferCaptureJs, buildUsBankOffersVisibleJs, buildUsBankReadJs } from './sync/usBankSync.js';
 import { parseCardLabel }                                 from './sync/cardLabel.js';
 import {
@@ -536,8 +543,12 @@ export default function SyncWebView({ visible, bank, onClose, onSuccess }) {
     autoStartConsumedRef.current = true;
     setCurrentCard('Citi Card');
     enterCapturing();
+    // Install/refresh hook, then poll stash like Wells when-ready — first
+    // auto-start often races CITI_ON_OFFERS before merchant-offers stash lands.
     webViewRef.current?.injectJavaScript(buildCitiOfferCaptureJs());
-    webViewRef.current?.injectJavaScript(buildCitiReadJs());
+    webViewRef.current?.injectJavaScript(
+      buildCitiCaptureWhenReadyJs(CITI_CAPTURE_READY_TIMEOUT_MS, CITI_CAPTURE_POLL_MS),
+    );
     startingCitiRef.current = false;
   };
 
@@ -862,6 +873,27 @@ export default function SyncWebView({ visible, bank, onClose, onSuccess }) {
     const id = setInterval(reprobe, AUTH_REPROBE_MS);
     return () => clearInterval(id);
   }, [visible, bank, syncMode, config.loginPaths, config.offersPaths]);
+
+  // Citi SPA can paint merchantoffers before Sign Off chrome is in innerText.
+  // Re-inject visibility until honest signedIn flips (Chase/Wells reprobes stay separate).
+  useEffect(() => {
+    if (!visible || bank !== 'citi') return;
+    if (syncMode !== SYNC_MODES.AUTH && syncMode !== SYNC_MODES.NEEDS_INPUT) return;
+    if (syncStartedRef.current) return;
+
+    const reprobe = () => {
+      if (syncStartedRef.current) return;
+      if (syncModeRef.current !== SYNC_MODES.AUTH && syncModeRef.current !== SYNC_MODES.NEEDS_INPUT) {
+        return;
+      }
+      if (citiSignedInRef.current === true && onOffersPageRef.current) return;
+      webViewRef.current?.injectJavaScript(buildCitiOffersVisibleJs());
+    };
+
+    reprobe();
+    const id = setInterval(reprobe, AUTH_REPROBE_MS);
+    return () => clearInterval(id);
+  }, [visible, bank, syncMode]);
 
   const switchChaseCard = (position) => {
     cardIndexRef.current = position;

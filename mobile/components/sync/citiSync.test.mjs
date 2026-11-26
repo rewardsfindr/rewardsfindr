@@ -12,6 +12,9 @@ import {
   buildCitiOfferCaptureJs,
   buildCitiOffersVisibleJs,
   buildCitiReadJs,
+  buildCitiCaptureWhenReadyJs,
+  CITI_CAPTURE_READY_TIMEOUT_MS,
+  CITI_CAPTURE_POLL_MS,
   stripCitiOffers,
 } from './citiSync.js';
 
@@ -217,6 +220,8 @@ test('SyncWebView wires Citi capture/read/save the same way as Wells Fargo', () 
   assert.match(syncSource, /buildCitiOfferCaptureJs/);
   assert.match(syncSource, /buildCitiOffersVisibleJs/);
   assert.match(syncSource, /buildCitiReadJs/);
+  assert.match(syncSource, /buildCitiCaptureWhenReadyJs/);
+  assert.match(syncSource, /CITI_CAPTURE_READY_TIMEOUT_MS/);
   assert.match(syncSource, /bank === 'citi'/);
   assert.match(syncSource, /CITI_ON_OFFERS/);
   assert.match(syncSource, /CITI_CAPTURE_UNAVAILABLE/);
@@ -225,6 +230,57 @@ test('SyncWebView wires Citi capture/read/save the same way as Wells Fargo', () 
   assert.equal(typeof buildCitiOffersVisibleJs(), 'string');
   assert.match(buildCitiOffersVisibleJs(), /CITI_ON_OFFERS/);
   assert.equal(BANK_CONFIG.citi.url, 'https://online.citi.com/US/nga/products-offers/merchantoffers');
+  const startCitiBlock = syncSource.match(
+    /const startCitiCapture = \(\) => \{[\s\S]*?startingCitiRef\.current = false;\r?\n  \};/,
+  )?.[0] || '';
+  assert.match(startCitiBlock, /buildCitiCaptureWhenReadyJs/);
+  assert.doesNotMatch(startCitiBlock, /buildCitiReadJs\(\)/);
+});
+
+test('capture-when-ready posts as soon as the merchant-offers stash lands', async () => {
+  assert.ok(CITI_CAPTURE_POLL_MS <= 150);
+  assert.ok(CITI_CAPTURE_READY_TIMEOUT_MS >= 2000);
+
+  const messages = [];
+  const window = {
+    __citiLastOffers: null,
+    ReactNativeWebView: { postMessage(raw) { messages.push(JSON.parse(raw)); } },
+  };
+  new Function('window', 'document', buildCitiCaptureWhenReadyJs(500, 40))(window, {});
+  await new Promise(r => setTimeout(r, 80));
+  assert.equal(messages.length, 0);
+
+  window.__citiLastOffers = {
+    selectedCard: { displayProductName: 'Citi Strata® Card - 4832', cardType: 'CREDIT' },
+    merchantOffers: [{
+      displayOffersCategory: 'Featured',
+      offers: [{
+        offerId: 'READYOFFER1',
+        merchantName: 'Ready Cafe',
+        offerTitle: '5% Back',
+        offerStatus: 'AVAILABLE',
+        offerDiscountType: 'PERCENT',
+        offerEndDate: '',
+        offerExpiryDays: '',
+      }],
+    }],
+  };
+  await new Promise(r => setTimeout(r, 120));
+  assert.equal(messages.at(-1)?.type, 'CITI_OFFERS');
+  assert.equal(
+    messages.at(-1)?.offers.merchantOffers[0].offers[0].offerId,
+    'READYOFFER1',
+  );
+});
+
+test('capture-when-ready times out with CITI_CAPTURE_UNAVAILABLE when stash never lands', async () => {
+  const messages = [];
+  const window = {
+    ReactNativeWebView: { postMessage(raw) { messages.push(JSON.parse(raw)); } },
+  };
+  new Function('window', 'document', buildCitiCaptureWhenReadyJs(120, 40))(window, {});
+  await new Promise(r => setTimeout(r, 220));
+  assert.equal(messages.at(-1)?.type, 'CITI_CAPTURE_UNAVAILABLE');
 });
 
 test('Citi offers-visible posts honest signedIn (never force true from URL alone)', () => {
@@ -237,6 +293,12 @@ test('Citi offers-visible posts honest signedIn (never force true from URL alone
   assert.match(syncSource, /shouldAutoStartCiti/);
   assert.match(syncSource, /startCitiCapture/);
   assert.match(syncSource, /data\.signedIn === true/);
+  // AUTH re-probe re-injects visibility until Sign Off chrome is seen.
+  assert.match(syncSource, /buildCitiOffersVisibleJs\(\)/);
+  assert.match(
+    syncSource,
+    /Citi SPA can paint merchantoffers before Sign Off[\s\S]*?AUTH_REPROBE_MS/,
+  );
 });
 
 test('stripCitiOffers keeps offer fields and the selected credit card only', () => {
