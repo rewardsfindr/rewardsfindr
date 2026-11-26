@@ -114,11 +114,40 @@ export function partialAbortCopy({ syncedCount = 0, totalCards = 0 } = {}) {
 }
 
 /**
- * Capture cover is Chase-only in Slice 0+1. Non-Chase Sync Offers must not
- * show a Chase-branded overlay (plan: other banks unchanged).
+ * Capture cover for banks with auto-start (Chase + Wells). Manual Sync Offers
+ * banks (Amex / Citi / US Bank) stay uncovered.
  */
 export function shouldShowSyncCover({ bank, syncMode } = {}) {
-  return bank === 'chase' && syncMode === SYNC_MODES.CAPTURING;
+  return (
+    (bank === 'chase' || bank === 'wells_fargo')
+    && syncMode === SYNC_MODES.CAPTURING
+  );
+}
+
+/**
+ * Wells Fargo auto-start / resume gate. Requires a positive deals surface
+ * (onOffersPage / WELLS_ON_DEALS) — never starts solely because !onLoginPage.
+ * First start: syncMode === auth and !autoStartConsumed.
+ * Resume: syncMode === needsInput (consumed flag ignored).
+ */
+export function shouldAutoStartWells({
+  bank,
+  syncMode,
+  onOffersPage,
+  onLoginPage,
+  syncStarted,
+  autoStartConsumed,
+  visible = true,
+} = {}) {
+  if (!visible) return false;
+  if (bank !== 'wells_fargo') return false;
+  if (syncStarted) return false;
+  if (onLoginPage) return false;
+  if (!onOffersPage) return false;
+
+  if (syncMode === SYNC_MODES.NEEDS_INPUT) return true;
+  if (syncMode === SYNC_MODES.AUTH) return !autoStartConsumed;
+  return false;
 }
 
 /**

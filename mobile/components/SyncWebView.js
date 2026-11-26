@@ -2,10 +2,9 @@
 // SYNC WEBVIEW MODAL — orchestrator
 // Handles modal UI, state, and message routing.
 //
-// Slice 0+1: shared syncMode machine + Chase auto-start when
-// cards + capture hook are ready. Cover during capturing; re-show
-// WebView on auth / needsInput; Sync Offers remains for non-Chase
-// and as Chase failure fallback.
+// Shared syncMode machine + Chase/Wells auto-start. Cover during
+// capturing; re-show WebView on auth / needsInput; Sync Offers remains
+// for Amex/Citi/US Bank and as Chase/Wells failure fallback.
 //
 // Amex sync flow:
 //   1. User lands on offers page → AMEX_CARDS_DETECTED fires with all cards
@@ -71,6 +70,7 @@ import {
   AUTH_REPROBE_MS,
   CHASE_OFFER_HOOK_VERSION,
   shouldAutoStartChase,
+  shouldAutoStartWells,
   nextSyncMode,
   isPartialAbort,
   partialAbortCopy,
@@ -122,6 +122,7 @@ export default function SyncWebView({ visible, bank, onClose, onSuccess }) {
   const autoStartDebounceRef = useRef(null);
   const postSwitchTimeoutRef = useRef(null);
   const startingChaseRef    = useRef(false);
+  const startingWellsRef    = useRef(false);
 
   const [syncMode, setSyncMode]             = useState(SYNC_MODES.AUTH);
   const [syncing, setSyncing]               = useState(false);
@@ -171,9 +172,13 @@ export default function SyncWebView({ visible, bank, onClose, onSuccess }) {
 
   const armStepTimer = () => {
     clearStepTimer();
-    if (bank !== 'chase') return;
+    if (bank !== 'chase' && bank !== 'wells_fargo') return;
     stepTimerRef.current = setTimeout(() => {
       if (syncModeRef.current !== SYNC_MODES.CAPTURING) return;
+      if (bank === 'wells_fargo') {
+        failWellsCapture('Sync timed out. Try again, or sync manually from the deals page.');
+        return;
+      }
       failChaseCapture('Sync timed out on this card. Try again, or sync manually from the offers page.');
     }, STEP_TIMEOUT_MS);
   };
@@ -189,6 +194,15 @@ export default function SyncWebView({ visible, bank, onClose, onSuccess }) {
     setSwitching(false);
   };
 
+  const disarmWellsCapture = () => {
+    clearStepTimer();
+    syncStartedRef.current = false;
+    startingWellsRef.current = false;
+    setSyncStarted(false);
+    setSyncing(false);
+    setSwitching(false);
+  };
+
   const failChaseCapture = (message) => {
     if (bank !== 'chase') return;
     disarmChaseWalk();
@@ -196,18 +210,28 @@ export default function SyncWebView({ visible, bank, onClose, onSuccess }) {
     setMode(SYNC_MODES.FAILED);
   };
 
+  const failWellsCapture = (message) => {
+    if (bank !== 'wells_fargo') return;
+    disarmWellsCapture();
+    setFailMessage(message || 'Auto-sync stopped. Try again, or sync manually from the deals page.');
+    setMode(SYNC_MODES.FAILED);
+  };
+
   const pauseForNeedsInput = () => {
-    if (bank !== 'chase') return;
+    if (bank !== 'chase' && bank !== 'wells_fargo') return;
     if (syncModeRef.current !== SYNC_MODES.CAPTURING) return;
     clearStepTimer();
     clearPostSwitchTimeout();
     captureArmed.current = false;
     syncStartedRef.current = false;
     startingChaseRef.current = false;
+    startingWellsRef.current = false;
     setSyncStarted(false);
     setSyncing(false);
     setSwitching(false);
-    webViewRef.current?.injectJavaScript(buildChasePauseCaptureJs());
+    if (bank === 'chase') {
+      webViewRef.current?.injectJavaScript(buildChasePauseCaptureJs());
+    }
     setMode(SYNC_MODES.NEEDS_INPUT);
   };
 
@@ -243,6 +267,7 @@ export default function SyncWebView({ visible, bank, onClose, onSuccess }) {
       pendingCardLabelRef.current = null;
       autoStartConsumedRef.current = false;
       startingChaseRef.current    = false;
+      startingWellsRef.current    = false;
       syncModeRef.current         = SYNC_MODES.AUTH;
       if (amexWaitRef.current) clearTimeout(amexWaitRef.current);
       amexWaitRef.current         = null;
@@ -275,9 +300,9 @@ export default function SyncWebView({ visible, bank, onClose, onSuccess }) {
     onLoginPageRef.current = onLoginPage;
   }, [onLoginPage]);
 
-  // Chase: login mid-capture → NeedsInput (MFA pre-empts step timer).
+  // Chase / Wells: login mid-capture → NeedsInput (MFA pre-empts step timer).
   useEffect(() => {
-    if (!visible || bank !== 'chase') return;
+    if (!visible || (bank !== 'chase' && bank !== 'wells_fargo')) return;
     if (onLoginPage && syncModeRef.current === SYNC_MODES.CAPTURING) {
       pauseForNeedsInput();
     }
@@ -447,6 +472,19 @@ export default function SyncWebView({ visible, bank, onClose, onSuccess }) {
     startingChaseRef.current = false;
   };
 
+  /** Shared Wells start path for auto-start, Sync Offers, and Try again. */
+  const startWellsCapture = () => {
+    if (bank !== 'wells_fargo') return;
+    if (startingWellsRef.current || syncStartedRef.current) return;
+    startingWellsRef.current = true;
+    autoStartConsumedRef.current = true;
+    setCurrentCard('Wells Fargo');
+    enterCapturing();
+    webViewRef.current?.injectJavaScript(buildWellsFargoOfferCaptureJs());
+    webViewRef.current?.injectJavaScript(buildWellsFargoReadJs());
+    startingWellsRef.current = false;
+  };
+
   /** Resume after MFA: re-arm capture on the current unsaved card (no same-card switch). */
   const resumeChaseCapture = () => {
     if (bank !== 'chase') return;
@@ -488,6 +526,14 @@ export default function SyncWebView({ visible, bank, onClose, onSuccess }) {
       return;
     }
 
+    if (bank === 'wells_fargo') {
+      if (syncModeRef.current === SYNC_MODES.FAILED) {
+        setMode(nextSyncMode(SYNC_MODES.FAILED, 'sync_offers'));
+      }
+      startWellsCapture();
+      return;
+    }
+
     setSyncStarted(true);
     syncStartedRef.current = true;
     setMode(SYNC_MODES.CAPTURING);
@@ -508,13 +554,6 @@ export default function SyncWebView({ visible, bank, onClose, onSuccess }) {
       return;
     }
 
-    if (bank === 'wells_fargo') {
-      setCurrentCard('Wells Fargo');
-      webViewRef.current?.injectJavaScript(buildWellsFargoOfferCaptureJs());
-      webViewRef.current?.injectJavaScript(buildWellsFargoReadJs());
-      return;
-    }
-
     if (bank === 'citi') {
       setCurrentCard('Citi Card');
       webViewRef.current?.injectJavaScript(buildCitiOfferCaptureJs());
@@ -531,6 +570,17 @@ export default function SyncWebView({ visible, bank, onClose, onSuccess }) {
   };
 
   const handleTryAgain = () => {
+    if (bank === 'wells_fargo') {
+      if (!onOffersPage || onLoginPage) {
+        disarmWellsCapture();
+        setFailMessage('');
+        setMode(SYNC_MODES.AUTH);
+        return;
+      }
+      setMode(nextSyncMode(SYNC_MODES.FAILED, 'try_again'));
+      startWellsCapture();
+      return;
+    }
     if (bank !== 'chase') return;
     const ready = onOffersPage && chaseHookReady && (cardCount > 0 || cardOptionsRef.current.length > 0);
     if (!ready) {
@@ -610,6 +660,60 @@ export default function SyncWebView({ visible, bank, onClose, onSuccess }) {
     pageLoaded,
   ]);
 
+  // Wells auto-start / NeedsInput resume — debounced, once per open (resume allowed).
+  // Resume re-runs startWellsCapture when deals-ready again (no Chase walk planner).
+  useEffect(() => {
+    if (!visible || bank !== 'wells_fargo') return;
+    clearAutoStartDebounce();
+
+    const gateInput = {
+      bank,
+      syncMode,
+      onOffersPage,
+      onLoginPage,
+      syncStarted: syncStartedRef.current,
+      autoStartConsumed: autoStartConsumedRef.current,
+      visible,
+    };
+    const gate = shouldAutoStartWells(gateInput);
+    if (!gate) {
+      if (syncMode === SYNC_MODES.AUTH || syncMode === SYNC_MODES.NEEDS_INPUT) {
+        console.log('[wells-auto-start] waiting', {
+          syncMode,
+          onOffersPage,
+          onLoginPage,
+          autoStartConsumed: autoStartConsumedRef.current,
+          syncStarted: syncStartedRef.current,
+        });
+      }
+      return;
+    }
+
+    autoStartDebounceRef.current = setTimeout(() => {
+      const still = shouldAutoStartWells({
+        bank,
+        syncMode: syncModeRef.current,
+        onOffersPage: onOffersPageRef.current,
+        onLoginPage: onLoginPageRef.current,
+        syncStarted: syncStartedRef.current,
+        autoStartConsumed: autoStartConsumedRef.current,
+        visible: true,
+      });
+      if (!still) return;
+      console.log('[wells-auto-start] firing', { syncMode: syncModeRef.current });
+      startWellsCapture();
+    }, AUTO_START_DEBOUNCE_MS);
+
+    return () => clearAutoStartDebounce();
+  }, [
+    visible,
+    bank,
+    syncMode,
+    onOffersPage,
+    onLoginPage,
+    pageLoaded,
+  ]);
+
   // While AUTH/NeedsInput, keep re-probing hook + page + cards until gates open.
   // Chase SPA/microapp loads can miss a one-shot inject on first loadEnd.
   useEffect(() => {
@@ -671,6 +775,12 @@ export default function SyncWebView({ visible, bank, onClose, onSuccess }) {
     onClose();
   };
 
+  const abortWellsCaptureConfirmed = () => {
+    disarmWellsCapture();
+    setMode(SYNC_MODES.DONE);
+    onClose();
+  };
+
   const requestClose = () => {
     if (syncModeRef.current === SYNC_MODES.CAPTURING && bank === 'chase') {
       Alert.alert(
@@ -681,6 +791,17 @@ export default function SyncWebView({ visible, bank, onClose, onSuccess }) {
         [
           { text: 'Keep syncing', style: 'cancel' },
           { text: 'Stop', style: 'destructive', onPress: abortCaptureConfirmed },
+        ],
+      );
+      return;
+    }
+    if (syncModeRef.current === SYNC_MODES.CAPTURING && bank === 'wells_fargo') {
+      Alert.alert(
+        'Stop syncing?',
+        'Stop syncing Wells Fargo offers?',
+        [
+          { text: 'Keep syncing', style: 'cancel' },
+          { text: 'Stop', style: 'destructive', onPress: abortWellsCaptureConfirmed },
         ],
       );
       return;
@@ -970,20 +1091,15 @@ export default function SyncWebView({ visible, bank, onClose, onSuccess }) {
 
       if (data.type === 'WELLS_CAPTURE_UNAVAILABLE' && bank === 'wells_fargo') {
         if (!syncStartedRef.current) return;
-        syncStartedRef.current = false;
-        setSyncStarted(false);
-        setSyncing(false);
-        setSwitching(false);
-        setMode(SYNC_MODES.AUTH);
-        Alert.alert(
-          'Could not read Wells Fargo deals',
-          'Stay on the deals page and try again. Nothing was changed.'
+        failWellsCapture(
+          'Could not read Wells Fargo deals. Stay on the deals page and try again. Nothing was changed.'
         );
         return;
       }
 
       if (data.type === 'WELLS_DEALS' && bank === 'wells_fargo') {
         if (!syncStartedRef.current) return;
+        clearStepTimer();
         await handleCaptureResult({
           payload: data.deals,
           cardLabel: 'Wells Fargo',
@@ -1107,6 +1223,8 @@ export default function SyncWebView({ visible, bank, onClose, onSuccess }) {
       console.error(`[SyncWebView] handleMessage error:`, err.message);
       if (bank === 'chase') {
         failChaseCapture(err.message);
+      } else if (bank === 'wells_fargo') {
+        failWellsCapture(err.message);
       } else {
         setMode(SYNC_MODES.AUTH);
         Alert.alert('Sync Failed', err.message);
@@ -1121,12 +1239,12 @@ export default function SyncWebView({ visible, bank, onClose, onSuccess }) {
   const coverProgress = chaseCoverProgress({
     syncedCount: syncedUiCount,
     totalCards,
-    inFlight: showCover && (syncing || switching),
+    inFlight: showCover && bank === 'chase' && (syncing || switching),
   });
   const progressFrac = Math.max(progressPeak, coverProgress.rawFrac);
-  const chaseFailed  = bank === 'chase' && syncMode === SYNC_MODES.FAILED;
-  const chaseAuth    = bank === 'chase' && syncMode === SYNC_MODES.AUTH;
-  const chaseNeeds   = bank === 'chase' && syncMode === SYNC_MODES.NEEDS_INPUT;
+  const autoFailed   = (bank === 'chase' || bank === 'wells_fargo') && syncMode === SYNC_MODES.FAILED;
+  const autoAuth     = (bank === 'chase' || bank === 'wells_fargo') && syncMode === SYNC_MODES.AUTH;
+  const autoNeeds    = (bank === 'chase' || bank === 'wells_fargo') && syncMode === SYNC_MODES.NEEDS_INPUT;
 
   useEffect(() => {
     if (!showCover) return;
@@ -1146,7 +1264,7 @@ export default function SyncWebView({ visible, bank, onClose, onSuccess }) {
   );
 
   const renderFooter = () => {
-    if (chaseFailed) {
+    if (autoFailed) {
       return (
         <View style={s.failedFooter}>
           <TouchableOpacity style={s.syncBtn} onPress={handleTryAgain}>
@@ -1167,16 +1285,18 @@ export default function SyncWebView({ visible, bank, onClose, onSuccess }) {
       );
     }
 
-    if (chaseNeeds) {
+    if (autoNeeds) {
       return (
         <Text style={s.helperText}>Confirm it is you to continue syncing</Text>
       );
     }
 
-    if (chaseAuth) {
+    if (autoAuth) {
       return (
         <Text style={s.helperText}>
-          Waiting for the offers page to load for sync to begin
+          {bank === 'wells_fargo'
+            ? 'Waiting for the deals page to load for sync to begin'
+            : 'Waiting for the offers page to load for sync to begin'}
         </Text>
       );
     }
@@ -1256,23 +1376,34 @@ export default function SyncWebView({ visible, bank, onClose, onSuccess }) {
             {showCover ? (
               <View style={s.cover} pointerEvents="auto">
                 <BankLogoIcon bankId={bank} size={56} />
-                <Text style={s.coverTitle}>Syncing Chase offers...</Text>
-                <Text style={s.coverSub}>
-                  {coverCardLabel} · card {coverIndex} of {totalCards}
-                  {syncedUiCount > 0 ? ` · ${syncedUiCount} saved` : ''}
+                <Text style={s.coverTitle}>
+                  {bank === 'wells_fargo'
+                    ? 'Syncing Wells Fargo offers…'
+                    : 'Syncing Chase offers...'}
                 </Text>
-                <View style={s.progressTrack}>
-                  <View style={[s.progressFill, { width: `${Math.round(progressFrac * 100)}%` }]} />
-                </View>
+                {bank === 'chase' ? (
+                  <>
+                    <Text style={s.coverSub}>
+                      {coverCardLabel} · card {coverIndex} of {totalCards}
+                      {syncedUiCount > 0 ? ` · ${syncedUiCount} saved` : ''}
+                    </Text>
+                    <View style={s.progressTrack}>
+                      <View style={[s.progressFill, { width: `${Math.round(progressFrac * 100)}%` }]} />
+                    </View>
+                  </>
+                ) : null}
               </View>
             ) : null}
           </View>
           <View style={s.footer}>
-            {chaseFailed ? (
+            {autoFailed ? (
               <View style={s.failBanner}>
                 <Text style={s.failTitle}>Could not finish sync</Text>
                 <Text style={s.failBody}>
-                  {failMessage || 'Auto-sync stopped. Try again, or sync manually from the offers page.'}
+                  {failMessage
+                    || (bank === 'wells_fargo'
+                      ? 'Auto-sync stopped. Try again, or sync manually from the deals page.'
+                      : 'Auto-sync stopped. Try again, or sync manually from the offers page.')}
                 </Text>
               </View>
             ) : null}
