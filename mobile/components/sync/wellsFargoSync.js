@@ -360,12 +360,15 @@ export const buildWellsFargoDealsVisibleJs = () => `
   true;
 `;
 
-// Posts offer fields from the getDeals stash, or from the deals object the
-// page already rendered: any same-origin window or frame, then the deal tiles.
-// The raw response never leaves the page.
-export const buildWellsFargoReadJs = () => `
-  (function() {
-    try {
+// Poll for stash / page deals instead of a fixed sleep after deals-ready.
+// Matches Chase capture-when-ready: auto-start often fires on WELLS_ON_DEALS
+// before getDeals stash or parseable tiles land.
+export const WELLS_CAPTURE_READY_TIMEOUT_MS = 2800;
+export const WELLS_CAPTURE_POLL_MS = 120;
+
+// Shared helpers + runWellsCapture() for one-shot read and when-ready.
+// The raw getDeals response never leaves the page.
+const wellsCaptureBodySource = `
       var stripWellsDeals = ${stripWellsDealsSource};
       var unwrapWellsPayload = ${unwrapWellsPayloadSource};
       var readRenderedDeals = ${readRenderedDealsSource};
@@ -412,24 +415,45 @@ export const buildWellsFargoReadJs = () => `
         return null;
       }
 
-      var saved = window.__wellsLastDeals && window.__wellsLastDeals.availableDeals
-        && Array.isArray(window.__wellsLastDeals.availableDeals.cardlyticsEligibleDeals)
-        ? stripWellsDeals(window.__wellsLastDeals)
-        : null;
-      // Keep the getDeals lists when available is empty. A later walk must not
-      // replace activated or earned deals with a flattened available list.
-      var stash = hasListedDeals(saved) ? saved : null;
-      if (!stash) {
-        try { stash = usable(window); } catch (e) { stash = null; }
+      function resolveStash() {
+        var saved = window.__wellsLastDeals && window.__wellsLastDeals.availableDeals
+          && Array.isArray(window.__wellsLastDeals.availableDeals.cardlyticsEligibleDeals)
+          ? stripWellsDeals(window.__wellsLastDeals)
+          : null;
+        // Keep the getDeals lists when available is empty. A later walk must not
+        // replace activated or earned deals with a flattened available list.
+        var next = hasListedDeals(saved) ? saved : null;
+        if (!next) {
+          try { next = usable(window); } catch (e) { next = null; }
+        }
+        if (!next) {
+          try { next = fromFrames(window, document); } catch (e) { next = null; }
+        }
+        return next;
       }
-      if (!stash) {
-        try { stash = fromFrames(window, document); } catch (e) { stash = null; }
-      }
+
       function listOf(rendered, listName) {
         if (!rendered || !rendered.availableDeals) return [];
         if (listName === 'activated') return rendered.availableDeals.activatedDeals || [];
         if (listName === 'earned') return (rendered.earnedDeals && rendered.earnedDeals.deals) || [];
         return rendered.availableDeals.cardlyticsEligibleDeals || [];
+      }
+
+      function readList(listName) {
+        try { return listOf(readRenderedDeals(document, listName), listName); }
+        catch (e) { return []; }
+      }
+
+      // True when stash/window/frames or parseable tiles can feed publish.
+      // Heading-only "Showing N deals" is not enough — need offer ids / stash.
+      function wellsCaptureReady() {
+        if (resolveStash()) return true;
+        try {
+          if ((readList('available') || []).length > 0) return true;
+          if ((readList('activated') || []).length > 0) return true;
+          if ((readList('earned') || []).length > 0) return true;
+        } catch (e) {}
+        return false;
       }
 
       function labelOf(el) {
@@ -450,7 +474,7 @@ export const buildWellsFargoReadJs = () => `
         return String(el.getAttribute('aria-selected') || '').toLowerCase() === 'true';
       }
 
-      function publish(domAvailable, domActivated, domEarned) {
+      function publish(stash, domAvailable, domActivated, domEarned) {
         var baseAvailable = (stash && stash.availableDeals && stash.availableDeals.cardlyticsEligibleDeals) || [];
         var baseActivated = (stash && stash.availableDeals && stash.availableDeals.activatedDeals) || [];
         var baseEarned = (stash && stash.earnedDeals && stash.earnedDeals.deals) || [];
@@ -475,11 +499,6 @@ export const buildWellsFargoReadJs = () => `
         window.ReactNativeWebView.postMessage(JSON.stringify({ type: 'WELLS_DEALS', deals: payload }));
       }
 
-      function readList(listName) {
-        try { return listOf(readRenderedDeals(document, listName), listName); }
-        catch (e) { return []; }
-      }
-
       // The three tabs are links. Only an exact Available, Activated, or
       // Earned label is clicked. A deal card is never clicked.
       function visit(name, done) {
@@ -500,23 +519,66 @@ export const buildWellsFargoReadJs = () => `
         })();
       }
 
-      if (!findTab('available') && !findTab('activated') && !findTab('earned')) {
-        publish(readList('available'), [], []);
-        return;
-      }
-
-      visit('available', function(availableNow) {
-        visit('activated', function(activatedNow) {
-          visit('earned', function(earnedNow) {
-            var back = findTab('available');
-            if (back && !tabSelected(back)) {
-              try { back.click(); } catch (e) {}
-            }
-            publish(availableNow, activatedNow, earnedNow);
+      function runWellsCapture() {
+        var stash = resolveStash();
+        if (!findTab('available') && !findTab('activated') && !findTab('earned')) {
+          publish(stash, readList('available'), [], []);
+          return;
+        }
+        visit('available', function(availableNow) {
+          visit('activated', function(activatedNow) {
+            visit('earned', function(earnedNow) {
+              var back = findTab('available');
+              if (back && !tabSelected(back)) {
+                try { back.click(); } catch (e) {}
+              }
+              publish(stash, availableNow, activatedNow, earnedNow);
+            });
           });
         });
-      });
-      return;
+      }
+`;
+
+// Posts offer fields from the getDeals stash, or from the deals object the
+// page already rendered: any same-origin window or frame, then the deal tiles.
+export const buildWellsFargoReadJs = () => `
+  (function() {
+    try {
+      ${wellsCaptureBodySource}
+      runWellsCapture();
+    } catch (e) {
+      window.ReactNativeWebView.postMessage(JSON.stringify({
+        type: 'WELLS_CAPTURE_UNAVAILABLE',
+      }));
+    }
+  })();
+  true;
+`;
+
+// Poll until stash / window / frames / parseable tiles are ready, then capture.
+// Posts the same WELLS_DEALS / WELLS_CAPTURE_UNAVAILABLE messages as read.
+export const buildWellsCaptureWhenReadyJs = (
+  timeoutMs = WELLS_CAPTURE_READY_TIMEOUT_MS,
+  intervalMs = WELLS_CAPTURE_POLL_MS,
+) => `
+  (async function() {
+    try {
+      ${wellsCaptureBodySource}
+      var started = Date.now();
+      while (Date.now() - started < ${timeoutMs}) {
+        if (wellsCaptureReady()) {
+          runWellsCapture();
+          return;
+        }
+        await new Promise(function(resolve) { setTimeout(resolve, ${intervalMs}); });
+      }
+      if (wellsCaptureReady()) {
+        runWellsCapture();
+        return;
+      }
+      window.ReactNativeWebView.postMessage(JSON.stringify({
+        type: 'WELLS_CAPTURE_UNAVAILABLE',
+      }));
     } catch (e) {
       window.ReactNativeWebView.postMessage(JSON.stringify({
         type: 'WELLS_CAPTURE_UNAVAILABLE',

@@ -391,6 +391,14 @@ test('SyncWebView wires Wells auto-start without Chase-only gates', () => {
   assert.match(src, /Syncing Wells Fargo offers/);
   assert.match(src, /WELLS_CAPTURE_UNAVAILABLE[\s\S]{0,240}failWellsCapture/);
   assert.match(src, /failWellsCapture[\s\S]{0,400}SYNC_MODES\.FAILED/);
+  // First capture uses when-ready poll (not one-shot read) to avoid deals race.
+  assert.match(src, /buildWellsCaptureWhenReadyJs/);
+  assert.match(src, /WELLS_CAPTURE_READY_TIMEOUT_MS/);
+  const startWellsBlock = src.match(
+    /const startWellsCapture = \(\) => \{[\s\S]*?startingWellsRef\.current = false;\n  \};/,
+  )?.[0] || '';
+  assert.match(startWellsBlock, /buildWellsCaptureWhenReadyJs/);
+  assert.doesNotMatch(startWellsBlock, /buildWellsFargoReadJs\(\)/);
   // Wells gate must not require Chase cards/hook readiness.
   const wellsGateBlock = src.match(
     /shouldAutoStartWells\(\{[\s\S]*?\}\)/,

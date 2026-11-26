@@ -7,6 +7,9 @@ import { wellsFargoRecords } from '../../../api/lib/offers/deviceCatalog.js';
 import {
   buildWellsFargoOfferCaptureJs,
   buildWellsFargoReadJs,
+  buildWellsCaptureWhenReadyJs,
+  WELLS_CAPTURE_READY_TIMEOUT_MS,
+  WELLS_CAPTURE_POLL_MS,
 } from './wellsFargoSync.js';
 
 const NOW = new Date('2026-01-01T00:00:00.000Z');
@@ -703,4 +706,51 @@ test('hooks getDeals on fetch and ignores a non-2xx response', async () => {
   assert.equal(message.type, 'WELLS_DEALS');
   assert.equal(message.deals.availableDeals.cardlyticsEligibleDeals[0].merchantDealDetails.dealAmount, 10);
   assert.equal(message.deals.availableDeals.cardlyticsEligibleDeals[0].merchantDealDetails.amountType, '%');
+});
+
+test('capture-when-ready posts as soon as the getDeals stash lands', async () => {
+  assert.ok(WELLS_CAPTURE_POLL_MS <= 150);
+  assert.ok(WELLS_CAPTURE_READY_TIMEOUT_MS >= 2000);
+
+  const messages = [];
+  const window = {
+    __wellsLastDeals: null,
+    ReactNativeWebView: { postMessage(raw) { messages.push(JSON.parse(raw)); } },
+  };
+  new Function('window', 'document', buildWellsCaptureWhenReadyJs(500, 40))(window, {});
+  await new Promise(r => setTimeout(r, 80));
+  assert.equal(messages.length, 0);
+
+  window.__wellsLastDeals = {
+    availableDeals: {
+      cardlyticsEligibleDeals: [{
+        isActivated: false,
+        merchantDealDetails: {
+          merchantOfferId: 'READYOFFER1',
+          merchantName: 'Ready Cafe',
+          dealAmount: 5,
+          amountType: '%',
+          shortDescription: '5% cash back',
+        },
+      }],
+      activatedDeals: [],
+    },
+    earnedDeals: { deals: [] },
+  };
+  await new Promise(r => setTimeout(r, 120));
+  assert.equal(messages.at(-1)?.type, 'WELLS_DEALS');
+  assert.equal(
+    messages.at(-1)?.deals.availableDeals.cardlyticsEligibleDeals[0].merchantDealDetails.merchantOfferId,
+    'READYOFFER1',
+  );
+});
+
+test('capture-when-ready times out with WELLS_CAPTURE_UNAVAILABLE when stash never lands', async () => {
+  const messages = [];
+  const window = {
+    ReactNativeWebView: { postMessage(raw) { messages.push(JSON.parse(raw)); } },
+  };
+  new Function('window', 'document', buildWellsCaptureWhenReadyJs(120, 40))(window, {});
+  await new Promise(r => setTimeout(r, 220));
+  assert.equal(messages.at(-1)?.type, 'WELLS_CAPTURE_UNAVAILABLE');
 });

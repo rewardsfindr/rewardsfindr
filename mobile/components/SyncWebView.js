@@ -59,7 +59,13 @@ import {
   buildAmexClearFiltersJs,
   amexHandleLoadEnd,
 } from './sync/amexSync.js';
-import { buildWellsFargoDealsVisibleJs, buildWellsFargoOfferCaptureJs, buildWellsFargoReadJs } from './sync/wellsFargoSync.js';
+import {
+  buildWellsFargoDealsVisibleJs,
+  buildWellsFargoOfferCaptureJs,
+  buildWellsCaptureWhenReadyJs,
+  WELLS_CAPTURE_READY_TIMEOUT_MS,
+  WELLS_CAPTURE_POLL_MS,
+} from './sync/wellsFargoSync.js';
 import { buildCitiOfferCaptureJs, buildCitiOffersVisibleJs, buildCitiReadJs } from './sync/citiSync.js';
 import { buildUsBankOfferCaptureJs, buildUsBankOffersVisibleJs, buildUsBankReadJs } from './sync/usBankSync.js';
 import { parseCardLabel }                                 from './sync/cardLabel.js';
@@ -480,8 +486,12 @@ export default function SyncWebView({ visible, bank, onClose, onSuccess }) {
     autoStartConsumedRef.current = true;
     setCurrentCard('Wells Fargo');
     enterCapturing();
+    // Install/refresh hook, then poll stash/DOM like Chase when-ready — first
+    // auto-start often races WELLS_ON_DEALS before getDeals stash lands.
     webViewRef.current?.injectJavaScript(buildWellsFargoOfferCaptureJs());
-    webViewRef.current?.injectJavaScript(buildWellsFargoReadJs());
+    webViewRef.current?.injectJavaScript(
+      buildWellsCaptureWhenReadyJs(WELLS_CAPTURE_READY_TIMEOUT_MS, WELLS_CAPTURE_POLL_MS),
+    );
     startingWellsRef.current = false;
   };
 
