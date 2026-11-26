@@ -142,3 +142,20 @@ export function planChaseNeedsInputResume({
   }
   return { action: 'arm_capture', position: pos };
 }
+
+/**
+ * Cover bar fill from cards saved + optional half-step while a card is in flight.
+ * Returns rawFrac only — callers keep a peak so the bar never moves backward when
+ * syncing/switching toggles between cards.
+ */
+export function chaseCoverProgress({ syncedCount = 0, totalCards = 1, inFlight = false } = {}) {
+  const total = Math.max(1, Number(totalCards) || 1);
+  const synced = Math.max(0, Math.min(total, Number(syncedCount) || 0));
+  const rawFrac = inFlight && synced < total
+    ? Math.min(1, (synced + 0.5) / total)
+    : synced / total;
+  return {
+    rawFrac,
+    coverIndex: Math.min(total, synced < total ? synced + 1 : Math.max(synced, 1)),
+  };
+}

@@ -42,11 +42,15 @@ import {
   buildListCardsJs,
   buildSwitchCardJs,
   buildCaptureOffersJs,
+  buildChaseCaptureWhenReadyJs,
   buildChaseOfferCaptureJs,
   buildChaseHookReadyProbeJs,
   buildChasePauseCaptureJs,
   nextChaseCardPosition,
   mergeDetectedCards,
+  CHASE_SWITCH_TIMEOUT_MS,
+  CHASE_CAPTURE_READY_TIMEOUT_MS,
+  CHASE_CAPTURE_POLL_MS,
 } from './sync/chaseSync.js';
 import {
   AMEX_OPEN_AND_DETECT_JS,
@@ -71,6 +75,7 @@ import {
   partialAbortCopy,
   shouldShowSyncCover,
   planChaseNeedsInputResume,
+  chaseCoverProgress,
   urlMatchesAnyPath,
 } from './sync/syncMode.js';
 import BankLogoIcon from './BankLogoIcon.js';
@@ -83,7 +88,7 @@ function citiCardLabelFromOffers(payload) {
   return raw;
 }
 
-const SWITCH_TIMEOUT_MS    = 3500;
+// Non-Chase banks that still use CARD_SWITCHED + delayed capture.
 const POST_SWITCH_DELAY_MS = 2500;
 const MAX_SWITCH_RETRIES   = 3;
 
@@ -126,6 +131,8 @@ export default function SyncWebView({ visible, bank, onClose, onSuccess }) {
   const [currentUrl, setCurrentUrl]         = useState('');
   const [cardCount, setCardCount]           = useState(0);
   const [cardIndexUi, setCardIndexUi]       = useState(0);
+  const [syncedUiCount, setSyncedUiCount]   = useState(0);
+  const [progressPeak, setProgressPeak]     = useState(0);
   const [syncPhaseUi, setSyncPhaseUi]       = useState('eligible');
   const [failMessage, setFailMessage]       = useState('');
 
@@ -244,6 +251,8 @@ export default function SyncWebView({ visible, bank, onClose, onSuccess }) {
       setChaseHookReady(false);
       setCardCount(0);
       setCardIndexUi(0);
+      setSyncedUiCount(0);
+      setProgressPeak(0);
       setSyncPhaseUi('eligible');
       setFailMessage('');
     }
@@ -401,6 +410,9 @@ export default function SyncWebView({ visible, bank, onClose, onSuccess }) {
     startingChaseRef.current = true;
     autoStartConsumedRef.current = true;
     chaseRefreshRef.current = false;
+    syncedCountRef.current = 0;
+    setSyncedUiCount(0);
+    setProgressPeak(0);
     enterCapturing();
     webViewRef.current?.injectJavaScript(buildChaseOfferCaptureJs());
     webViewRef.current?.injectJavaScript(buildChaseHookReadyProbeJs());
@@ -434,7 +446,9 @@ export default function SyncWebView({ visible, bank, onClose, onSuccess }) {
     webViewRef.current?.injectJavaScript(buildChaseHookReadyProbeJs());
     captureArmed.current = true;
     armStepTimer();
-    webViewRef.current?.injectJavaScript(buildCaptureOffersJs());
+    webViewRef.current?.injectJavaScript(
+      buildChaseCaptureWhenReadyJs(CHASE_CAPTURE_READY_TIMEOUT_MS, CHASE_CAPTURE_POLL_MS),
+    );
     startingChaseRef.current = false;
   };
 
@@ -599,7 +613,9 @@ export default function SyncWebView({ visible, bank, onClose, onSuccess }) {
     switchRetriesRef.current = 0;
     armStepTimer();
     webViewRef.current?.injectJavaScript(buildChaseOfferCaptureJs());
-    webViewRef.current?.injectJavaScript(buildSwitchCardJs(cardOptionsRef.current[position].index, 8000));
+    webViewRef.current?.injectJavaScript(
+      buildSwitchCardJs(cardOptionsRef.current[position].index, CHASE_SWITCH_TIMEOUT_MS),
+    );
   };
 
   const finishChaseSuccess = () => {
@@ -727,6 +743,7 @@ export default function SyncWebView({ visible, bank, onClose, onSuccess }) {
     }
 
     syncedCountRef.current += 1;
+    setSyncedUiCount(syncedCountRef.current);
     const totalCards = cardOptionsRef.current.length;
     const nextPos = nextChaseCardPosition(cardIndexRef.current, totalCards, syncedCountRef.current);
     if (nextPos !== null) {
@@ -798,7 +815,9 @@ export default function SyncWebView({ visible, bank, onClose, onSuccess }) {
         setCurrentCard(data.selectedLabel || cards[cardIndexRef.current].label);
         captureArmed.current = true;
         armStepTimer();
-        webViewRef.current?.injectJavaScript(buildCaptureOffersJs());
+        webViewRef.current?.injectJavaScript(
+          buildChaseCaptureWhenReadyJs(CHASE_CAPTURE_READY_TIMEOUT_MS, CHASE_CAPTURE_POLL_MS),
+        );
         return;
       }
 
@@ -854,6 +873,15 @@ export default function SyncWebView({ visible, bank, onClose, onSuccess }) {
             webViewRef.current?.injectJavaScript(`clearTimeout(window.__amexQuietTimer); window.__amexBest = null; window.__amexJsonCaptureArmed = false; true;`);
             advanceAmexSync(amexExpectedRef.current);
           }, 5000);
+        } else if (bank === 'chase') {
+          // Poll hooked stash as soon as customer-offers lands — no fixed 2.5s sleep.
+          clearPostSwitchTimeout();
+          captureArmed.current = true;
+          setSyncing(true);
+          armStepTimer();
+          webViewRef.current?.injectJavaScript(
+            buildChaseCaptureWhenReadyJs(CHASE_CAPTURE_READY_TIMEOUT_MS, CHASE_CAPTURE_POLL_MS),
+          );
         } else {
           clearPostSwitchTimeout();
           postSwitchTimeoutRef.current = setTimeout(() => {
@@ -1051,16 +1079,26 @@ export default function SyncWebView({ visible, bank, onClose, onSuccess }) {
   const { cardName } = parseCardLabel(currentCard);
   const totalCards   = cardCount || cardOptionsRef.current.length || 1;
   const phaseLabel   = syncPhaseUi === 'enrolled' ? 'activated' : 'eligible';
-  const progressFrac = Math.min(1, Math.max(0, (syncedCountRef.current + (syncing || switching ? 0.45 : 0)) / totalCards));
   const showCover    = shouldShowSyncCover({ bank, syncMode });
+  const coverProgress = chaseCoverProgress({
+    syncedCount: syncedUiCount,
+    totalCards,
+    inFlight: showCover && (syncing || switching),
+  });
+  const progressFrac = Math.max(progressPeak, coverProgress.rawFrac);
   const chaseFailed  = bank === 'chase' && syncMode === SYNC_MODES.FAILED;
   const chaseAuth    = bank === 'chase' && syncMode === SYNC_MODES.AUTH;
   const chaseNeeds   = bank === 'chase' && syncMode === SYNC_MODES.NEEDS_INPUT;
 
+  useEffect(() => {
+    if (!showCover) return;
+    setProgressPeak((peak) => Math.max(peak, coverProgress.rawFrac));
+  }, [showCover, coverProgress.rawFrac]);
+
   const statusText = switching
     ? `Switching card...`
     : syncing
-      ? `Syncing ${phaseLabel} offers — ${cardName || 'card'} (${cardIndexUi + 1} of ${totalCards})...`
+      ? `Syncing ${phaseLabel} offers — ${cardName || 'card'} (${coverProgress.coverIndex} of ${totalCards})...`
       : `Processing...`;
 
   const renderSyncButton = () => (
@@ -1120,7 +1158,7 @@ export default function SyncWebView({ visible, bank, onClose, onSuccess }) {
   };
 
   const coverCardLabel = cardName || currentCard || 'card';
-  const coverIndex = Math.min(cardIndexUi + 1, totalCards);
+  const coverIndex = coverProgress.coverIndex;
 
   return (
     <Modal visible={visible} animationType="slide" transparent={true} onRequestClose={requestClose}>
@@ -1178,6 +1216,7 @@ export default function SyncWebView({ visible, bank, onClose, onSuccess }) {
                 <Text style={s.coverTitle}>Syncing Chase offers...</Text>
                 <Text style={s.coverSub}>
                   {coverCardLabel} · card {coverIndex} of {totalCards}
+                  {syncedUiCount > 0 ? ` · ${syncedUiCount} saved` : ''}
                 </Text>
                 <View style={s.progressTrack}>
                   <View style={[s.progressFill, { width: `${Math.round(progressFrac * 100)}%` }]} />

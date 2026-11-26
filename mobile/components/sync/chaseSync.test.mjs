@@ -2,12 +2,17 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
   buildCaptureOffersJs,
+  buildChaseCaptureWhenReadyJs,
   buildChaseOfferCaptureJs,
   buildChaseHookReadyProbeJs,
   buildChasePauseCaptureJs,
   buildListCardsJs,
   buildSwitchCardJs,
   CHASE_OFFER_HOOK_VERSION,
+  CHASE_SWITCH_TIMEOUT_MS,
+  CHASE_CAPTURE_READY_TIMEOUT_MS,
+  CHASE_CAPTURE_POLL_MS,
+  CHASE_LEGACY_SWITCH_SETTLE_MS,
   mapChaseCustomerOffers,
   mergeDetectedCards,
   nextChaseCardPosition,
@@ -544,6 +549,33 @@ test('asks for another card request when the offers response was missed', () => 
   };
   new Function('window', 'document', buildCaptureOffersJs())(window, page([button]));
   assert.equal(messages[0].type, 'CHASE_CAPTURE_UNAVAILABLE');
+});
+
+test('capture-when-ready posts as soon as the hooked stash lands', async () => {
+  assert.ok(CHASE_SWITCH_TIMEOUT_MS < 8000);
+  assert.ok(CHASE_CAPTURE_POLL_MS <= 150);
+  assert.ok(CHASE_CAPTURE_READY_TIMEOUT_MS >= 2000);
+  assert.ok(CHASE_LEGACY_SWITCH_SETTLE_MS < CHASE_SWITCH_TIMEOUT_MS);
+  assert.match(buildSwitchCardJs(0), /Math\.min\(900,/);
+
+  const button = new El('DIV', { id: 'select-credit-card-account', text: 'Sapphire Reserve (...2222)' });
+  const messages = [];
+  const window = {
+    __chaseLastOfferCapture: null,
+    ReactNativeWebView: { postMessage(raw) { messages.push(JSON.parse(raw)); } },
+  };
+  // Injected script is an async IIFE ending in `true;` — start it, then land the stash.
+  new Function('window', 'document', buildChaseCaptureWhenReadyJs(500, 40))(window, page([button]));
+  await new Promise(r => setTimeout(r, 80));
+  window.__chaseLastOfferCapture = {
+    gridFound: true,
+    partial: false,
+    tileCount: 1,
+    offers: [{ merchantName: 'Target', bankOfferId: 'FIGG:9' }],
+  };
+  await new Promise(r => setTimeout(r, 120));
+  assert.equal(messages.at(-1)?.type, 'CAPTURE_OFFERS');
+  assert.equal(messages.at(-1)?.offers[0]?.merchantName, 'Target');
 });
 
 test('walks every card once, starting from the card already on screen', () => {

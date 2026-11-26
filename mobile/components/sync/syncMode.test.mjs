@@ -13,6 +13,7 @@ import {
   partialAbortCopy,
   shouldShowSyncCover,
   planChaseNeedsInputResume,
+  chaseCoverProgress,
   urlMatchesAnyPath,
 } from './syncMode.js';
 import { BANK_CONFIG } from './bankConfig.js';
@@ -223,10 +224,27 @@ test('NeedsInput resume falls back to full_start when walk is done or empty', ()
   );
 });
 
+test('cover progress tracks saved cards and never needs a backward pulse', () => {
+  assert.equal(chaseCoverProgress({ syncedCount: 0, totalCards: 5, inFlight: false }).rawFrac, 0);
+  assert.equal(chaseCoverProgress({ syncedCount: 0, totalCards: 5, inFlight: true }).rawFrac, 0.1);
+  assert.equal(chaseCoverProgress({ syncedCount: 2, totalCards: 5, inFlight: false }).rawFrac, 0.4);
+  assert.equal(chaseCoverProgress({ syncedCount: 2, totalCards: 5, inFlight: true }).rawFrac, 0.5);
+  assert.equal(chaseCoverProgress({ syncedCount: 5, totalCards: 5, inFlight: true }).rawFrac, 1);
+  assert.equal(chaseCoverProgress({ syncedCount: 2, totalCards: 5, inFlight: true }).coverIndex, 3);
+  // Peak floor: when inFlight drops between cards, rawFrac falls to completed only —
+  // UI must keep Math.max(peak, rawFrac) so the bar does not bounce.
+  const midFlight = chaseCoverProgress({ syncedCount: 1, totalCards: 5, inFlight: true }).rawFrac;
+  const midIdle = chaseCoverProgress({ syncedCount: 1, totalCards: 5, inFlight: false }).rawFrac;
+  assert.ok(midFlight > midIdle);
+  assert.equal(Math.max(midFlight, midIdle), midFlight);
+});
+
 test('SyncWebView gates cover and resume to Chase helpers (no same-card switch)', () => {
   const src = readFileSync(join(HERE, '..', 'SyncWebView.js'), 'utf8');
   assert.match(src, /shouldShowSyncCover/);
   assert.match(src, /planChaseNeedsInputResume/);
+  assert.match(src, /chaseCoverProgress/);
+  assert.match(src, /buildChaseCaptureWhenReadyJs/);
   assert.match(src, /Do not switchChaseCard\(current\)/);
   assert.doesNotMatch(
     src,
