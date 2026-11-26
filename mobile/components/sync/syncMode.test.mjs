@@ -512,10 +512,15 @@ test('SyncWebView wires Citi auto-start with honest signedIn gate', () => {
   // Cap One / US Bank auto-start must not appear in this PR.
   assert.doesNotMatch(src, /shouldAutoStartUsBank/);
   assert.doesNotMatch(src, /shouldAutoStartCapitalOne|capital_one.*autoStart/);
-  // AUTH_REPROBE stays Chase-only (not Citi).
-  const reprobeEffect = src.match(
+  // Chase AUTH_REPROBE stays Chase-only (no Citi hooks in that effect).
+  const chaseReprobeEffect = src.match(
     /While AUTH\/NeedsInput, keep re-probing[\s\S]*?AUTH_REPROBE_MS[\s\S]*?\}, \[visible, bank, syncMode/,
   )?.[0] || '';
-  assert.match(reprobeEffect, /bank !== 'chase'/);
-  assert.doesNotMatch(reprobeEffect, /bank === 'citi'/);
+  assert.match(chaseReprobeEffect, /bank !== 'chase'/);
+  assert.doesNotMatch(chaseReprobeEffect, /buildCitiOffersVisibleJs/);
+  // Citi gets its own thin visibility re-probe (Sign Off may appear after loadEnd).
+  assert.match(
+    src,
+    /Citi SPA can paint merchantoffers before Sign Off[\s\S]*?bank !== 'citi'[\s\S]*?buildCitiOffersVisibleJs\(\)[\s\S]*?AUTH_REPROBE_MS/,
+  );
 });

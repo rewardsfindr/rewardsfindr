@@ -237,6 +237,12 @@ test('Citi offers-visible posts honest signedIn (never force true from URL alone
   assert.match(syncSource, /shouldAutoStartCiti/);
   assert.match(syncSource, /startCitiCapture/);
   assert.match(syncSource, /data\.signedIn === true/);
+  // AUTH re-probe re-injects visibility until Sign Off chrome is seen.
+  assert.match(syncSource, /buildCitiOffersVisibleJs\(\)/);
+  assert.match(
+    syncSource,
+    /Citi SPA can paint merchantoffers before Sign Off[\s\S]*?AUTH_REPROBE_MS/,
+  );
 });
 
 test('stripCitiOffers keeps offer fields and the selected credit card only', () => {

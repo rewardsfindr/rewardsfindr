@@ -863,6 +863,27 @@ export default function SyncWebView({ visible, bank, onClose, onSuccess }) {
     return () => clearInterval(id);
   }, [visible, bank, syncMode, config.loginPaths, config.offersPaths]);
 
+  // Citi SPA can paint merchantoffers before Sign Off chrome is in innerText.
+  // Re-inject visibility until honest signedIn flips (Chase/Wells reprobes stay separate).
+  useEffect(() => {
+    if (!visible || bank !== 'citi') return;
+    if (syncMode !== SYNC_MODES.AUTH && syncMode !== SYNC_MODES.NEEDS_INPUT) return;
+    if (syncStartedRef.current) return;
+
+    const reprobe = () => {
+      if (syncStartedRef.current) return;
+      if (syncModeRef.current !== SYNC_MODES.AUTH && syncModeRef.current !== SYNC_MODES.NEEDS_INPUT) {
+        return;
+      }
+      if (citiSignedInRef.current === true && onOffersPageRef.current) return;
+      webViewRef.current?.injectJavaScript(buildCitiOffersVisibleJs());
+    };
+
+    reprobe();
+    const id = setInterval(reprobe, AUTH_REPROBE_MS);
+    return () => clearInterval(id);
+  }, [visible, bank, syncMode]);
+
   const switchChaseCard = (position) => {
     cardIndexRef.current = position;
     setCardIndexUi(position);
