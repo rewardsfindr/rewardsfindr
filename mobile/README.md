@@ -19,6 +19,9 @@ npm run android    # Android emulator
 npm run ios        # iOS simulator (Mac only)
 ```
 
+Copy `.env.example` → `.env.development` and fill Firebase / Google OAuth values.
+No RewardsFindr API URL is required — offers sync and search run on-device.
+
 Scan the QR code with **Expo Go** (free app on App Store / Play Store)
 to run on your real phone immediately — no build needed.
 

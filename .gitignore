@@ -30,14 +30,8 @@ yarn-error.log*
 .env.test
 .env*.local
 
-# API environment files
-api/.env
-api/.env.development
-api/.env.production
-
 # Firebase service account keys (NEVER commit these!)
 serviceAccountKey.json
-api/serviceAccountKey.json
 **/serviceAccountKey*.json
 
 # Mobile environment files

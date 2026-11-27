@@ -3,7 +3,7 @@
 // label text. Expiry comes from the tile. Missing expiry stays unknown
 // instead of being stored as a made-up 90-day date.
 
-import { normalizeMerchant } from '../shared/offerUtils.js';
+import { normalizeMerchant } from '../../shared/offerUtils.js';
 
 export const CHASE_OFFERS_BASE_URL = 'https://secure.chase.com/web/auth/dashboard#/dashboard/merchantOffers/offer-hub';
 

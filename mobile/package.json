@@ -4,7 +4,7 @@
   "main": "expo-router/entry",
   "scripts": {
     "start": "expo start",
-    "test": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --test components/sync/chaseSync.test.mjs components/sync/syncMode.test.mjs components/sync/amexSync.test.mjs components/sync/wellsFargoSync.test.mjs components/sync/citiSync.test.mjs components/sync/usBankSync.test.mjs lib/*.test.mjs",
+    "test": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --test components/sync/chaseSync.test.mjs components/sync/syncMode.test.mjs components/sync/amexSync.test.mjs components/sync/wellsFargoSync.test.mjs components/sync/citiSync.test.mjs components/sync/usBankSync.test.mjs lib/*.test.mjs lib/catalog/*.test.js lib/catalog/parsers/*.test.js",
     "android": "expo start --android",
     "ios": "expo start --ios",
     "build:android": "eas build --platform android",

@@ -21,8 +21,7 @@ Offers for Chase and Amex are stored only on the phone, keyed by Firebase uid (`
 - Search passes only the store name to the results screen. The results screen reads matches from the phone. A known expiry renders as `Expires Mon D, YYYY`. An offer with no date shows no expiry line.
 
 ### Tests
-- `mobile`: `npm test` covers Chase sync, Amex menu/capture, search route params, expiry text, and the sync summary.
-- `api`: `npm test` covers Chase snapshots, freshness, the device catalog, and the Amex parser.
+- `mobile`: `npm test` covers Chase sync, Amex menu/capture, search route params, expiry text, the sync summary, and the on-device catalog/parser under `mobile/lib/catalog/`.
 
 ### Next session
 1. The enrolled pass can still skip a card when Amex does not send a new offers response after the switch. The summary then counts only the eligible offers for that card.
@@ -78,12 +77,9 @@ Offers for Chase and Amex are stored only on the phone, keyed by Firebase uid (`
 - **Banks Supported:** Chase, Amex (Capital One planned)
 - **Auth:** chrome.identity + Firebase custom tokens
 
-### Backend API
-- **Runtime:** Node.js 18+ with Express
-- **Auth:** Firebase Admin SDK
-- **Database:** Firestore
-- **Deployment:** Railway (or Render)
-- **Port:** 3001 (local dev)
+### Backend
+- **None for product use.** Offers, search, and history are on-device (AsyncStorage). Firebase Auth only.
+- The former Express / Cloud Run API was removed. GCP cleanup: `docs/retire-cloud-run.md`.
 
 ### Firebase Projects
 - **Dev:** `rewardsfindr-dev` (us-west2)
@@ -142,25 +138,16 @@ rewardsfindr/
 │   │   └── OffersSyncStatus.js
 │   ├── lib/
 │   │   ├── firebaseClient.js  ← Firebase JS SDK init
-│   │   └── apiClient.js       ← HTTP client for API calls
+│   │   ├── offerStore.js      ← AsyncStorage offer catalog
+│   │   └── catalog/           ← On-device parsers / snapshot logic
 │   ├── shared/
 │   ├── .env.example
 │   ├── .env.development     ← gitignored, local only
 │   └── .env.production      ← gitignored, local only
-├── api/                    ← Node.js Express backend
-│   ├── index.js
-│   ├── config/
-│   │   └── firebase.js        ← Firebase Admin SDK
-│   ├── middleware/
-│   │   └── auth.js            ← Token verification
-│   ├── routes/
-│   │   ├── auth.js
-│   │   └── offers.js          ← includes /parse endpoint
-│   ├── .env.example
-│   └── .env                 ← gitignored, local only
+├── docs/                   ← Ops notes (e.g. retire Cloud Run)
 ├── shared/                  ← Top-level shared utilities
 ├── src/shared/              ← Shared constants (used by mobile)
-├── .github/workflows/       ← CI/CD (tests)
+├── .github/workflows/       ← CI (mobile tests)
 └── DEV_CONTEXT.md           ← This file
 ```
 
@@ -177,33 +164,10 @@ EXPO_PUBLIC_FIREBASE_AUTH_DOMAIN
 EXPO_PUBLIC_FIREBASE_STORAGE_BUCKET
 EXPO_PUBLIC_FIREBASE_MESSAGING_SENDER_ID
 EXPO_PUBLIC_FIREBASE_APP_ID
-EXPO_PUBLIC_API_URL
+EXPO_PUBLIC_GOOGLE_CLIENT_ID
 ```
 
-### Backend API (`/api`)
-**No prefix** (standard Node.js)
-```
-FIREBASE_PROJECT_ID
-FIREBASE_CLIENT_EMAIL
-FIREBASE_PRIVATE_KEY
-PORT
-NODE_ENV
-ALLOWED_ORIGINS
-```
-
----
-
-## API Endpoints (`/api`)
-
-### Public
-- `GET /health` — Health check
-
-### Authentication
-- `POST /api/auth/verify` — Exchange Google OAuth token for Firebase custom token
-
-### Offers (Protected)
-- `POST /api/offers/parse` — Accept raw HTML from mobile WebView, parse offers, store in Firestore
-- `GET /api/offers/:userId` — Get user’s synced offers
+Normal product use does **not** need a RewardsFindr HTTP API URL.
 
 ---
 
@@ -240,7 +204,7 @@ The mobile app uses an **in-app WebView** (not a Chrome extension) to sync bank 
    - **"Go to Offers Page →"** after login page loads (fallback redirect)
    - **"Sync Offers"** once card dropdown detected on offers page
    - **Spinner + status** during sync
-6. On "Sync Offers" tap: JS injected to capture HTML → POSTed to `/api/offers/parse` → stored in Firestore
+6. On "Sync Offers" tap: JS injected to capture structured offer payloads → saved on-device via `offerStore` / `mobile/lib/catalog/` (AsyncStorage keyed by Firebase uid)
 7. For multiple cards: auto-switches via dropdown JS injection, captures each card’s offers
 
 ### SyncWebView — Key Implementation Details

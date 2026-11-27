@@ -7,7 +7,7 @@ import { BANK_LIST, FAQ_ITEMS } from '../../shared/constants.js';
 import { BANK_CONFIG } from './bankConfig.js';
 import { CONNECT_BANK_COPY, ONBOARDING_PAGES } from '../../lib/onboardingContent.js';
 import { formatOfferExpiry } from '../../lib/savedOffers.js';
-import { citiRecords, replaceCardOffers } from '../../../api/lib/offers/deviceCatalog.js';
+import { citiRecords, replaceCardOffers } from '../../lib/catalog/deviceCatalog.js';
 import {
   buildCitiOfferCaptureJs,
   buildCitiOffersVisibleJs,
