@@ -1198,7 +1198,7 @@ test('SyncWebView wires US Bank auto-start without Chase-only gates', () => {
   assert.match(src, /if \(isAutoBank\) return null/);
   assert.equal(
     BANK_CONFIG.us_bank.url,
-    'https://onlinebanking.usbank.com/digital/servicing/dominjection/cashback-deals',
+    'https://onlinebanking.usbank.com/auth/login/?channel=mobileweb',
   );
   assert.equal(
     BANK_CONFIG.us_bank.offersUrl,

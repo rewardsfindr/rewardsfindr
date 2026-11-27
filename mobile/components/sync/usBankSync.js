@@ -352,12 +352,17 @@ export const buildUsBankOffersVisibleJs = () => `
         || /looks like that information isn.?t here/i.test(text);
       var onHomeShell = /\\/(home|dashboard|overview|accounts?)(\\b|\\/|\\?|#|$)/i.test(href)
         || /welcome\\s*to\\s*online\\s*banking/i.test(leading);
-      // Stale cookie: not-found, logged-out deals, or home/dashboard shell.
+      // Public marketing site (www.usbank.com) after deals bounce — not Account login.
+      var onMarketingHome = href.indexOf('www.usbank.com') !== -1
+        || (/^https?:\\/\\/([^/]*\\.)?usbank\\.com(\\/|$)/i.test(href)
+          && href.indexOf('onlinebanking.usbank.com') === -1);
+      // Stale cookie: not-found, logged-out deals, home/dashboard, or marketing home.
       // Do NOT treat MFA / soft-token pages (non-login, non-offers) as expired.
       var expired = !signedIn && !onLoginForm && (
         pageNotFound
         || (onOffers && /log\\s*in/i.test(leading))
         || onHomeShell
+        || onMarketingHome
       );
       if (window.ReactNativeWebView) {
         window.ReactNativeWebView.postMessage(JSON.stringify({

@@ -114,7 +114,7 @@ function readOffers(window, messages) {
   return messages.at(-1);
 }
 
-test('US Bank opens Cash Back Deals with loginUrl force path and is marked supported', () => {
+test('US Bank opens Account login first with offersUrl force path and is marked supported', () => {
   const usBank = BANK_LIST.find((bank) => bank.id === 'us_bank');
   assert.equal(usBank.supported, true);
   assert.equal(usBank.label, 'US Bank');
@@ -123,12 +123,13 @@ test('US Bank opens Cash Back Deals with loginUrl force path and is marked suppo
     assert.equal(BANK_LIST.find((bank) => bank.id === id).supported, false);
   }
   const config = BANK_CONFIG.us_bank;
-  assert.equal(config.url, US_BANK_OFFERS_URL);
+  assert.equal(config.url, US_BANK_LOGIN_URL);
   assert.equal(config.offersUrl, US_BANK_OFFERS_URL);
   assert.equal(config.loginUrl, US_BANK_LOGIN_URL);
-  assert.equal(config.url, config.offersUrl);
+  assert.equal(config.url, config.loginUrl);
   assert.notEqual(config.loginUrl, config.offersUrl);
   assert.ok(config.loginPaths.some((path) => path.includes('/auth/login')));
+  assert.ok(config.loginPaths.some((path) => path.includes('www.usbank.com')));
   assert.ok(config.loginUrl.toLowerCase().includes('/auth/login'));
   assert.ok(config.offersPaths.some((path) => config.offersUrl.toLowerCase().includes(path.toLowerCase())));
 
@@ -148,16 +149,17 @@ test('SyncWebView force-login and post-login goToOffers target US Bank loginUrl/
   assert.match(syncSource, /buildUsBankForceLoginJs/);
   assert.match(syncSource, /US_BANK_PAGE_STATE/);
   const goToOffersBlock = syncSource.match(
-    /const goToOffers = \(\) => \{[\s\S]*?\};\n/,
+    /const goToOffers = \(\) => \{[\s\S]*?\};\r?\n/,
   )?.[0] || '';
   assert.match(goToOffersBlock, /config\.offersUrl \|\| config\.url/);
   const goToLoginBlock = syncSource.match(
-    /const goToUsBankLogin = \(\) => \{[\s\S]*?\};\n/,
+    /const goToUsBankLogin = \(\) => \{[\s\S]*?\};\r?\n/,
   )?.[0] || '';
   assert.match(goToLoginBlock, /config\.loginUrl \|\| US_BANK_LOGIN_URL/);
   assert.equal(BANK_CONFIG.us_bank.offersUrl, US_BANK_OFFERS_URL);
   assert.equal(BANK_CONFIG.us_bank.loginUrl, US_BANK_LOGIN_URL);
-  assert.equal(BANK_CONFIG.us_bank.url, US_BANK_OFFERS_URL);
+  assert.equal(BANK_CONFIG.us_bank.url, US_BANK_LOGIN_URL);
+  assert.match(syncSource, /source=\{\{ uri: config\.url \}\}/);
 });
 
 test('home BankGrid treats supported US Bank as tappable (+ Add), not Coming Soon', () => {
@@ -259,6 +261,17 @@ test('US_BANK_PAGE_STATE marks logged-out deals as expired; login form is not', 
   assert.equal(loginState.onLoginForm, true);
   assert.equal(loginState.expired, false);
   assert.equal(loginState.signedIn, false);
+
+  const marketing = run(
+    'https://www.usbank.com/index.html',
+    'END OF YEAR SAVINGS BONUS\nGet a bonus up to $500\nLog in\nEarn your bonus',
+  );
+  const marketingState = marketing.find((m) => m.type === 'US_BANK_PAGE_STATE');
+  assert.ok(marketingState);
+  assert.equal(marketingState.onLoginForm, false);
+  assert.equal(marketingState.onOffers, false);
+  assert.equal(marketingState.signedIn, false);
+  assert.equal(marketingState.expired, true);
 });
 
 test('force login clears storage and replaces to official loginUrl', () => {
