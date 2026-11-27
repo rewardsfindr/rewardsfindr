@@ -9,12 +9,14 @@ import {
   StyleSheet, SafeAreaView, Platform,
 } from 'react-native';
 import { Stack, useRouter } from 'expo-router';
+import Constants from 'expo-constants';
 import { GoogleSignin, statusCodes } from '@react-native-google-signin/google-signin';
 import {
   GoogleAuthProvider, OAuthProvider, getRedirectResult,
   signInWithCredential, signInWithPopup, signInWithRedirect,
 } from 'firebase/auth';
 import { getAuthInstance } from '../lib/firebaseClient.js';
+import { getGoogleWebClientId } from '../lib/googleWebClientId.js';
 import { colors, radii, shadow } from '../shared/theme.js';
 
 let AppleAuthentication = null;
@@ -26,9 +28,20 @@ if (Platform.OS === 'ios') {
   }
 }
 
-if (Platform.OS !== 'web') {
+function googleWebClientIdFromExpoExtra() {
+  return (
+    Constants.expoConfig?.extra?.googleWebClientId ||
+    Constants.manifest?.extra?.googleWebClientId ||
+    Constants.manifest2?.extra?.expoClient?.extra?.googleWebClientId
+  );
+}
+
+const googleWebClientId =
+  Platform.OS !== 'web' ? getGoogleWebClientId(googleWebClientIdFromExpoExtra()) : null;
+
+if (Platform.OS !== 'web' && googleWebClientId) {
   GoogleSignin.configure({
-    webClientId: process.env.EXPO_PUBLIC_GOOGLE_CLIENT_ID,
+    webClientId: googleWebClientId,
     scopes: ['profile', 'email'],
     offlineAccess: false,
   });
@@ -81,6 +94,11 @@ export default function LoginScreen() {
           await signInWithRedirect(auth, provider);
         }
         return;
+      }
+      if (!googleWebClientId) {
+        throw new Error(
+          'Google Sign-In is not configured (missing web client id). Rebuild with EXPO_PUBLIC_GOOGLE_CLIENT_ID or google-services.json type-3 client.',
+        );
       }
       await GoogleSignin.hasPlayServices({ showPlayServicesUpdateDialog: true });
       const userInfo = await GoogleSignin.signIn();
