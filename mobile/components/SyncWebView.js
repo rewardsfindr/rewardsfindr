@@ -146,7 +146,8 @@ export default function SyncWebView({ visible, bank, onClose, onSuccess }) {
   const amexNudgeUsedRef    = useRef(false);
   const amexDomSelectedRef  = useRef(null);
   const amexBounceTargetRef = useRef(null);
-  const amexCoverRevealRef  = useRef(null);
+  /** Cards per eligible/enrolled phase — used for monotonic cover 1..(N×2). */
+  const amexPhaseCardCountRef = useRef(0);
   const syncModeRef         = useRef(SYNC_MODES.AUTH);
   const autoStartConsumedRef = useRef(false);
   const stepTimerRef        = useRef(null);
@@ -264,43 +265,33 @@ export default function SyncWebView({ visible, bank, onClose, onSuccess }) {
     amexWaitRef.current = null;
   };
 
-  const clearAmexCoverReveal = () => {
-    if (amexCoverRevealRef.current) clearTimeout(amexCoverRevealRef.current);
-    amexCoverRevealRef.current = null;
-  };
-
+  /**
+   * Show Syncing {card} · n of N only for a real capture pass (armed wait /
+   * CAPTURE_JSON). Bounce/arm stay blank. Monotonic across eligible+enrolled
+   * (1..(N×2)) so the enrolled walk is 3/4, 4/4 — not a replay of 1/2, 2/2.
+   */
   const publishAmexCoverDetail = (card) => {
     if (!card?.testId) return;
+    if (amexBounceTargetRef.current) return;
     const cards = cardOptionsRef.current;
+    const n = Math.max(
+      1,
+      cards.length || amexPhaseCardCountRef.current || cardCount || 1,
+    );
+    amexPhaseCardCountRef.current = n;
     const idx = Math.max(0, cards.findIndex((c) => c.testId === card.testId));
+    const phaseBase = syncPhaseRef.current === 'enrolled' ? n : 0;
     const full = amexCardDisplayLabel(card);
     const { cardName: name } = parseCardLabel(full);
     setAmexCoverDetail({
       label: name || full || 'card',
-      index: idx + 1,
-      total: Math.max(1, cards.length || cardCount || 1),
+      index: phaseBase + idx + 1,
+      total: n * 2,
     });
   };
 
   const clearAmexCoverDetail = () => {
-    clearAmexCoverReveal();
     setAmexCoverDetail(null);
-  };
-
-  /** After a short arming blank, show Syncing {card} · n of N while waiting for CAPTURE_JSON. */
-  const scheduleAmexCoverReveal = (card) => {
-    clearAmexCoverReveal();
-    if (!card?.testId) return;
-    const revealFor = card.testId;
-    amexCoverRevealRef.current = setTimeout(() => {
-      amexCoverRevealRef.current = null;
-      if (!syncStartedRef.current) return;
-      if (amexBounceTargetRef.current) return;
-      if (amexExpectedRef.current !== revealFor) return;
-      publishAmexCoverDetail(card);
-      setSwitching(false);
-      setSyncing(true);
-    }, 800);
   };
 
   const clearAmexArm = () => {
@@ -317,13 +308,15 @@ export default function SyncWebView({ visible, bank, onClose, onSuccess }) {
    */
   const scheduleAmexCaptureWait = (allowNudge) => {
     clearAmexWait();
-    // Active capture wait — ensure first card (and later) show Syncing n of N.
-    const expectedCard = amexExpectedRef.current
-      ? cardOptionsRef.current.find((c) => c?.testId === amexExpectedRef.current)
-      : null;
-    if (expectedCard) publishAmexCoverDetail(expectedCard);
-    setSwitching(false);
-    setSyncing(true);
+    // Real capture pass only — never during bounce/arm blank.
+    if (!amexBounceTargetRef.current) {
+      const expectedCard = amexExpectedRef.current
+        ? cardOptionsRef.current.find((c) => c?.testId === amexExpectedRef.current)
+        : null;
+      if (expectedCard) publishAmexCoverDetail(expectedCard);
+      setSwitching(false);
+      setSyncing(true);
+    }
     const waitMs = allowNudge
       ? AMEX_CAPTURE_NUDGE_AFTER_MS
       : AMEX_CAPTURE_READY_TIMEOUT_MS;
@@ -455,7 +448,7 @@ export default function SyncWebView({ visible, bank, onClose, onSuccess }) {
       amexNudgeUsedRef.current    = false;
       amexDomSelectedRef.current  = null;
       amexBounceTargetRef.current = null;
-      clearAmexCoverReveal();
+      amexPhaseCardCountRef.current = 0;
       setAmexCoverDetail(null);
       setMode(SYNC_MODES.AUTH);
       setCurrentCard(null);
@@ -516,9 +509,8 @@ export default function SyncWebView({ visible, bank, onClose, onSuccess }) {
    * Capture one Amex card by list order. Cover index = position in cardOptions
    * (monotonic 1..N). If already on that card in the DOM, bounce via another
    * card (or force-refresh) so ReadOffersHubPresentation actually fires.
-   * Cover subtitle blank during bounce/arming; reveals Syncing {card} · n of N
-   * once active capture starts (do not wait solely on CARD_SWITCHED — first card
-   * often gets CAPTURE_JSON first and never painted the line).
+   * Cover subtitle blank during bounce/arming; Syncing {card} · n of (N×2) only
+   * on real capture wait / CAPTURE_JSON (monotonic across eligible→enrolled).
    */
   const beginAmexCardCapture = (card) => {
     if (!card?.testId) return false;
@@ -588,8 +580,8 @@ export default function SyncWebView({ visible, bank, onClose, onSuccess }) {
         refreshAfterClick: true,
       }),
     );
-    // Reveal first-card (and later) cover without waiting for CARD_SWITCHED.
-    scheduleAmexCoverReveal(card);
+    // Cover stays blank through arming; publish only on real capture wait /
+    // CAPTURE_JSON (scheduleAmexCaptureWait / CAPTURE_JSON handler).
     return true;
   };
 
@@ -1667,6 +1659,7 @@ export default function SyncWebView({ visible, bank, onClose, onSuccess }) {
         });
         if (applied.populated) {
           cardOptionsRef.current = applied.cardOptions;
+          amexPhaseCardCountRef.current = applied.cardOptions.length;
           setCardCount(applied.cardOptions.length);
           cardIndexRef.current = applied.selectedIndex;
           setCardIndexUi(applied.selectedIndex);
@@ -1743,12 +1736,10 @@ export default function SyncWebView({ visible, bank, onClose, onSuccess }) {
             pendingCardLabelRef.current = label;
             setCurrentCard(label);
           }
-          if (expectedCard) publishAmexCoverDetail(expectedCard);
-          clearAmexCoverReveal();
-          setSyncing(true);
           amexNudgeUsedRef.current = false;
           // Poke filters so cached cards still emit ReadOffersHubPresentation.
           webViewRef.current?.injectJavaScript(buildAmexForceOffersRefreshJs());
+          // Publishes Syncing n of N (real capture pass) — blank through bounce/arm.
           scheduleAmexCaptureWait(true);
           return;
         }
@@ -1967,9 +1958,10 @@ export default function SyncWebView({ visible, bank, onClose, onSuccess }) {
         });
         clearAmexWait();
         clearStepTimer();
-        clearAmexCoverReveal();
         amexNudgeUsedRef.current = false;
         amexBounceTargetRef.current = null;
+        // CAPTURE_JSON can arrive before CARD_SWITCHED — publish here so the
+        // first card is not stuck on generic title during save.
         const expectedCard = capturedTestId
           ? cardOptionsRef.current.find((c) => c?.testId === capturedTestId)
           : cardOptionsRef.current.find((c) => c?.testId === amexExpectedRef.current);

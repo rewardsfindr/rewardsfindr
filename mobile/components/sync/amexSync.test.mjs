@@ -594,7 +594,9 @@ test('SyncWebView never advances Amex walk on capture timeout; walks display ord
   assert.match(src, /amexCoverStatusLine/);
   assert.match(src, /amexCoverDetail/);
   assert.match(src, /publishAmexCoverDetail/);
-  assert.match(src, /scheduleAmexCoverReveal/);
+  assert.match(src, /amexPhaseCardCountRef/);
+  assert.match(src, /n \* 2/);
+  assert.doesNotMatch(src, /scheduleAmexCoverReveal/);
   assert.match(src, /Amex cards ready — starting sync/);
   assert.match(src, /captureNextAmexCardInOrder/);
   assert.match(src, /beginAmexCardCapture/);

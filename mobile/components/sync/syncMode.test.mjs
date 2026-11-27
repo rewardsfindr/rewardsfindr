@@ -843,25 +843,34 @@ test('amexCoverStatusLine is blank unless actively capturing; no eligible/saved 
       active: true,
       cardLabel: 'Platinum Card®',
       cardIndex: 1,
-      cardsInPhase: 2,
+      cardsInPhase: 4,
     }),
-    'Syncing Platinum Card® · 1 of 2',
+    'Syncing Platinum Card® · 1 of 4',
   );
   assert.equal(
     amexCoverStatusLine({
       syncing: true,
       cardLabel: 'Blue Cash Preferred®',
       cardIndex: 2,
-      cardsInPhase: 2,
+      cardsInPhase: 4,
     }),
-    'Syncing Blue Cash Preferred® · 2 of 2',
+    'Syncing Blue Cash Preferred® · 2 of 4',
+  );
+  assert.equal(
+    amexCoverStatusLine({
+      active: true,
+      cardLabel: 'Platinum Card®',
+      cardIndex: 3,
+      cardsInPhase: 4,
+    }),
+    'Syncing Platinum Card® · 3 of 4',
   );
   assert.doesNotMatch(
     amexCoverStatusLine({
       active: true,
       cardLabel: 'Platinum Card®',
       cardIndex: 1,
-      cardsInPhase: 2,
+      cardsInPhase: 4,
     }),
     /eligible|activated|saved/i,
   );
