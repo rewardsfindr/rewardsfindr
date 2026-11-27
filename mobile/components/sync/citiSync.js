@@ -234,24 +234,79 @@ export const buildCitiOfferCaptureJs = () => `
   true;
 `;
 
-// Tells the app the Merchant Offers page chrome is on screen.
+// Official Citi Online sign-on (proven 200 at /US/ag/signon). Used when an
+// expired cookie leaves Merchant Offers as pageNotFound / signed-out shell.
+export const CITI_LOGIN_URL = 'https://online.citi.com/US/ag/signon';
+export const CITI_OFFERS_URL = 'https://online.citi.com/US/nga/products-offers/merchantoffers';
+
+// Page probe for AUTH: offers surface, honest signedIn, real login form, and
+// expired/signed-out shells that must be forced to loginUrl.
 export const buildCitiOffersVisibleJs = () => `
   (function() {
     try {
       var href = String((window.location && window.location.href) || '').toLowerCase();
       var text = document.body ? (document.body.innerText || '') : '';
+      var head = text.slice(0, 1200);
       var onOffers = href.indexOf('/nga/products-offers/merchantoffers') !== -1
         || href.indexOf('merchantoffers') !== -1;
       // Honest signed-in chrome only — never force true from URL match alone
       // (auto-start must require signedIn === true; see citi-pr-67 guideline).
       var signedIn = /sign\\s*off/i.test(text) && !/sign\\s*on/i.test(text.slice(0, 800));
-      if (onOffers && window.ReactNativeWebView) {
+      var onLoginForm = /user\\s*id/i.test(text) && /password/i.test(text)
+        && /sign\\s*on/i.test(text);
+      var pageNotFound = href.indexOf('pagenotfound') !== -1
+        || /looks like that information isn.?t here/i.test(text);
+      // Stale cookie: pageNotFound, or Sign On chrome without a real login form
+      // and without Sign Off (covers merchantoffers shells + public chrome).
+      var expired = !signedIn && !onLoginForm && (
+        pageNotFound
+        || (/sign\\s*on/i.test(head) && (onOffers || pageNotFound || href.indexOf('online.citi.com') !== -1 || href.indexOf('www.citi.com') !== -1))
+      );
+      if (window.ReactNativeWebView) {
         window.ReactNativeWebView.postMessage(JSON.stringify({
-          type: 'CITI_ON_OFFERS',
+          type: 'CITI_PAGE_STATE',
+          onOffers: !!onOffers,
           signedIn: !!signedIn,
+          onLoginForm: !!onLoginForm,
+          expired: !!expired,
         }));
+        // Keep legacy message for offers surface so older handlers/tests still see it.
+        if (onOffers) {
+          window.ReactNativeWebView.postMessage(JSON.stringify({
+            type: 'CITI_ON_OFFERS',
+            signedIn: !!signedIn,
+          }));
+        }
       }
     } catch (e) {}
+  })();
+  true;
+`;
+
+// Clear same-origin storage + best-effort cookies, then open official sign-on.
+// HttpOnly cookies cannot be cleared from JS; navigating to loginUrl still
+// presents the User ID / Password form when the session is dead.
+export const buildCitiForceLoginJs = (loginUrl = CITI_LOGIN_URL) => `
+  (function() {
+    try {
+      try { window.localStorage && window.localStorage.clear(); } catch (e) {}
+      try { window.sessionStorage && window.sessionStorage.clear(); } catch (e) {}
+      try {
+        var cookies = String(document.cookie || '').split(';');
+        for (var i = 0; i < cookies.length; i++) {
+          var part = cookies[i];
+          var eq = part.indexOf('=');
+          var name = (eq === -1 ? part : part.slice(0, eq)).replace(/^\\s+|\\s+$/g, '');
+          if (!name) continue;
+          document.cookie = name + '=; expires=Thu, 01 Jan 1970 00:00:00 GMT; path=/';
+          document.cookie = name + '=; expires=Thu, 01 Jan 1970 00:00:00 GMT; path=/; domain=.citi.com';
+          document.cookie = name + '=; expires=Thu, 01 Jan 1970 00:00:00 GMT; path=/; domain=.online.citi.com';
+        }
+      } catch (e) {}
+      window.location.replace(${JSON.stringify(String(loginUrl || CITI_LOGIN_URL))});
+    } catch (e) {
+      try { window.location.href = ${JSON.stringify(String(loginUrl || CITI_LOGIN_URL))}; } catch (e2) {}
+    }
   })();
   true;
 `;

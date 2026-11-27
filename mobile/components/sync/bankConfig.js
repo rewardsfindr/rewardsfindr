@@ -63,9 +63,12 @@ export const BANK_CONFIG = {
     loginPaths: ['/auth/login'],
   },
   citi: {
-    // Merchant Offers entry — redirects to sign-on when the session is gone.
+    // Merchant Offers entry — warm sessions stay here. Expired/stale cookies can
+    // paint pageNotFound or a signed-out shell instead of login; SyncWebView
+    // then forces loginUrl and returns to offersUrl after sign-on.
     url: 'https://online.citi.com/US/nga/products-offers/merchantoffers',
     offersUrl: 'https://online.citi.com/US/nga/products-offers/merchantoffers',
+    loginUrl: 'https://online.citi.com/US/ag/signon',
     label: 'Citi Offers',
     color: '#003b8e',
     offersPaths: ['/nga/products-offers/merchantoffers', 'merchantoffers'],

@@ -69,10 +69,12 @@ import {
 } from './sync/wellsFargoSync.js';import {
   buildCitiOfferCaptureJs,
   buildCitiOffersVisibleJs,
+  buildCitiForceLoginJs,
   buildCitiReadJs,
   buildCitiCaptureWhenReadyJs,
   CITI_CAPTURE_READY_TIMEOUT_MS,
   CITI_CAPTURE_POLL_MS,
+  CITI_LOGIN_URL,
 } from './sync/citiSync.js';
 import { buildUsBankOfferCaptureJs, buildUsBankOffersVisibleJs, buildUsBankReadJs } from './sync/usBankSync.js';
 import { parseCardLabel }                                 from './sync/cardLabel.js';
@@ -91,6 +93,8 @@ import {
   shouldShowSyncCover,
   planChaseNeedsInputResume,
   shouldForceChaseOffersRedirect,
+  shouldForceCitiLogin,
+  shouldForceCitiOffersRedirect,
   chaseCoverProgress,
   urlMatchesAnyPath,
 } from './sync/syncMode.js';
@@ -139,6 +143,8 @@ export default function SyncWebView({ visible, bank, onClose, onSuccess }) {
   const startingWellsRef    = useRef(false);
   const startingCitiRef     = useRef(false);
   const citiSignedInRef     = useRef(false);
+  const citiLoginForcedRef  = useRef(false);
+  const citiLoginSeenRef    = useRef(false);
 
   const [syncMode, setSyncMode]             = useState(SYNC_MODES.AUTH);
   const [syncing, setSyncing]               = useState(false);
@@ -308,6 +314,8 @@ export default function SyncWebView({ visible, bank, onClose, onSuccess }) {
       startingWellsRef.current    = false;
       startingCitiRef.current     = false;
       citiSignedInRef.current     = false;
+      citiLoginForcedRef.current  = false;
+      citiLoginSeenRef.current    = false;
       syncModeRef.current         = SYNC_MODES.AUTH;
       if (amexWaitRef.current) clearTimeout(amexWaitRef.current);
       amexWaitRef.current         = null;
@@ -499,6 +507,14 @@ export default function SyncWebView({ visible, bank, onClose, onSuccess }) {
     if (!target) return;
     offersRedirectRef.current = true;
     webViewRef.current?.injectJavaScript(`window.location.replace(${JSON.stringify(target)}); true;`);
+  };
+
+  const goToCitiLogin = () => {
+    if (bank !== 'citi') return;
+    if (citiLoginForcedRef.current || syncStartedRef.current) return;
+    citiLoginForcedRef.current = true;
+    const target = config.loginUrl || CITI_LOGIN_URL;
+    webViewRef.current?.injectJavaScript(buildCitiForceLoginJs(target));
   };
 
   /** Shared Chase start path for auto-start, Sync Offers, and Try again. */
@@ -1283,7 +1299,52 @@ export default function SyncWebView({ visible, bank, onClose, onSuccess }) {
         return;
       }
 
+      if (data.type === 'CITI_PAGE_STATE' && bank === 'citi') {
+        const onOffers = data.onOffers === true;
+        const signedIn = data.signedIn === true;
+        const onLoginForm = data.onLoginForm === true;
+        const expired = data.expired === true;
+        if (onOffers) offersRedirectRef.current = false;
+        if (onLoginForm) citiLoginSeenRef.current = true;
+        setOnOffersPage(onOffers);
+        setCitiSignedIn(signedIn);
+        setOnLoginPage(onLoginForm || (expired && !signedIn && !onOffers));
+        if (signedIn) setOnLoginPage(false);
+
+        const waiting =
+          syncModeRef.current === SYNC_MODES.AUTH
+          || syncModeRef.current === SYNC_MODES.NEEDS_INPUT;
+        if (
+          waiting
+          && shouldForceCitiLogin({
+            expired,
+            onLoginForm,
+            signedIn,
+            syncStarted: syncStartedRef.current,
+            loginForced: citiLoginForcedRef.current,
+          })
+        ) {
+          goToCitiLogin();
+          return;
+        }
+        if (
+          waiting
+          && shouldForceCitiOffersRedirect({
+            onOffers,
+            signedIn,
+            onLoginForm,
+            syncStarted: syncStartedRef.current,
+            offersRedirected: offersRedirectRef.current,
+            loginSeen: citiLoginSeenRef.current,
+          })
+        ) {
+          goToOffers();
+        }
+        return;
+      }
+
       if (data.type === 'CITI_ON_OFFERS' && bank === 'citi') {
+        // Legacy offers-only signal (still emitted alongside CITI_PAGE_STATE).
         offersRedirectRef.current = false;
         setOnOffersPage(true);
         const signedIn = data.signedIn === true;

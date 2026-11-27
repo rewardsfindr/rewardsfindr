@@ -16,6 +16,8 @@ import {
   shouldShowSyncCover,
   planChaseNeedsInputResume,
   shouldForceChaseOffersRedirect,
+  shouldForceCitiLogin,
+  shouldForceCitiOffersRedirect,
   chaseCoverProgress,
   urlMatchesAnyPath,
 } from './syncMode.js';
@@ -413,6 +415,146 @@ test('force offers redirect only before the hub has been seen', () => {
   );
 });
 
+test('force Citi login only for expired shells, not happy-path or login form', () => {
+  assert.equal(
+    shouldForceCitiLogin({
+      expired: true,
+      onLoginForm: false,
+      signedIn: false,
+      syncStarted: false,
+      loginForced: false,
+    }),
+    true,
+  );
+  assert.equal(
+    shouldForceCitiLogin({
+      expired: true,
+      onLoginForm: true,
+      signedIn: false,
+      syncStarted: false,
+      loginForced: false,
+    }),
+    false,
+    'already on User ID / Password form',
+  );
+  assert.equal(
+    shouldForceCitiLogin({
+      expired: true,
+      onLoginForm: false,
+      signedIn: true,
+      syncStarted: false,
+      loginForced: false,
+    }),
+    false,
+    'honest signed-in session must stay on Merchant Offers',
+  );
+  assert.equal(
+    shouldForceCitiLogin({
+      expired: false,
+      onLoginForm: false,
+      signedIn: false,
+      syncStarted: false,
+      loginForced: false,
+    }),
+    false,
+  );
+  assert.equal(
+    shouldForceCitiLogin({
+      expired: true,
+      onLoginForm: false,
+      signedIn: false,
+      syncStarted: false,
+      loginForced: true,
+    }),
+    false,
+    'one-shot only',
+  );
+  assert.equal(
+    shouldForceCitiLogin({
+      expired: true,
+      onLoginForm: false,
+      signedIn: false,
+      syncStarted: true,
+      loginForced: false,
+    }),
+    false,
+  );
+});
+
+test('force Citi Merchant Offers after login (fresh or expired→login)', () => {
+  assert.equal(
+    shouldForceCitiOffersRedirect({
+      onOffers: false,
+      signedIn: true,
+      onLoginForm: false,
+      syncStarted: false,
+      offersRedirected: false,
+      loginSeen: false,
+    }),
+    true,
+    'signed-in off offers → Merchant Offers',
+  );
+  assert.equal(
+    shouldForceCitiOffersRedirect({
+      onOffers: false,
+      signedIn: false,
+      onLoginForm: false,
+      syncStarted: false,
+      offersRedirected: false,
+      loginSeen: true,
+    }),
+    true,
+    'post-login hop (interstitial/dashboard) after login form was seen',
+  );
+  assert.equal(
+    shouldForceCitiOffersRedirect({
+      onOffers: false,
+      signedIn: false,
+      onLoginForm: true,
+      syncStarted: false,
+      offersRedirected: false,
+      loginSeen: true,
+    }),
+    false,
+    'still on login form',
+  );
+  assert.equal(
+    shouldForceCitiOffersRedirect({
+      onOffers: true,
+      signedIn: true,
+      onLoginForm: false,
+      syncStarted: false,
+      offersRedirected: false,
+      loginSeen: true,
+    }),
+    false,
+    'already on Merchant Offers (happy path)',
+  );
+  assert.equal(
+    shouldForceCitiOffersRedirect({
+      onOffers: false,
+      signedIn: false,
+      onLoginForm: false,
+      syncStarted: false,
+      offersRedirected: false,
+      loginSeen: false,
+    }),
+    false,
+  );
+  assert.equal(
+    shouldForceCitiOffersRedirect({
+      onOffers: false,
+      signedIn: true,
+      onLoginForm: false,
+      syncStarted: false,
+      offersRedirected: true,
+      loginSeen: true,
+    }),
+    false,
+    'one-shot offers redirect',
+  );
+});
+
 test('cover progress tracks saved cards and never needs a backward pulse', () => {
   assert.equal(chaseCoverProgress({ syncedCount: 0, totalCards: 5, inFlight: false }).rawFrac, 0);
   assert.equal(chaseCoverProgress({ syncedCount: 0, totalCards: 5, inFlight: true }).rawFrac, 0.1);
@@ -514,8 +656,19 @@ test('SyncWebView wires Citi auto-start with honest signedIn gate', () => {
   assert.doesNotMatch(citiGateBlock, /hasCards/);
   assert.doesNotMatch(citiGateBlock, /hookReady/);
   assert.doesNotMatch(citiGateBlock, /chaseHookReady/);
-  // CITI_ON_OFFERS must key off data.signedIn === true.
+  // CITI_ON_OFFERS / PAGE_STATE must key off data.signedIn === true.
   assert.match(src, /data\.signedIn === true/);
+  // Expired session → official sign-on; post-login → Merchant Offers.
+  assert.match(src, /CITI_PAGE_STATE/);
+  assert.match(src, /shouldForceCitiLogin/);
+  assert.match(src, /shouldForceCitiOffersRedirect/);
+  assert.match(src, /buildCitiForceLoginJs/);
+  assert.match(src, /goToCitiLogin/);
+  assert.equal(BANK_CONFIG.citi.loginUrl, 'https://online.citi.com/US/ag/signon');
+  assert.equal(
+    BANK_CONFIG.citi.offersUrl,
+    'https://online.citi.com/US/nga/products-offers/merchantoffers',
+  );
   // Cap One / US Bank auto-start must not appear in this PR.
   assert.doesNotMatch(src, /shouldAutoStartUsBank/);
   assert.doesNotMatch(src, /shouldAutoStartCapitalOne|capital_one.*autoStart/);

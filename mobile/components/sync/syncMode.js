@@ -197,6 +197,47 @@ export function shouldForceChaseOffersRedirect({
 }
 
 /**
+ * Expired / signed-out Citi shell → one-shot navigate to official sign-on.
+ * Do not fire when the real User ID / Password form is already visible, or
+ * when the session is honestly signed in (happy path stays on Merchant Offers).
+ */
+export function shouldForceCitiLogin({
+  expired = false,
+  onLoginForm = false,
+  signedIn = false,
+  syncStarted = false,
+  loginForced = false,
+} = {}) {
+  if (syncStarted) return false;
+  if (loginForced) return false;
+  if (signedIn === true) return false;
+  if (onLoginForm) return false;
+  return expired === true;
+}
+
+/**
+ * After Citi sign-on (fresh or expired→login), land on Merchant Offers before
+ * capture. Skip while the login form is still up or when already on offers.
+ * `loginSeen` covers post-auth hops (interstitial / dashboard) that may not
+ * yet expose Sign Off chrome.
+ */
+export function shouldForceCitiOffersRedirect({
+  onOffers = false,
+  signedIn = false,
+  onLoginForm = false,
+  syncStarted = false,
+  offersRedirected = false,
+  loginSeen = false,
+} = {}) {
+  if (syncStarted) return false;
+  if (offersRedirected) return false;
+  if (onOffers) return false;
+  if (onLoginForm) return false;
+  if (signedIn === true) return true;
+  return loginSeen === true;
+}
+
+/**
  * After MFA / NeedsInput, plan the Chase resume action.
  * Never same-card switch — buildSwitchCardJs posts CARD_SWITCH_ERROR when the
  * menu stays on the current card, which would falsely enter failed.
