@@ -11,10 +11,13 @@ import { citiRecords, replaceCardOffers } from '../../lib/catalog/deviceCatalog.
 import {
   buildCitiOfferCaptureJs,
   buildCitiOffersVisibleJs,
+  buildCitiForceLoginJs,
   buildCitiReadJs,
   buildCitiCaptureWhenReadyJs,
   CITI_CAPTURE_READY_TIMEOUT_MS,
   CITI_CAPTURE_POLL_MS,
+  CITI_LOGIN_URL,
+  CITI_OFFERS_URL,
   stripCitiOffers,
 } from './citiSync.js';
 
@@ -177,6 +180,9 @@ test('Citi opens Merchant Offers and is marked supported', () => {
     'https://online.citi.com/US/nga/products-offers/merchantoffers'
   );
   assert.equal(config.offersUrl, config.url);
+  assert.equal(config.offersUrl, CITI_OFFERS_URL);
+  assert.equal(config.loginUrl, CITI_LOGIN_URL);
+  assert.equal(config.loginUrl, 'https://online.citi.com/US/ag/signon');
   assert.ok(config.loginPaths.length > 0);
   assert.equal(
     config.offersPaths.some(path => config.url.toLowerCase().includes(path.toLowerCase())),
@@ -288,6 +294,9 @@ test('Citi offers-visible posts honest signedIn (never force true from URL alone
   assert.match(visibleJs, /signedIn:\s*!!signedIn/);
   assert.doesNotMatch(visibleJs, /signedIn:\s*signedIn\s*\|\|\s*onOffers/);
   assert.match(visibleJs, /sign\\s\*off/i);
+  assert.match(visibleJs, /CITI_PAGE_STATE/);
+  assert.match(visibleJs, /onLoginForm/);
+  assert.match(visibleJs, /expired/);
   // SyncWebView auto path must require signedIn === true before start.
   const syncSource = readRepoFile('..', 'SyncWebView.js');
   assert.match(syncSource, /shouldAutoStartCiti/);
@@ -299,6 +308,79 @@ test('Citi offers-visible posts honest signedIn (never force true from URL alone
     syncSource,
     /Citi SPA can paint merchantoffers before Sign Off[\s\S]*?AUTH_REPROBE_MS/,
   );
+});
+
+test('pageNotFound / signed-out shell marks expired; login form and Sign Off do not', () => {
+  function probe(href, bodyText) {
+    const messages = [];
+    const window = {
+      location: { href },
+      ReactNativeWebView: { postMessage(raw) { messages.push(JSON.parse(raw)); } },
+    };
+    const document = { body: { innerText: bodyText } };
+    new Function('window', 'document', buildCitiOffersVisibleJs())(window, document);
+    return messages.find(m => m.type === 'CITI_PAGE_STATE');
+  }
+
+  const dead = probe(
+    'https://online.citi.com/US/ag/pageNotFound',
+    'Hmm... looks like that information isn\'t here. Sign On Credit Cards Banking',
+  );
+  assert.equal(dead.expired, true);
+  assert.equal(dead.signedIn, false);
+  assert.equal(dead.onLoginForm, false);
+  assert.equal(dead.onOffers, false);
+
+  const staleOffers = probe(
+    'https://online.citi.com/US/nga/products-offers/merchantoffers',
+    'Sign On\nMerchant Offers\nProducts',
+  );
+  assert.equal(staleOffers.onOffers, true);
+  assert.equal(staleOffers.signedIn, false);
+  assert.equal(staleOffers.expired, true);
+  assert.equal(staleOffers.onLoginForm, false);
+
+  const loginForm = probe(
+    'https://online.citi.com/US/ag/signon',
+    'User ID\nPassword\nRemember me\nSign On\nForgot User ID or Password',
+  );
+  assert.equal(loginForm.onLoginForm, true);
+  assert.equal(loginForm.expired, false);
+  assert.equal(loginForm.signedIn, false);
+
+  const happy = probe(
+    'https://online.citi.com/US/nga/products-offers/merchantoffers',
+    'Sign Off\nMerchant Offers\nFeatured\nCVS',
+  );
+  assert.equal(happy.onOffers, true);
+  assert.equal(happy.signedIn, true);
+  assert.equal(happy.expired, false);
+  assert.equal(happy.onLoginForm, false);
+});
+
+test('force-login clears storage best-effort and navigates to official sign-on', () => {
+  assert.equal(CITI_LOGIN_URL, 'https://online.citi.com/US/ag/signon');
+  const forceJs = buildCitiForceLoginJs();
+  assert.match(forceJs, /localStorage/);
+  assert.match(forceJs, /sessionStorage/);
+  assert.match(forceJs, /online\.citi\.com\/US\/ag\/signon/);
+
+  let replaced = '';
+  let clearedLocal = false;
+  let clearedSession = false;
+  const window = {
+    localStorage: { clear() { clearedLocal = true; } },
+    sessionStorage: { clear() { clearedSession = true; } },
+    location: {
+      replace(url) { replaced = url; },
+      href: 'https://online.citi.com/US/ag/pageNotFound',
+    },
+  };
+  const document = { cookie: 'a=1; b=2' };
+  new Function('window', 'document', buildCitiForceLoginJs(CITI_LOGIN_URL))(window, document);
+  assert.equal(clearedLocal, true);
+  assert.equal(clearedSession, true);
+  assert.equal(replaced, CITI_LOGIN_URL);
 });
 
 test('stripCitiOffers keeps offer fields and the selected credit card only', () => {
