@@ -363,10 +363,9 @@ export const buildUsBankOffersVisibleJs = () => `
       var onMarketingHome = href.indexOf('www.usbank.com') !== -1
         || (/^https?:\\/\\/([^/]*\\.)?usbank\\.com(\\/|$)/i.test(href)
           && href.indexOf('onlinebanking.usbank.com') === -1);
-      // OfferHub with live deals and no Account login / Log in chrome ≈ session ok.
-      if (!signedIn && onOffers && !onLoginForm
-          && !hasLoginPrompt
-          && (/cash\\s*back/i.test(text) || /\\d+\\s*%/.test(text) || /activate/i.test(text))) {
+      // OfferHub / cashback-deals without login prompt ≈ session ok — start capture
+      // without waiting for a late "load" signal that never arrives.
+      if (!signedIn && onOffers && !onLoginForm && !hasLoginPrompt) {
         signedIn = true;
       }
       // Customer dashboard / shellapp after login — Log out may lag; still hop.

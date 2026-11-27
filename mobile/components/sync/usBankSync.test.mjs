@@ -347,8 +347,8 @@ test('US_BANK_ON_OFFERS posts signedIn true on OfferHub deals without Log out ch
   };
   const document = {
     body: {
-      // OfferHub often hides Log out in a menu — deals + % cash back still mean session ok.
-      innerText: 'Cash Back Deals\nFragranceNet.com\n5% cash back\nQVC\n10% cash back\nActivate',
+      // OfferHub URL without login prompt is enough — do not wait for a late load signal.
+      innerText: 'Your cash-back deals\nTotal amount saved to date: $0.00\nAll deals',
     },
   };
   new Function('window', 'document', buildUsBankOffersVisibleJs())(window, document);

@@ -1222,7 +1222,7 @@ test('SyncWebView wires US Bank auto-start without Chase-only gates', () => {
   assert.doesNotMatch(usBankGateBlock, /hasCards/);
   assert.doesNotMatch(usBankGateBlock, /hookReady/);
   assert.doesNotMatch(usBankGateBlock, /chaseHookReady/);
-  // Offers-ready only from honest signedIn message — not URL cashback-deals alone.
+  // Auto-start still requires signedIn from PAGE_STATE (OfferHub sets it without Log out).
   assert.match(src, /data\.signedIn === true/);
   assert.match(src, /URL alone never marks offers-ready/);
   // Expired / signed-out → official loginUrl; signedIn / post-login home → offersUrl.
@@ -1235,6 +1235,11 @@ test('SyncWebView wires US Bank auto-start without Chase-only gates', () => {
   assert.match(src, /goToUsBankLogin/);
   assert.match(src, /buildUsBankForceLoginJs/);
   assert.match(src, /const goToOffers = \(\) => \{[\s\S]*?config\.offersUrl/);
+  // OfferHub AUTH re-probe until signedIn + onOffers (Citi-shaped).
+  assert.match(
+    src,
+    /US Bank OfferHub can paint cashback-deals[\s\S]*?bank !== 'us_bank'[\s\S]*?buildUsBankOffersVisibleJs[\s\S]*?AUTH_REPROBE_MS/,
+  );
   // Happy / waiting path must not show Sync Offers (failed footer only).
   assert.match(src, /isAutoBank/);
   assert.match(src, /if \(isAutoBank\) return null/);

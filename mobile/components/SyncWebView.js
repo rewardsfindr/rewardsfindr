@@ -1601,6 +1601,29 @@ export default function SyncWebView({ visible, bank, onClose, onSuccess }) {
     return () => clearInterval(id);
   }, [visible, bank, syncMode]);
 
+  // US Bank OfferHub can paint cashback-deals before PAGE_STATE signedIn lands
+  // (or after goToOffers with a one-shot probe). Re-inject until auto-start can fire.
+  useEffect(() => {
+    if (!visible || bank !== 'us_bank') return;
+    if (syncMode !== SYNC_MODES.AUTH && syncMode !== SYNC_MODES.NEEDS_INPUT) return;
+    if (syncStartedRef.current) return;
+
+    const reprobe = () => {
+      if (syncStartedRef.current) return;
+      if (syncModeRef.current !== SYNC_MODES.AUTH && syncModeRef.current !== SYNC_MODES.NEEDS_INPUT) {
+        return;
+      }
+      if (usBankSignedInRef.current === true && onOffersPageRef.current) return;
+      webViewRef.current?.injectJavaScript(buildUsBankOfferCaptureJs());
+      webViewRef.current?.injectJavaScript(buildUsBankOffersVisibleJs());
+      webViewRef.current?.injectJavaScript(buildUsBankChallengeVisibleJs());
+    };
+
+    reprobe();
+    const id = setInterval(reprobe, AUTH_REPROBE_MS);
+    return () => clearInterval(id);
+  }, [visible, bank, syncMode]);
+
   // Amex SPA can paint offers before the card combobox is ready. Re-open detect
   // until amexCardsReady (Chase/Citi reprobes stay separate).
   useEffect(() => {
