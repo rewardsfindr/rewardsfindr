@@ -808,7 +808,7 @@ test('amexCoverProgress matches Chase math; AMEX_SWITCH_TIMEOUT_MS stays 3500', 
   );
 });
 
-test('amexCoverStatusLine omits N-of-M while switch-only; shows it while syncing', () => {
+test('amexCoverStatusLine is blank while switch-only; shows N-of-M only while syncing', () => {
   assert.equal(
     amexCoverStatusLine({
       switching: true,
@@ -818,7 +818,17 @@ test('amexCoverStatusLine omits N-of-M while switch-only; shows it while syncing
       cardsInPhase: 2,
       phaseLabel: 'eligible',
     }),
-    'Switching card…',
+    '',
+  );
+  assert.equal(
+    amexCoverStatusLine({
+      switching: false,
+      syncing: false,
+      cardLabel: 'Blue Cash Preferred®',
+      cardIndex: 1,
+      cardsInPhase: 2,
+    }),
+    '',
   );
   assert.equal(
     amexCoverStatusLine({

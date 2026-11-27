@@ -1868,7 +1868,7 @@ export default function SyncWebView({ visible, bank, onClose, onSuccess }) {
     syncedCount: syncedUiCount,
   });
   const statusText = switching && !syncing
-    ? `Switching card...`
+    ? (bank === 'amex' ? '' : 'Switching card...')
     : syncing
       ? bank === 'amex'
         ? `Syncing ${phaseLabel} offers — ${cardName || 'card'} (${phaseCardIndex} of ${cardsInPhase})...`
@@ -2034,11 +2034,13 @@ export default function SyncWebView({ visible, bank, onClose, onSuccess }) {
                 </Text>
                 {bank === 'chase' || bank === 'amex' ? (
                   <>
-                    <Text style={s.coverSub}>
-                      {bank === 'amex'
-                        ? amexCoverSub
-                        : `${coverCardLabel} · card ${coverIndex} of ${totalCards}${syncedUiCount > 0 ? ` · ${syncedUiCount} saved` : ''}`}
-                    </Text>
+                    {(bank === 'amex' ? amexCoverSub : true) ? (
+                      <Text style={s.coverSub}>
+                        {bank === 'amex'
+                          ? amexCoverSub
+                          : `${coverCardLabel} · card ${coverIndex} of ${totalCards}${syncedUiCount > 0 ? ` · ${syncedUiCount} saved` : ''}`}
+                      </Text>
+                    ) : null}
                     <View style={s.progressTrack}>
                       <View style={[s.progressFill, { width: `${Math.round(progressFrac * 100)}%` }]} />
                     </View>

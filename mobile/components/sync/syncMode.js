@@ -309,8 +309,8 @@ export function amexCoverProgress(args) {
 }
 
 /**
- * Amex cover subtitle. Switch-only steps (arming the next card) must not claim
- * "card N of M" — that line is only for an in-flight capture.
+ * Amex cover subtitle. Switch-only / idle steps show nothing — cover detail
+ * is only for an in-flight capture (card name + honest N of M).
  */
 export function amexCoverStatusLine({
   switching = false,
@@ -321,15 +321,12 @@ export function amexCoverStatusLine({
   phaseLabel = 'eligible',
   syncedCount = 0,
 } = {}) {
-  if (switching && !syncing) return 'Switching card…';
-  if (syncing) {
-    const index = Math.max(1, Number(cardIndex) || 1);
-    const total = Math.max(1, Number(cardsInPhase) || 1);
-    const base = `${cardLabel || 'card'} · card ${index} of ${total} · ${phaseLabel || 'eligible'}`;
-    const saved = Number(syncedCount) || 0;
-    return saved > 0 ? `${base} · ${saved} saved` : base;
-  }
-  return 'Processing…';
+  if (!syncing) return '';
+  const index = Math.max(1, Number(cardIndex) || 1);
+  const total = Math.max(1, Number(cardsInPhase) || 1);
+  const base = `${cardLabel || 'card'} · card ${index} of ${total} · ${phaseLabel || 'eligible'}`;
+  const saved = Number(syncedCount) || 0;
+  return saved > 0 ? `${base} · ${saved} saved` : base;
 }
 
 /**
