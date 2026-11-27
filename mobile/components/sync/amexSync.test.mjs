@@ -10,6 +10,9 @@ import {
   AMEX_CAPTURE_READY_TIMEOUT_MS,
   applyAmexCardsDetected,
   resolveAmexCaptureAttribution,
+  resolveAmexResumeCapture,
+  amexCardKey,
+  matchAmexCard,
   buildAmexJsonCaptureJs,
   buildAmexSwitchCardJs,
   buildAmexNudgeRecaptureJs,
@@ -573,6 +576,66 @@ test('resolveAmexCaptureAttribution falls back to DOM when expected is unknown',
   assert.equal(attributed.labelMismatch, false);
 });
 
+test('MFA resume prefers amexCycleCardRef over next unvisited (mid eligible→enrolled)', () => {
+  const platinum = {
+    label: 'Platinum Card®',
+    last4: '2009',
+    testId: 'ENROLLED_PLAT_99',
+  };
+  const blue = {
+    label: 'Blue Cash Preferred®',
+    last4: '1008',
+    testId: 'ENROLLED_BCP_01',
+  };
+  // Enrolled list order puts Blue first — naive next-unvisited would steal the walk.
+  const enrolledCards = [blue, platinum];
+  const cycleCard = {
+    label: 'Platinum Card®',
+    last4: '2009',
+    testId: 'CARD_PRODUCT_PLAT',
+    coverIndex: 1,
+  };
+  const visitedKeys = new Set(); // Platinum cycle not complete until enrolled saves
+
+  const resolved = resolveAmexResumeCapture({
+    cards: enrolledCards,
+    cycleCard,
+    visitedKeys,
+    eligibleOrder: [
+      { label: 'Platinum Card®', last4: '2009', testId: 'CARD_PRODUCT_PLAT' },
+      { label: 'Blue Cash Preferred®', last4: '1008', testId: 'CARD_PRODUCT_BCP' },
+    ],
+  });
+  assert.equal(resolved.action, 'capture_card');
+  assert.equal(resolved.reason, 'cycle');
+  assert.equal(resolved.card.testId, 'ENROLLED_PLAT_99');
+  assert.equal(amexCardKey(resolved.card), amexCardKey(cycleCard));
+
+  // Without cycle, first unvisited in list order would be Blue — the bug.
+  const naive = resolveAmexResumeCapture({
+    cards: enrolledCards,
+    cycleCard: null,
+    visitedKeys,
+  });
+  assert.equal(naive.card.testId, 'ENROLLED_BCP_01');
+  assert.notEqual(naive.card.testId, resolved.card.testId);
+
+  assert.equal(
+    matchAmexCard(enrolledCards, cycleCard)?.testId,
+    'ENROLLED_PLAT_99',
+  );
+});
+
+test('MFA resume with cycle but empty card list asks for redetect', () => {
+  const resolved = resolveAmexResumeCapture({
+    cards: [],
+    cycleCard: { label: 'Platinum Card®', last4: '2009', testId: 'CARD_PRODUCT_PLAT' },
+    visitedKeys: new Set(),
+  });
+  assert.equal(resolved.action, 'redetect');
+  assert.equal(resolved.reason, 'cycle_missing');
+});
+
 test('SyncWebView pins amexExpectedRef before switch and attributes CAPTURE_JSON via helper', () => {
   const src = readFileSync(join(HERE, '..', 'SyncWebView.js'), 'utf8');
   assert.match(src, /resolveAmexCaptureAttribution/);
@@ -596,8 +659,11 @@ test('SyncWebView never advances Amex walk on capture timeout; walks display ord
   assert.match(src, /publishAmexCoverDetail/);
   assert.match(src, /amexCycleCardRef/);
   assert.match(src, /amexVisitedKeysRef/);
+  assert.match(src, /resolveAmexResumeCapture/);
+  assert.match(src, /\[amex-resume\]/);
   assert.match(src, /one capture cycle per card|One cycle per card|Keep cover on this card through enrolled/);
   assert.doesNotMatch(src, /scheduleAmexCoverReveal/);
+  assert.doesNotMatch(src, /phase_to_enrolled/);
   assert.match(src, /Amex cards ready — starting sync/);
   assert.match(src, /captureNextAmexCardInOrder/);
   assert.match(src, /beginAmexCardCapture/);

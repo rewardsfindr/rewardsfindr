@@ -752,7 +752,46 @@ test('non-Amex banks never pass shouldAutoStartAmex', () => {
   }
 });
 
-test('Amex NeedsInput resume continues walk without Chase planner', () => {
+test('Amex NeedsInput resume prefers cycle / continue_walk; enrolled-complete is full_start', () => {
+  assert.deepEqual(
+    planAmexNeedsInputResume({
+      cardOptionsLength: 2,
+      visitedKeyCount: 0,
+      totalCards: 2,
+      syncPhase: 'enrolled',
+      hasCycleCard: true,
+    }),
+    { action: 'continue_cycle', phase: 'enrolled' },
+  );
+  assert.deepEqual(
+    planAmexNeedsInputResume({
+      cardOptionsLength: 2,
+      visitedKeyCount: 1,
+      totalCards: 2,
+      syncPhase: 'eligible',
+      hasCycleCard: false,
+    }),
+    { action: 'continue_walk', phase: 'eligible' },
+  );
+  assert.deepEqual(
+    planAmexNeedsInputResume({
+      cardOptionsLength: 2,
+      visitedKeyCount: 2,
+      totalCards: 2,
+      syncPhase: 'enrolled',
+      hasCycleCard: false,
+    }),
+    { action: 'full_start' },
+  );
+  assert.deepEqual(
+    planAmexNeedsInputResume({
+      cardOptionsLength: 0,
+      visitedKeyCount: 0,
+      syncPhase: 'eligible',
+    }),
+    { action: 'full_start' },
+  );
+  // Legacy visitedCount still works as alias.
   assert.deepEqual(
     planAmexNeedsInputResume({
       cardOptionsLength: 4,
@@ -761,23 +800,7 @@ test('Amex NeedsInput resume continues walk without Chase planner', () => {
     }),
     { action: 'continue_walk', phase: 'eligible' },
   );
-  assert.deepEqual(
-    planAmexNeedsInputResume({
-      cardOptionsLength: 4,
-      visitedCount: 4,
-      syncPhase: 'eligible',
-    }),
-    { action: 'phase_to_enrolled' },
-  );
-  assert.deepEqual(
-    planAmexNeedsInputResume({
-      cardOptionsLength: 0,
-      visitedCount: 0,
-      syncPhase: 'eligible',
-    }),
-    { action: 'full_start' },
-  );
-  // Enrolled-complete → full_start (visited >= total on enrolled phase).
+  // Enrolled-complete via legacy visitedCount → full_start (not phase_to_enrolled).
   assert.deepEqual(
     planAmexNeedsInputResume({
       cardOptionsLength: 4,
@@ -793,6 +816,14 @@ test('Amex NeedsInput resume continues walk without Chase planner', () => {
       syncPhase: 'eligible',
     }).action,
     'arm_capture',
+  );
+  assert.notEqual(
+    planAmexNeedsInputResume({
+      cardOptionsLength: 4,
+      visitedCount: 4,
+      syncPhase: 'eligible',
+    }).action,
+    'phase_to_enrolled',
   );
 });
 
@@ -902,12 +933,16 @@ test('SyncWebView wires Amex auto-start with cards-ready gate and arm-before-swi
   assert.match(startAmexBlock, /captureNextAmexCardInOrder/);
   assert.match(startAmexBlock, /__amexJsonCaptureArmed = false/);
   assert.match(startAmexBlock, /AMEX_OPEN_AND_DETECT_JS/);
-  // NeedsInput resume must not call Chase planner.
+  // NeedsInput resume must prefer cycle card — not Chase planner / blind next.
   const resumeAmexBlock = src.match(
     /const resumeAmexCapture = \(\) => \{[\s\S]*?startingAmexRef\.current = false;\r?\n  \};/,
   )?.[0] || '';
   assert.match(resumeAmexBlock, /planAmexNeedsInputResume/);
+  assert.match(resumeAmexBlock, /resolveAmexResumeCapture/);
+  assert.match(resumeAmexBlock, /amexCycleCardRef/);
+  assert.match(resumeAmexBlock, /hasCycleCard/);
   assert.doesNotMatch(resumeAmexBlock, /planChaseNeedsInputResume/);
+  assert.doesNotMatch(resumeAmexBlock, /phase_to_enrolled/);
   // Cap One / US Bank auto-start must not appear.
   assert.doesNotMatch(src, /shouldAutoStartUsBank/);
   assert.doesNotMatch(src, /shouldAutoStartCapitalOne|capital_one.*autoStart/);

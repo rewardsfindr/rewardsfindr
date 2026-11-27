@@ -61,7 +61,10 @@ import {
   amexHandleLoadEnd,
   applyAmexCardsDetected,
   resolveAmexCaptureAttribution,
+  resolveAmexResumeCapture,
   amexCardDisplayLabel,
+  amexCardKey,
+  matchAmexCard,
 } from './sync/amexSync.js';
 import {
   buildWellsFargoDealsVisibleJs,
@@ -271,23 +274,6 @@ export default function SyncWebView({ visible, bank, onClose, onSuccess }) {
   const clearAmexWait = () => {
     if (amexWaitRef.current) clearTimeout(amexWaitRef.current);
     amexWaitRef.current = null;
-  };
-
-  const amexCardKey = (card) => {
-    if (!card) return null;
-    if (card.last4) return `4:${card.last4}`;
-    if (card.label) return `n:${card.label}`;
-    if (card.testId) return `t:${card.testId}`;
-    return null;
-  };
-
-  const matchAmexCard = (cards, pending) => {
-    const list = Array.isArray(cards) ? cards : [];
-    if (!pending) return null;
-    return list.find((c) => c?.testId && c.testId === pending.testId)
-      || list.find((c) => c?.last4 && pending.last4 && c.last4 === pending.last4)
-      || list.find((c) => c?.label && pending.label && c.label === pending.label)
-      || null;
   };
 
   /**
@@ -554,8 +540,8 @@ export default function SyncWebView({ visible, bank, onClose, onSuccess }) {
    * Capture one Amex card by list order. Cover index = position in cardOptions
    * (monotonic 1..N). If already on that card in the DOM, bounce via another
    * card (or force-refresh) so ReadOffersHubPresentation actually fires.
-   * Cover subtitle blank during bounce/arming; Syncing {card} · n of (N×2) only
-   * on real capture wait / CAPTURE_JSON (monotonic across eligible→enrolled).
+   * Cover subtitle blank during bounce/arming; Syncing {card} · i of N once
+   * per card cycle (held through eligible→enrolled).
    */
   const beginAmexCardCapture = (card) => {
     if (!card?.testId) return false;
@@ -974,16 +960,18 @@ export default function SyncWebView({ visible, bank, onClose, onSuccess }) {
   };
 
   /**
-   * Resume Amex after MFA: clear arm, continue the current per-card
-   * eligible→enrolled cycle — never Chase planChaseNeedsInputResume.
+   * Resume Amex after MFA: prefer amexCycleCardRef (mid eligible→enrolled)
+   * over next-unvisited — never Chase planChaseNeedsInputResume.
    */
   const resumeAmexCapture = () => {
     if (bank !== 'amex') return;
     if (startingAmexRef.current || syncStartedRef.current) return;
     const plan = planAmexNeedsInputResume({
-      cardOptionsLength: cardOptionsRef.current.length,
-      visitedCount: visitedCardsRef.current.size,
+      cardOptionsLength: cardOptionsRef.current.length || amexEligibleOrderRef.current.length,
+      visitedKeyCount: amexVisitedKeysRef.current.size,
+      totalCards: amexPhaseCardCountRef.current || amexEligibleOrderRef.current.length,
       syncPhase: syncPhaseRef.current,
+      hasCycleCard: Boolean(amexCycleCardRef.current),
     });
     if (plan.action === 'full_start') {
       startAmexCapture();
@@ -993,17 +981,40 @@ export default function SyncWebView({ visible, bank, onClose, onSuccess }) {
     enterCapturing();
     webViewRef.current?.injectJavaScript(buildAmexJsonCaptureJs());
     clearAmexArm();
-    if (plan.action === 'phase_to_enrolled') {
-      advanceAmexSync(null);
-      startingAmexRef.current = false;
-      return;
-    }
     if (!initialActiveRef.current) {
       const active = cardOptionsRef.current.find(c => c.selected) ?? cardOptionsRef.current[0];
       initialActiveRef.current = active?.testId ?? null;
     }
     webViewRef.current?.injectJavaScript(`window.__amexJsonCaptureArmed = false; true;`);
-    captureNextAmexCardInOrder();
+
+    const resolved = resolveAmexResumeCapture({
+      cards: cardOptionsRef.current,
+      cycleCard: amexCycleCardRef.current,
+      visitedKeys: amexVisitedKeysRef.current,
+      eligibleOrder: amexEligibleOrderRef.current,
+    });
+    console.log('[amex-resume]', {
+      plan: plan.action,
+      reason: resolved.reason,
+      cycle: amexCycleCardRef.current?.testId || null,
+      card: resolved.card?.testId || null,
+      phase: syncPhaseRef.current,
+    });
+    if (resolved.action === 'capture_card' && resolved.card) {
+      beginAmexCardCapture(resolved.card);
+    } else if (resolved.action === 'redetect' || (
+      amexCycleCardRef.current && !resolved.card
+    )) {
+      // Cycle pending but list not ready (common right after MFA on enrolled).
+      cardsDiscovered.current = false;
+      setAmexCardsReady(false);
+      amexCardsReadyRef.current = false;
+      webViewRef.current?.injectJavaScript(AMEX_OPEN_AND_DETECT_JS);
+    } else if (resolved.card) {
+      beginAmexCardCapture(resolved.card);
+    } else {
+      captureNextAmexCardInOrder();
+    }
     startingAmexRef.current = false;
   };
 

@@ -538,6 +538,62 @@ export function resolveAmexCaptureAttribution({
   };
 }
 
+/** Stable key for a card across eligible/enrolled listboxes (testIds often differ). */
+export function amexCardKey(card) {
+  if (!card) return null;
+  if (card.last4) return `4:${card.last4}`;
+  if (card.label) return `n:${card.label}`;
+  if (card.testId) return `t:${card.testId}`;
+  return null;
+}
+
+/** Match a pending cycle card in a newly detected list (testId → last4 → label). */
+export function matchAmexCard(cards, pending) {
+  const list = Array.isArray(cards) ? cards : [];
+  if (!pending) return null;
+  return list.find((c) => c?.testId && c.testId === pending.testId)
+    || list.find((c) => c?.last4 && pending.last4 && c.last4 === pending.last4)
+    || list.find((c) => c?.label && pending.label && c.label === pending.label)
+    || null;
+}
+
+/**
+ * After MFA / NeedsInput, pick which Amex card to capture next.
+ * Prefer the active per-card cycle (eligible→enrolled) over "first unvisited"
+ * — mid-cycle resume must not skip to Blue Cash while Platinum enrolled is pending.
+ */
+export function resolveAmexResumeCapture({
+  cards = [],
+  cycleCard = null,
+  visitedKeys = null,
+  eligibleOrder = [],
+} = {}) {
+  const list = Array.isArray(cards) ? cards : [];
+  const order = list.length
+    ? list
+    : (Array.isArray(eligibleOrder) ? eligibleOrder : []);
+  const visited = visitedKeys instanceof Set
+    ? visitedKeys
+    : new Set(Array.isArray(visitedKeys) ? visitedKeys : []);
+
+  if (cycleCard) {
+    const match = matchAmexCard(list.length ? list : order, cycleCard);
+    if (match) {
+      return { action: 'capture_card', card: match, reason: 'cycle' };
+    }
+    return { action: 'redetect', card: null, reason: 'cycle_missing', cycleCard };
+  }
+
+  const next = order.find((c) => {
+    const key = amexCardKey(c);
+    return c?.testId && key && !visited.has(key);
+  });
+  if (next) {
+    return { action: 'capture_card', card: next, reason: 'next_unvisited' };
+  }
+  return { action: 'done', card: null, reason: 'all_visited' };
+}
+
 /**
  * Apply one AMEX_CARDS_DETECTED message to RN walk state.
  * Chase-shaped: only latch cardsDiscovered / populate when hasCards.
