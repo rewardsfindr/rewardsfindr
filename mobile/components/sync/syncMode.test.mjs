@@ -489,7 +489,6 @@ test('force Citi Merchant Offers after login (fresh or expired→login)', () => 
       onLoginForm: false,
       syncStarted: false,
       offersRedirected: false,
-      loginSeen: false,
     }),
     true,
     'signed-in off offers → Merchant Offers',
@@ -498,22 +497,9 @@ test('force Citi Merchant Offers after login (fresh or expired→login)', () => 
     shouldForceCitiOffersRedirect({
       onOffers: false,
       signedIn: false,
-      onLoginForm: false,
-      syncStarted: false,
-      offersRedirected: false,
-      loginSeen: true,
-    }),
-    true,
-    'post-login hop (interstitial/dashboard) after login form was seen',
-  );
-  assert.equal(
-    shouldForceCitiOffersRedirect({
-      onOffers: false,
-      signedIn: false,
       onLoginForm: true,
       syncStarted: false,
       offersRedirected: false,
-      loginSeen: true,
     }),
     false,
     'still on login form',
@@ -525,7 +511,6 @@ test('force Citi Merchant Offers after login (fresh or expired→login)', () => 
       onLoginForm: false,
       syncStarted: false,
       offersRedirected: false,
-      loginSeen: true,
     }),
     false,
     'already on Merchant Offers (happy path)',
@@ -537,7 +522,6 @@ test('force Citi Merchant Offers after login (fresh or expired→login)', () => 
       onLoginForm: false,
       syncStarted: false,
       offersRedirected: false,
-      loginSeen: false,
     }),
     false,
   );
@@ -548,10 +532,25 @@ test('force Citi Merchant Offers after login (fresh or expired→login)', () => 
       onLoginForm: false,
       syncStarted: false,
       offersRedirected: true,
-      loginSeen: true,
     }),
     false,
     'one-shot offers redirect',
+  );
+});
+
+test('Citi offers redirect stays put on MFA / soft-token / challenge mid-auth', () => {
+  // Regression: after Sign On was seen, challenge pages lack User ID+Password
+  // and are not yet signedIn — must NOT one-shot goToOffers() mid-auth.
+  assert.equal(
+    shouldForceCitiOffersRedirect({
+      onOffers: false,
+      signedIn: false,
+      onLoginForm: false,
+      syncStarted: false,
+      offersRedirected: false,
+    }),
+    false,
+    'loginSeen-era path (no Sign Off yet) must stay — MFA/challenge',
   );
 });
 

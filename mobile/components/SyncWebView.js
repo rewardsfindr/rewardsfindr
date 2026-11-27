@@ -144,7 +144,6 @@ export default function SyncWebView({ visible, bank, onClose, onSuccess }) {
   const startingCitiRef     = useRef(false);
   const citiSignedInRef     = useRef(false);
   const citiLoginForcedRef  = useRef(false);
-  const citiLoginSeenRef    = useRef(false);
 
   const [syncMode, setSyncMode]             = useState(SYNC_MODES.AUTH);
   const [syncing, setSyncing]               = useState(false);
@@ -315,7 +314,6 @@ export default function SyncWebView({ visible, bank, onClose, onSuccess }) {
       startingCitiRef.current     = false;
       citiSignedInRef.current     = false;
       citiLoginForcedRef.current  = false;
-      citiLoginSeenRef.current    = false;
       syncModeRef.current         = SYNC_MODES.AUTH;
       if (amexWaitRef.current) clearTimeout(amexWaitRef.current);
       amexWaitRef.current         = null;
@@ -1305,7 +1303,6 @@ export default function SyncWebView({ visible, bank, onClose, onSuccess }) {
         const onLoginForm = data.onLoginForm === true;
         const expired = data.expired === true;
         if (onOffers) offersRedirectRef.current = false;
-        if (onLoginForm) citiLoginSeenRef.current = true;
         setOnOffersPage(onOffers);
         setCitiSignedIn(signedIn);
         setOnLoginPage(onLoginForm || (expired && !signedIn && !onOffers));
@@ -1335,7 +1332,6 @@ export default function SyncWebView({ visible, bank, onClose, onSuccess }) {
             onLoginForm,
             syncStarted: syncStartedRef.current,
             offersRedirected: offersRedirectRef.current,
-            loginSeen: citiLoginSeenRef.current,
           })
         ) {
           goToOffers();
