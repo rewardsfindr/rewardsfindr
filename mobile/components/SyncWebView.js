@@ -2,9 +2,9 @@
 // SYNC WEBVIEW MODAL — orchestrator
 // Handles modal UI, state, and message routing.
 //
-// Shared syncMode machine + Chase/Wells/Citi/Amex auto-start. Cover during
-// capturing; re-show WebView on auth / needsInput; Sync Offers remains
-// for US Bank and as Chase/Wells/Citi/Amex failure fallback.
+// Shared syncMode machine + Chase/Wells/Citi/Amex/US Bank auto-start. Cover
+// during capturing; re-show WebView on auth / needsInput; Sync Offers remains
+// as failure fallback for auto banks.
 //
 // Amex sync flow (one capture cycle per card — does not feel like two walks):
 //   1. Offers page → AMEX_CARDS_DETECTED
@@ -83,7 +83,14 @@ import {
   CITI_CAPTURE_POLL_MS,
   CITI_LOGIN_URL,
 } from './sync/citiSync.js';
-import { buildUsBankOfferCaptureJs, buildUsBankOffersVisibleJs, buildUsBankReadJs } from './sync/usBankSync.js';
+import {
+  buildUsBankOfferCaptureJs,
+  buildUsBankOffersVisibleJs,
+  buildUsBankChallengeVisibleJs,
+  buildUsBankCaptureWhenReadyJs,
+  US_BANK_CAPTURE_READY_TIMEOUT_MS,
+  US_BANK_CAPTURE_POLL_MS,
+} from './sync/usBankSync.js';
 import { parseCardLabel }                                 from './sync/cardLabel.js';
 import {
   SYNC_MODES,
@@ -94,6 +101,7 @@ import {
   shouldAutoStartChase,
   shouldAutoStartWells,
   shouldAutoStartCiti,
+  shouldAutoStartUsBank,
   shouldAutoStartAmex,
   nextSyncMode,
   isPartialAbort,
@@ -167,8 +175,10 @@ export default function SyncWebView({ visible, bank, onClose, onSuccess }) {
   const startingChaseRef    = useRef(false);
   const startingWellsRef    = useRef(false);
   const startingCitiRef     = useRef(false);
+  const startingUsBankRef   = useRef(false);
   const startingAmexRef     = useRef(false);
   const citiSignedInRef     = useRef(false);
+  const usBankSignedInRef   = useRef(false);
   const citiLoginForcedRef  = useRef(false);
   const amexCardsReadyRef   = useRef(false);
 
@@ -180,6 +190,7 @@ export default function SyncWebView({ visible, bank, onClose, onSuccess }) {
   const [onOffersPage, setOnOffersPage]     = useState(false);
   const [onLoginPage, setOnLoginPage]       = useState(false);
   const [citiSignedIn, setCitiSignedIn]     = useState(false);
+  const [usBankSignedIn, setUsBankSignedIn] = useState(false);
   const [amexCardsReady, setAmexCardsReady] = useState(false);
   const [chaseHookReady, setChaseHookReady] = useState(false);
   const [currentCard, setCurrentCard]       = useState(null);
@@ -223,7 +234,7 @@ export default function SyncWebView({ visible, bank, onClose, onSuccess }) {
 
   const armStepTimer = () => {
     clearStepTimer();
-    if (bank !== 'chase' && bank !== 'wells_fargo' && bank !== 'citi' && bank !== 'amex') return;
+    if (bank !== 'chase' && bank !== 'wells_fargo' && bank !== 'citi' && bank !== 'us_bank' && bank !== 'amex') return;
     stepTimerRef.current = setTimeout(() => {
       if (syncModeRef.current !== SYNC_MODES.CAPTURING) return;
       if (bank === 'wells_fargo') {
@@ -232,6 +243,10 @@ export default function SyncWebView({ visible, bank, onClose, onSuccess }) {
       }
       if (bank === 'citi') {
         failCitiCapture('Sync timed out. Try again, or sync manually from the Merchant Offers page.');
+        return;
+      }
+      if (bank === 'us_bank') {
+        failUsBankCapture('Sync timed out. Try again, or sync manually from the Cash Back Deals page.');
         return;
       }
       if (bank === 'amex') {
@@ -399,6 +414,22 @@ export default function SyncWebView({ visible, bank, onClose, onSuccess }) {
     setMode(SYNC_MODES.FAILED);
   };
 
+  const disarmUsBankCapture = () => {
+    clearStepTimer();
+    syncStartedRef.current = false;
+    startingUsBankRef.current = false;
+    setSyncStarted(false);
+    setSyncing(false);
+    setSwitching(false);
+  };
+
+  const failUsBankCapture = (message) => {
+    if (bank !== 'us_bank') return;
+    disarmUsBankCapture();
+    setFailMessage(message || 'Auto-sync stopped. Try again, or sync manually from the Cash Back Deals page.');
+    setMode(SYNC_MODES.FAILED);
+  };
+
   const failAmexCapture = (message) => {
     if (bank !== 'amex') return;
     disarmAmexCapture();
@@ -407,7 +438,7 @@ export default function SyncWebView({ visible, bank, onClose, onSuccess }) {
   };
 
   const pauseForNeedsInput = () => {
-    if (bank !== 'chase' && bank !== 'wells_fargo' && bank !== 'citi' && bank !== 'amex') return;
+    if (bank !== 'chase' && bank !== 'wells_fargo' && bank !== 'citi' && bank !== 'us_bank' && bank !== 'amex') return;
     if (syncModeRef.current !== SYNC_MODES.CAPTURING) return;
     clearStepTimer();
     clearPostSwitchTimeout();
@@ -416,6 +447,7 @@ export default function SyncWebView({ visible, bank, onClose, onSuccess }) {
     startingChaseRef.current = false;
     startingWellsRef.current = false;
     startingCitiRef.current = false;
+    startingUsBankRef.current = false;
     startingAmexRef.current = false;
     setSyncStarted(false);
     setSyncing(false);
@@ -463,8 +495,10 @@ export default function SyncWebView({ visible, bank, onClose, onSuccess }) {
       startingChaseRef.current    = false;
       startingWellsRef.current    = false;
       startingCitiRef.current     = false;
+      startingUsBankRef.current   = false;
       startingAmexRef.current     = false;
       citiSignedInRef.current     = false;
+      usBankSignedInRef.current   = false;
       citiLoginForcedRef.current  = false;
       amexCardsReadyRef.current   = false;
       syncModeRef.current         = SYNC_MODES.AUTH;
@@ -491,6 +525,7 @@ export default function SyncWebView({ visible, bank, onClose, onSuccess }) {
       setOnOffersPage(false);
       setOnLoginPage(false);
       setCitiSignedIn(false);
+      setUsBankSignedIn(false);
       setAmexCardsReady(false);
       setChaseHookReady(false);
       setCardCount(0);
@@ -516,12 +551,16 @@ export default function SyncWebView({ visible, bank, onClose, onSuccess }) {
   }, [citiSignedIn]);
 
   useEffect(() => {
+    usBankSignedInRef.current = usBankSignedIn;
+  }, [usBankSignedIn]);
+
+  useEffect(() => {
     amexCardsReadyRef.current = amexCardsReady;
   }, [amexCardsReady]);
 
-  // Chase / Wells / Citi / Amex: login mid-capture → NeedsInput (MFA pre-empts step timer).
+  // Chase / Wells / Citi / US Bank / Amex: login mid-capture → NeedsInput (MFA pre-empts step timer).
   useEffect(() => {
-    if (!visible || (bank !== 'chase' && bank !== 'wells_fargo' && bank !== 'citi' && bank !== 'amex')) return;
+    if (!visible || (bank !== 'chase' && bank !== 'wells_fargo' && bank !== 'citi' && bank !== 'us_bank' && bank !== 'amex')) return;
     if (onLoginPage && syncModeRef.current === SYNC_MODES.CAPTURING) {
       pauseForNeedsInput();
     }
@@ -765,6 +804,18 @@ export default function SyncWebView({ visible, bank, onClose, onSuccess }) {
       }
       return;
     }
+    // US Bank: login from URL only; offers-ready stays message/signedIn gated.
+    if (bank === 'us_bank') {
+      if (onLogin) {
+        setOnLoginPage(true);
+        setOnOffersPage(false);
+        setUsBankSignedIn(false);
+        offersRedirectRef.current = false;
+      } else {
+        setOnLoginPage(false);
+      }
+      return;
+    }
     if (onOffers || onLogin || !config.useCardsDetectedAsOffersSignal) {
       setOnOffersPage(onOffers);
       setOnLoginPage(onLogin && !onOffers);
@@ -809,11 +860,29 @@ export default function SyncWebView({ visible, bank, onClose, onSuccess }) {
     if (bank === 'us_bank') {
       webViewRef.current?.injectJavaScript(buildUsBankOfferCaptureJs());
       webViewRef.current?.injectJavaScript(buildUsBankOffersVisibleJs());
+      webViewRef.current?.injectJavaScript(buildUsBankChallengeVisibleJs());
       if (!url) return;
       const onLogin = (config.loginPaths || []).some(p => url.includes(p.toLowerCase()));
-      const onOffers = !onLogin && (config.offersPaths || []).some(p => url.includes(p.toLowerCase()));
-      setOnOffersPage(onOffers);
-      setOnLoginPage(onLogin && !onOffers);
+      const onOffersUrl = urlMatchesAnyPath(url, config.offersPaths);
+      // Never mark offers-ready from URL alone — honest signedIn arrives via
+      // US_BANK_ON_OFFERS. After login entry, leave Auth/NeedsInput dashboard
+      // for Cash Back Deals via goToOffers → config.offersUrl (Amex-shaped).
+      if (onLogin) {
+        setOnLoginPage(true);
+        setOnOffersPage(false);
+        setUsBankSignedIn(false);
+        offersRedirectRef.current = false;
+      } else {
+        setOnLoginPage(false);
+        if (onOffersUrl) {
+          offersRedirectRef.current = false;
+        } else if (
+          (syncModeRef.current === SYNC_MODES.AUTH || syncModeRef.current === SYNC_MODES.NEEDS_INPUT)
+          && !syncStartedRef.current
+        ) {
+          goToOffers();
+        }
+      }
       return;
     }
 
@@ -912,6 +981,24 @@ export default function SyncWebView({ visible, bank, onClose, onSuccess }) {
     );
     startingCitiRef.current = false;
   };
+
+  /** Shared US Bank start path for auto-start, Sync Offers, and Try again. */
+  const startUsBankCapture = () => {
+    if (bank !== 'us_bank') return;
+    if (startingUsBankRef.current || syncStartedRef.current) return;
+    startingUsBankRef.current = true;
+    autoStartConsumedRef.current = true;
+    setCurrentCard('US Bank');
+    enterCapturing();
+    // Install/refresh hook, then poll stash like Wells/Chase when-ready —
+    // first auto-start often races US_BANK_ON_OFFERS before getInsights lands.
+    webViewRef.current?.injectJavaScript(buildUsBankOfferCaptureJs());
+    webViewRef.current?.injectJavaScript(
+      buildUsBankCaptureWhenReadyJs(US_BANK_CAPTURE_READY_TIMEOUT_MS, US_BANK_CAPTURE_POLL_MS),
+    );
+    startingUsBankRef.current = false;
+  };
+
 
   /**
    * Shared Amex start path for auto-start, Sync Offers, and Try again.
@@ -1075,6 +1162,14 @@ export default function SyncWebView({ visible, bank, onClose, onSuccess }) {
       return;
     }
 
+    if (bank === 'us_bank') {
+      if (syncModeRef.current === SYNC_MODES.FAILED) {
+        setMode(nextSyncMode(SYNC_MODES.FAILED, 'sync_offers'));
+      }
+      startUsBankCapture();
+      return;
+    }
+
     if (bank === 'amex') {
       if (syncModeRef.current === SYNC_MODES.FAILED) {
         setMode(nextSyncMode(SYNC_MODES.FAILED, 'sync_offers'));
@@ -1089,16 +1184,6 @@ export default function SyncWebView({ visible, bank, onClose, onSuccess }) {
       return;
     }
 
-    setSyncStarted(true);
-    syncStartedRef.current = true;
-    setMode(SYNC_MODES.CAPTURING);
-
-    if (bank === 'us_bank') {
-      setCurrentCard('US Bank');
-      webViewRef.current?.injectJavaScript(buildUsBankOfferCaptureJs());
-      webViewRef.current?.injectJavaScript(buildUsBankReadJs());
-      return;
-    }
   };
 
   const handleTryAgain = () => {
@@ -1122,6 +1207,17 @@ export default function SyncWebView({ visible, bank, onClose, onSuccess }) {
       }
       setMode(nextSyncMode(SYNC_MODES.FAILED, 'try_again'));
       startCitiCapture();
+      return;
+    }
+    if (bank === 'us_bank') {
+      if (!onOffersPage || onLoginPage || usBankSignedIn !== true) {
+        disarmUsBankCapture();
+        setFailMessage('');
+        setMode(SYNC_MODES.AUTH);
+        return;
+      }
+      setMode(nextSyncMode(SYNC_MODES.FAILED, 'try_again'));
+      startUsBankCapture();
       return;
     }
     if (bank === 'amex') {
@@ -1328,6 +1424,64 @@ export default function SyncWebView({ visible, bank, onClose, onSuccess }) {
     pageLoaded,
   ]);
 
+  // US Bank auto-start / NeedsInput resume — requires honest signedIn + offers surface.
+  // Resume re-runs startUsBankCapture when signed-in + offers-ready again (when-ready poll).
+  useEffect(() => {
+    if (!visible || bank !== 'us_bank') return;
+    clearAutoStartDebounce();
+
+    const gateInput = {
+      bank,
+      syncMode,
+      onOffersPage,
+      onLoginPage,
+      signedIn: usBankSignedIn,
+      syncStarted: syncStartedRef.current,
+      autoStartConsumed: autoStartConsumedRef.current,
+      visible,
+    };
+    const gate = shouldAutoStartUsBank(gateInput);
+    if (!gate) {
+      if (syncMode === SYNC_MODES.AUTH || syncMode === SYNC_MODES.NEEDS_INPUT) {
+        console.log('[us-bank-auto-start] waiting', {
+          syncMode,
+          onOffersPage,
+          onLoginPage,
+          signedIn: usBankSignedIn,
+          autoStartConsumed: autoStartConsumedRef.current,
+          syncStarted: syncStartedRef.current,
+        });
+      }
+      return;
+    }
+
+    autoStartDebounceRef.current = setTimeout(() => {
+      const still = shouldAutoStartUsBank({
+        bank,
+        syncMode: syncModeRef.current,
+        onOffersPage: onOffersPageRef.current,
+        onLoginPage: onLoginPageRef.current,
+        signedIn: usBankSignedInRef.current,
+        syncStarted: syncStartedRef.current,
+        autoStartConsumed: autoStartConsumedRef.current,
+        visible: true,
+      });
+      if (!still) return;
+      console.log('[us-bank-auto-start] firing', { syncMode: syncModeRef.current });
+      startUsBankCapture();
+    }, AUTO_START_DEBOUNCE_MS);
+
+    return () => clearAutoStartDebounce();
+  }, [
+    visible,
+    bank,
+    syncMode,
+    onOffersPage,
+    onLoginPage,
+    usBankSignedIn,
+    pageLoaded,
+  ]);
+
   // Amex auto-start / NeedsInput resume — requires amexCardsReady + offers surface.
   // Resume continues eligible→enrolled walk (not Chase planner).
   useEffect(() => {
@@ -1508,6 +1662,12 @@ export default function SyncWebView({ visible, bank, onClose, onSuccess }) {
     onClose();
   };
 
+  const abortUsBankCaptureConfirmed = () => {
+    disarmUsBankCapture();
+    setMode(SYNC_MODES.DONE);
+    onClose();
+  };
+
   const abortAmexCaptureConfirmed = () => {
     const cardsLen = cardOptionsRef.current.length || cardCount;
     const totalCards = cardsLen > 0 ? cardsLen * 2 : 0;
@@ -1559,6 +1719,17 @@ export default function SyncWebView({ visible, bank, onClose, onSuccess }) {
         [
           { text: 'Keep syncing', style: 'cancel' },
           { text: 'Stop', style: 'destructive', onPress: abortCitiCaptureConfirmed },
+        ],
+      );
+      return;
+    }
+    if (syncModeRef.current === SYNC_MODES.CAPTURING && bank === 'us_bank') {
+      Alert.alert(
+        'Stop syncing?',
+        'Stop syncing US Bank offers?',
+        [
+          { text: 'Keep syncing', style: 'cancel' },
+          { text: 'Stop', style: 'destructive', onPress: abortUsBankCaptureConfirmed },
         ],
       );
       return;
@@ -2052,29 +2223,40 @@ export default function SyncWebView({ visible, bank, onClose, onSuccess }) {
         return;
       }
 
+      if (data.type === 'US_BANK_CHALLENGE' && bank === 'us_bank') {
+        // Arkose / adaptive captcha — keep WebView interactive (no cover) and
+        // show NeedsInput copy. Do not auto-click; emulator taps are rejected.
+        if (data.present && syncModeRef.current === SYNC_MODES.AUTH) {
+          setMode(SYNC_MODES.NEEDS_INPUT);
+        }
+        return;
+      }
+
       if (data.type === 'US_BANK_ON_OFFERS' && bank === 'us_bank') {
         offersRedirectRef.current = false;
-        setOnLoginPage(false);
-        setOnOffersPage(true);
+        if (data.signedIn === true) {
+          setUsBankSignedIn(true);
+          setOnLoginPage(false);
+          setOnOffersPage(true);
+        } else {
+          // Logged-out deals / marketing shell — stay Auth until honest sign-in.
+          setUsBankSignedIn(false);
+          setOnOffersPage(false);
+        }
         return;
       }
 
       if (data.type === 'US_BANK_CAPTURE_UNAVAILABLE' && bank === 'us_bank') {
         if (!syncStartedRef.current) return;
-        syncStartedRef.current = false;
-        setSyncStarted(false);
-        setSyncing(false);
-        setSwitching(false);
-        setMode(SYNC_MODES.AUTH);
-        Alert.alert(
-          'Could not read US Bank offers',
-          'Stay on the Cash Back Deals page and try again. Nothing was changed.'
+        failUsBankCapture(
+          'Could not read US Bank offers. Stay on the Cash Back Deals page and try again. Nothing was changed.'
         );
         return;
       }
 
       if (data.type === 'US_BANK_OFFERS' && bank === 'us_bank') {
         if (!syncStartedRef.current) return;
+        clearStepTimer();
         await handleCaptureResult({
           payload: data.offers,
           cardLabel: 'US Bank',
@@ -2166,6 +2348,8 @@ export default function SyncWebView({ visible, bank, onClose, onSuccess }) {
         failWellsCapture(err.message);
       } else if (bank === 'citi') {
         failCitiCapture(err.message);
+      } else if (bank === 'us_bank') {
+        failUsBankCapture(err.message);
       } else if (bank === 'amex') {
         failAmexCapture(err.message);
       } else {
@@ -2188,9 +2372,9 @@ export default function SyncWebView({ visible, bank, onClose, onSuccess }) {
     inFlight: showCover && (bank === 'chase' || bank === 'amex') && (syncing || switching),
   });
   const progressFrac = Math.max(progressPeak, coverProgress.rawFrac);
-  const autoFailed   = (bank === 'chase' || bank === 'wells_fargo' || bank === 'citi' || bank === 'amex') && syncMode === SYNC_MODES.FAILED;
-  const autoAuth     = (bank === 'chase' || bank === 'wells_fargo' || bank === 'citi' || bank === 'amex') && syncMode === SYNC_MODES.AUTH;
-  const autoNeeds    = (bank === 'chase' || bank === 'wells_fargo' || bank === 'citi' || bank === 'amex') && syncMode === SYNC_MODES.NEEDS_INPUT;
+  const autoFailed   = (bank === 'chase' || bank === 'wells_fargo' || bank === 'citi' || bank === 'us_bank' || bank === 'amex') && syncMode === SYNC_MODES.FAILED;
+  const autoAuth     = (bank === 'chase' || bank === 'wells_fargo' || bank === 'citi' || bank === 'us_bank' || bank === 'amex') && syncMode === SYNC_MODES.AUTH;
+  const autoNeeds    = (bank === 'chase' || bank === 'wells_fargo' || bank === 'citi' || bank === 'us_bank' || bank === 'amex') && syncMode === SYNC_MODES.NEEDS_INPUT;
 
   useEffect(() => {
     if (!showCover) return;
@@ -2245,7 +2429,11 @@ export default function SyncWebView({ visible, bank, onClose, onSuccess }) {
 
     if (autoNeeds) {
       return (
-        <Text style={s.helperText}>Confirm it is you to continue syncing</Text>
+        <Text style={s.helperText}>
+          {bank === 'us_bank'
+            ? 'Complete the security check (tap Continue once), then finish sign-in'
+            : 'Confirm it is you to continue syncing'}
+        </Text>
       );
     }
 
@@ -2256,6 +2444,8 @@ export default function SyncWebView({ visible, bank, onClose, onSuccess }) {
             ? 'Waiting for the deals page to load for sync to begin'
             : bank === 'citi'
               ? 'Waiting for Merchant Offers to load for sync to begin'
+              : bank === 'us_bank'
+                ? 'Waiting for Cash Back Deals to load for sync to begin'
               : bank === 'amex'
                 ? (amexCardsReady
                   ? 'Amex cards ready — starting sync…'
@@ -2355,6 +2545,10 @@ export default function SyncWebView({ visible, bank, onClose, onSuccess }) {
                   setCitiSignedIn(false);
                   citiSignedInRef.current = false;
                 }
+                if (bank === 'us_bank') {
+                  setUsBankSignedIn(false);
+                  usBankSignedInRef.current = false;
+                }
               }}
               onLoadEnd={handleLoadEnd}
               style={s.webview}
@@ -2370,6 +2564,8 @@ export default function SyncWebView({ visible, bank, onClose, onSuccess }) {
                     ? 'Syncing Wells Fargo offers…'
                     : bank === 'citi'
                       ? 'Syncing Citi offers…'
+                      : bank === 'us_bank'
+                        ? 'Syncing US Bank offers…'
                       : bank === 'amex'
                         ? 'Syncing Amex offers…'
                         : 'Syncing Chase offers...'}
@@ -2401,6 +2597,8 @@ export default function SyncWebView({ visible, bank, onClose, onSuccess }) {
                       ? 'Auto-sync stopped. Try again, or sync manually from the deals page.'
                       : bank === 'citi'
                         ? 'Auto-sync stopped. Try again, or sync manually from the Merchant Offers page.'
+                        : bank === 'us_bank'
+                          ? 'Auto-sync stopped. Try again, or sync manually from the Cash Back Deals page.'
                         : 'Auto-sync stopped. Try again, or sync manually from the offers page.')}
                 </Text>
               </View>

@@ -75,8 +75,9 @@ export const BANK_CONFIG = {
     loginPaths: ['/login', '/signon', '/sign-on', 'parent-interstitial', 'pageNotFound', 'www.citi.com'],
   },
   us_bank: {
-    // Cash Back Deals — redirects to /auth/login when the session is gone.
-    url: 'https://onlinebanking.usbank.com/digital/servicing/dominjection/cashback-deals',
+    // Mobile-web sign-on entry. After login, navigate / detect Cash Back Deals
+    // via offersUrl + offersPaths; auto-start still needs honest signedIn.
+    url: 'https://onlinebanking.usbank.com/auth/login/?channel=mobileweb',
     offersUrl: 'https://onlinebanking.usbank.com/digital/servicing/dominjection/cashback-deals',
     label: 'US Bank Offers',
     color: '#0c2074',

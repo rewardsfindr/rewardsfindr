@@ -296,28 +296,68 @@ export const buildUsBankOfferCaptureJs = () => `
   true;
 `;
 
-// Tells the app Cash Back Deals chrome is on screen.
-export const buildUsBankOffersVisibleJs = () => `
+// Detect Arkose / adaptive "Confirm you're a person" on the login shell.
+// Emulator/automation clicks are rejected — RN only uses this to uncover and
+// show NeedsInput copy so a human can tap Continue once. Never auto-click.
+export const buildUsBankChallengeVisibleJs = () => `
   (function() {
     try {
-      var href = String((window.location && window.location.href) || '').toLowerCase();
+      if (!window.ReactNativeWebView) return;
+      var iframe = document.getElementById('sec-cpt-if')
+        || document.querySelector('iframe[src*="adaptive"]')
+        || document.querySelector('iframe[src*="arkoselabs"]')
+        || document.querySelector('iframe[src*="funcaptcha"]');
       var text = document.body ? (document.body.innerText || '') : '';
-      var onOffers = href.indexOf('cashback-deals') !== -1
-        || href.indexOf('dominjection/cashback-deals') !== -1
-        || /cash\\s*back\\s*deals/i.test(text);
-      if (onOffers && window.ReactNativeWebView) {
-        window.ReactNativeWebView.postMessage(JSON.stringify({ type: 'US_BANK_ON_OFFERS' }));
+      var challengeText = /confirm\\s*you'?re\\s*a\\s*person/i.test(text)
+        || /i'?m\\s*a\\s*person/i.test(text);
+      if (iframe || challengeText) {
+        window.ReactNativeWebView.postMessage(JSON.stringify({
+          type: 'US_BANK_CHALLENGE',
+          present: true,
+        }));
       }
     } catch (e) {}
   })();
   true;
 `;
 
-// Posts offer fields from the getInsights stash, or from a same-origin
-// window/frame that already holds the list. Raw bank JSON never leaves the page.
-export const buildUsBankReadJs = () => `
+// Tells the app Cash Back Deals is on screen AND the user is signed in.
+// Entry often lands on the cashback-deals URL while logged out (marketing /
+// Log in chrome) — URL or "cash back deals" text alone must NOT fire.
+// Honest signedIn: Log out / Sign Off chrome without Log in / Sign On in the
+// leading text (same honesty bar as Citi Slice C).
+export const buildUsBankOffersVisibleJs = () => `
   (function() {
     try {
+      var href = String((window.location && window.location.href) || '').toLowerCase();
+      var text = document.body ? (document.body.innerText || '') : '';
+      var leading = text.slice(0, 1200);
+      var onOffers = href.indexOf('cashback-deals') !== -1
+        || href.indexOf('dominjection/cashback-deals') !== -1
+        || /cash\\s*back\\s*deals/i.test(text);
+      var signedIn = (/log\\s*out/i.test(text) || /sign\\s*off/i.test(text))
+        && !/log\\s*in/i.test(leading)
+        && !/sign\\s*on/i.test(leading);
+      if (onOffers && window.ReactNativeWebView) {
+        window.ReactNativeWebView.postMessage(JSON.stringify({
+          type: 'US_BANK_ON_OFFERS',
+          signedIn: !!signedIn,
+        }));
+      }
+    } catch (e) {}
+  })();
+  true;
+`;
+
+// Poll for stash / page offers instead of a fixed sleep after offers-ready.
+// Matches Chase/Wells capture-when-ready: auto-start often fires on
+// US_BANK_ON_OFFERS before getInsights stash lands.
+export const US_BANK_CAPTURE_READY_TIMEOUT_MS = 2800;
+export const US_BANK_CAPTURE_POLL_MS = 120;
+
+// Shared helpers + runUsBankCapture() for one-shot read and when-ready.
+// The raw getInsights response never leaves the page.
+const usBankCaptureBodySource = `
       var stripUsBankOffers = ${stripUsBankOffersSource};
       var unwrapUsBankPayload = ${unwrapUsBankPayloadSource};
 
@@ -360,24 +400,75 @@ export const buildUsBankReadJs = () => `
         return null;
       }
 
-      var stash = window.__usBankLastOffers && Array.isArray(window.__usBankLastOffers.ads)
-        ? stripUsBankOffers(window.__usBankLastOffers)
-        : null;
-      if (!stash || !hasOffers(stash)) {
-        try { stash = usable(window); } catch (e) { stash = null; }
-      }
-      if (!stash || !hasOffers(stash)) {
-        try { stash = fromFrames(window, document); } catch (e) { stash = null; }
+      function resolveStash() {
+        var stash = window.__usBankLastOffers && Array.isArray(window.__usBankLastOffers.ads)
+          ? stripUsBankOffers(window.__usBankLastOffers)
+          : null;
+        if (!stash || !hasOffers(stash)) {
+          try { stash = usable(window); } catch (e) { stash = null; }
+        }
+        if (!stash || !hasOffers(stash)) {
+          try { stash = fromFrames(window, document); } catch (e) { stash = null; }
+        }
+        return stash && hasOffers(stash) ? stash : null;
       }
 
-      if (!stash || !hasOffers(stash)) {
-        window.ReactNativeWebView.postMessage(JSON.stringify({ type: 'US_BANK_CAPTURE_UNAVAILABLE' }));
+      function usBankCaptureReady() {
+        return !!resolveStash();
+      }
+
+      function runUsBankCapture() {
+        var stash = resolveStash();
+        if (!stash) {
+          window.ReactNativeWebView.postMessage(JSON.stringify({ type: 'US_BANK_CAPTURE_UNAVAILABLE' }));
+          return;
+        }
+        window.ReactNativeWebView.postMessage(JSON.stringify({
+          type: 'US_BANK_OFFERS',
+          offers: stash,
+        }));
+      }
+`;
+
+// Posts offer fields from the getInsights stash, or from a same-origin
+// window/frame that already holds the list. Raw bank JSON never leaves the page.
+export const buildUsBankReadJs = () => `
+  (function() {
+    try {
+      ${usBankCaptureBodySource}
+      runUsBankCapture();
+    } catch (e) {
+      window.ReactNativeWebView.postMessage(JSON.stringify({
+        type: 'US_BANK_CAPTURE_UNAVAILABLE',
+      }));
+    }
+  })();
+  true;
+`;
+
+// Poll until stash / window / frames are ready, then capture.
+// Posts the same US_BANK_OFFERS / US_BANK_CAPTURE_UNAVAILABLE messages as read.
+export const buildUsBankCaptureWhenReadyJs = (
+  timeoutMs = US_BANK_CAPTURE_READY_TIMEOUT_MS,
+  intervalMs = US_BANK_CAPTURE_POLL_MS,
+) => `
+  (async function() {
+    try {
+      ${usBankCaptureBodySource}
+      var started = Date.now();
+      while (Date.now() - started < ${timeoutMs}) {
+        if (usBankCaptureReady()) {
+          runUsBankCapture();
+          return;
+        }
+        await new Promise(function(resolve) { setTimeout(resolve, ${intervalMs}); });
+      }
+      if (usBankCaptureReady()) {
+        runUsBankCapture();
         return;
       }
-
       window.ReactNativeWebView.postMessage(JSON.stringify({
-        type: 'US_BANK_OFFERS',
-        offers: stash,
+        type: 'US_BANK_CAPTURE_UNAVAILABLE',
       }));
     } catch (e) {
       window.ReactNativeWebView.postMessage(JSON.stringify({

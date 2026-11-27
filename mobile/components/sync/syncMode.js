@@ -114,12 +114,11 @@ export function partialAbortCopy({ syncedCount = 0, totalCards = 0 } = {}) {
 }
 
 /**
- * Capture cover for banks with auto-start (Chase + Wells + Citi + Amex).
- * Manual Sync Offers banks (US Bank) stay uncovered until their auto slice lands.
+ * Capture cover for banks with auto-start (Chase + Wells + Citi + Amex + US Bank).
  */
 export function shouldShowSyncCover({ bank, syncMode } = {}) {
   return (
-    (bank === 'chase' || bank === 'wells_fargo' || bank === 'citi' || bank === 'amex')
+    (bank === 'chase' || bank === 'wells_fargo' || bank === 'citi' || bank === 'amex' || bank === 'us_bank')
     && syncMode === SYNC_MODES.CAPTURING
   );
 }
@@ -168,6 +167,35 @@ export function shouldAutoStartCiti({
 } = {}) {
   if (!visible) return false;
   if (bank !== 'citi') return false;
+  if (syncStarted) return false;
+  if (onLoginPage) return false;
+  if (!onOffersPage) return false;
+  if (signedIn !== true) return false;
+
+  if (syncMode === SYNC_MODES.NEEDS_INPUT) return true;
+  if (syncMode === SYNC_MODES.AUTH) return !autoStartConsumed;
+  return false;
+}
+
+/**
+ * US Bank auto-start / resume gate. Requires a positive Cash Back Deals surface
+ * AND honest signedIn (never URL-only deals / !onLoginPage alone — deals URL
+ * alone is not enough even after login redirects).
+ * First start: syncMode === auth and !autoStartConsumed.
+ * Resume: syncMode === needsInput (consumed flag ignored).
+ */
+export function shouldAutoStartUsBank({
+  bank,
+  syncMode,
+  onOffersPage,
+  onLoginPage,
+  signedIn,
+  syncStarted,
+  autoStartConsumed,
+  visible = true,
+} = {}) {
+  if (!visible) return false;
+  if (bank !== 'us_bank') return false;
   if (syncStarted) return false;
   if (onLoginPage) return false;
   if (!onOffersPage) return false;

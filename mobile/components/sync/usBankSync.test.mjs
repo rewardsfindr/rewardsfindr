@@ -10,7 +10,11 @@ import { replaceCardOffers, usBankRecords } from '../../lib/catalog/deviceCatalo
 import {
   buildUsBankOfferCaptureJs,
   buildUsBankOffersVisibleJs,
+  buildUsBankChallengeVisibleJs,
   buildUsBankReadJs,
+  buildUsBankCaptureWhenReadyJs,
+  US_BANK_CAPTURE_READY_TIMEOUT_MS,
+  US_BANK_CAPTURE_POLL_MS,
   stripUsBankOffers,
 } from './usBankSync.js';
 
@@ -107,7 +111,7 @@ function readOffers(window, messages) {
   return messages.at(-1);
 }
 
-test('US Bank opens Cash Back Deals and is marked supported', () => {
+test('US Bank opens mobile-web login and is marked supported', () => {
   const usBank = BANK_LIST.find((bank) => bank.id === 'us_bank');
   assert.equal(usBank.supported, true);
   assert.equal(usBank.label, 'US Bank');
@@ -118,11 +122,16 @@ test('US Bank opens Cash Back Deals and is marked supported', () => {
   const config = BANK_CONFIG.us_bank;
   assert.equal(
     config.url,
+    'https://onlinebanking.usbank.com/auth/login/?channel=mobileweb',
+  );
+  assert.equal(
+    config.offersUrl,
     'https://onlinebanking.usbank.com/digital/servicing/dominjection/cashback-deals',
   );
-  assert.equal(config.offersUrl, config.url);
+  assert.notEqual(config.url, config.offersUrl);
   assert.ok(config.loginPaths.some((path) => path.includes('/auth/login')));
-  assert.ok(config.offersPaths.some((path) => config.url.toLowerCase().includes(path.toLowerCase())));
+  assert.ok(config.url.toLowerCase().includes('/auth/login'));
+  assert.ok(config.offersPaths.some((path) => config.offersUrl.toLowerCase().includes(path.toLowerCase())));
 
   const faq = FAQ_ITEMS.find((item) => item.q === 'Which banks are supported?');
   const [supported, comingSoon] = faq.a.split('coming soon');
@@ -130,6 +139,29 @@ test('US Bank opens Cash Back Deals and is marked supported', () => {
   assert.equal(comingSoon.includes('US Bank'), false);
   assert.match(ONBOARDING_PAGES[1].body, /US Bank/);
   assert.equal(CONNECT_BANK_COPY.footnote.includes('US Bank'), false);
+});
+
+test('SyncWebView post-login goToOffers targets US Bank offersUrl', () => {
+  const syncSource = readRepoFile('..', 'SyncWebView.js');
+  const usBankLoadEnd = syncSource.match(
+    /if \(bank === 'us_bank'\) \{[\s\S]*?return;\n    \}\n\n    if \(bank === 'amex'\)/,
+  )?.[0] || '';
+  assert.match(usBankLoadEnd, /goToOffers\(\)/);
+  assert.match(usBankLoadEnd, /onOffersUrl/);
+  assert.match(usBankLoadEnd, /SYNC_MODES\.AUTH/);
+  assert.match(usBankLoadEnd, /SYNC_MODES\.NEEDS_INPUT/);
+  const goToOffersBlock = syncSource.match(
+    /const goToOffers = \(\) => \{[\s\S]*?\};\n/,
+  )?.[0] || '';
+  assert.match(goToOffersBlock, /config\.offersUrl \|\| config\.url/);
+  assert.equal(
+    BANK_CONFIG.us_bank.offersUrl,
+    'https://onlinebanking.usbank.com/digital/servicing/dominjection/cashback-deals',
+  );
+  assert.equal(
+    BANK_CONFIG.us_bank.url,
+    'https://onlinebanking.usbank.com/auth/login/?channel=mobileweb',
+  );
 });
 
 test('home BankGrid treats supported US Bank as tappable (+ Add), not Coming Soon', () => {
@@ -141,18 +173,95 @@ test('home BankGrid treats supported US Bank as tappable (+ Add), not Coming Soo
   assert.equal(usBank.supported ? '+ Add' : 'Coming Soon', '+ Add');
 });
 
-test('SyncWebView wires US Bank capture/read/save the same way as Wells Fargo', () => {
+test('SyncWebView wires US Bank capture/when-ready/save like Wells Fargo', () => {
   const syncSource = readRepoFile('..', 'SyncWebView.js');
   assert.match(syncSource, /buildUsBankOfferCaptureJs/);
   assert.match(syncSource, /buildUsBankOffersVisibleJs/);
-  assert.match(syncSource, /buildUsBankReadJs/);
+  assert.match(syncSource, /buildUsBankChallengeVisibleJs/);
+  assert.match(syncSource, /buildUsBankCaptureWhenReadyJs/);
+  assert.match(syncSource, /US_BANK_CAPTURE_READY_TIMEOUT_MS/);
   assert.match(syncSource, /bank === 'us_bank'/);
   assert.match(syncSource, /US_BANK_ON_OFFERS/);
+  assert.match(syncSource, /US_BANK_CHALLENGE/);
   assert.match(syncSource, /US_BANK_CAPTURE_UNAVAILABLE/);
   assert.match(syncSource, /US_BANK_OFFERS/);
   assert.match(syncSource, /bank: 'us_bank'/);
   assert.equal(typeof buildUsBankOffersVisibleJs(), 'string');
   assert.match(buildUsBankOffersVisibleJs(), /US_BANK_ON_OFFERS/);
+  assert.match(buildUsBankOffersVisibleJs(), /signedIn/);
+  assert.match(buildUsBankChallengeVisibleJs(), /US_BANK_CHALLENGE/);
+  assert.match(buildUsBankChallengeVisibleJs(), /sec-cpt-if/);
+  // Challenge handler must lift to NeedsInput — never auto-click Continue.
+  assert.match(syncSource, /US_BANK_CHALLENGE[\s\S]{0,400}NEEDS_INPUT/);
+  assert.doesNotMatch(buildUsBankChallengeVisibleJs(), /click\(/);
+});
+
+test('US_BANK_CHALLENGE posts when Arkose adaptive iframe is present', () => {
+  const messages = [];
+  const window = {
+    ReactNativeWebView: { postMessage(raw) { messages.push(JSON.parse(raw)); } },
+  };
+  const document = {
+    body: { innerText: 'Account login\nWe are logging you in…' },
+    getElementById(id) {
+      return id === 'sec-cpt-if'
+        ? { src: 'https://client-api.arkoselabs.com/adaptive' }
+        : null;
+    },
+    querySelector() { return null; },
+  };
+  new Function('window', 'document', buildUsBankChallengeVisibleJs())(window, document);
+  assert.equal(messages.length, 1);
+  assert.equal(messages[0].type, 'US_BANK_CHALLENGE');
+  assert.equal(messages[0].present, true);
+});
+
+test('US_BANK_CHALLENGE stays silent on plain login form', () => {
+  const messages = [];
+  const window = {
+    ReactNativeWebView: { postMessage(raw) { messages.push(JSON.parse(raw)); } },
+  };
+  const document = {
+    body: { innerText: 'Account login\nUsername\nPassword\nLog in' },
+    getElementById() { return null; },
+    querySelector() { return null; },
+  };
+  new Function('window', 'document', buildUsBankChallengeVisibleJs())(window, document);
+  assert.equal(messages.length, 0);
+});
+
+test('US_BANK_ON_OFFERS posts signedIn false on logged-out deals URL', () => {
+  const messages = [];
+  const window = {
+    location: { href: 'https://onlinebanking.usbank.com/digital/servicing/dominjection/cashback-deals' },
+    ReactNativeWebView: { postMessage(raw) { messages.push(JSON.parse(raw)); } },
+  };
+  const document = {
+    body: {
+      innerText: 'usbank\nLog in\nYour cash-back deals\nActivate deals and earn cash back',
+    },
+  };
+  new Function('window', 'document', buildUsBankOffersVisibleJs())(window, document);
+  assert.equal(messages.length, 1);
+  assert.equal(messages[0].type, 'US_BANK_ON_OFFERS');
+  assert.equal(messages[0].signedIn, false);
+});
+
+test('US_BANK_ON_OFFERS posts signedIn true with Log out chrome on deals', () => {
+  const messages = [];
+  const window = {
+    location: { href: 'https://onlinebanking.usbank.com/digital/servicing/dominjection/cashback-deals' },
+    ReactNativeWebView: { postMessage(raw) { messages.push(JSON.parse(raw)); } },
+  };
+  const document = {
+    body: {
+      innerText: 'usbank\nLog out\nYour cash-back deals\nTotal amount saved to date: $0.00',
+    },
+  };
+  new Function('window', 'document', buildUsBankOffersVisibleJs())(window, document);
+  assert.equal(messages.length, 1);
+  assert.equal(messages[0].type, 'US_BANK_ON_OFFERS');
+  assert.equal(messages[0].signedIn, true);
 });
 
 test('stripUsBankOffers keeps offer fields and strips tokens and tracking', () => {
@@ -394,4 +503,46 @@ test('hooks getInsights on fetch and ignores a non-2xx response', async () => {
   // give clone().text() a tick
   await new Promise((resolve) => setTimeout(resolve, 0));
   assert.ok(window.__usBankLastOffers?.ads?.length >= 4);
+});
+
+test('capture-when-ready posts as soon as the getInsights stash lands', async () => {
+  assert.ok(US_BANK_CAPTURE_POLL_MS <= 150);
+  assert.ok(US_BANK_CAPTURE_READY_TIMEOUT_MS >= 2000);
+
+  const messages = [];
+  const window = {
+    __usBankLastOffers: null,
+    ReactNativeWebView: { postMessage(raw) { messages.push(JSON.parse(raw)); } },
+  };
+  new Function('window', 'document', buildUsBankCaptureWhenReadyJs(500, 40))(window, {});
+  await new Promise((r) => setTimeout(r, 80));
+  assert.equal(messages.length, 0);
+
+  window.__usBankLastOffers = {
+    ads: [{
+      offerId: 'READYOFFER1',
+      merchantName: 'Ready Cafe',
+      activationState: 'SERVED',
+      endDate: '2027-01-01T04:59:59Z',
+      headline: '5% cash back',
+      shortPreMessage: '',
+      rewardType: 'PERCENT_AMOUNT_PURCHASE',
+      rewardAmount: 5,
+      maxRewardAmount: null,
+      minSpendAmount: null,
+    }],
+  };
+  await new Promise((r) => setTimeout(r, 120));
+  assert.equal(messages.at(-1)?.type, 'US_BANK_OFFERS');
+  assert.equal(messages.at(-1)?.offers.ads[0].offerId, 'READYOFFER1');
+});
+
+test('capture-when-ready times out with US_BANK_CAPTURE_UNAVAILABLE when stash never lands', async () => {
+  const messages = [];
+  const window = {
+    ReactNativeWebView: { postMessage(raw) { messages.push(JSON.parse(raw)); } },
+  };
+  new Function('window', 'document', buildUsBankCaptureWhenReadyJs(120, 40))(window, {});
+  await new Promise((r) => setTimeout(r, 220));
+  assert.equal(messages.at(-1)?.type, 'US_BANK_CAPTURE_UNAVAILABLE');
 });
