@@ -118,9 +118,15 @@ export const AMEX_OPEN_AND_DETECT_JS = `
 
 // Wait after clicking an Amex card option before posting CARD_SWITCHED.
 export const AMEX_SWITCH_TIMEOUT_MS = 3500;
-/** First wait for CAPTURE_JSON after CARD_SWITCHED; then one nudge + second wait. */
-export const AMEX_CAPTURE_NUDGE_AFTER_MS = 4000;
-export const AMEX_CAPTURE_READY_TIMEOUT_MS = 10000;
+/** First wait for CAPTURE_JSON after arm/switch; then one nudge + second wait. */
+export const AMEX_CAPTURE_NUDGE_AFTER_MS = 5000;
+export const AMEX_CAPTURE_READY_TIMEOUT_MS = 12000;
+
+/** Display label for cover / save attribution (matches detect last4 shape). */
+export function amexCardDisplayLabel(card) {
+  if (!card || !card.label) return '';
+  return card.label + (card.last4 ? ` (...${card.last4})` : '');
+}
 
 /**
  * Re-click the expected card to force a fresh ReadOffersHubPresentation when the

@@ -808,21 +808,9 @@ test('amexCoverProgress matches Chase math; AMEX_SWITCH_TIMEOUT_MS stays 3500', 
   );
 });
 
-test('amexCoverStatusLine is blank while switch-only; shows N-of-M only while syncing', () => {
+test('amexCoverStatusLine is blank unless syncing; no eligible/saved noise', () => {
   assert.equal(
     amexCoverStatusLine({
-      switching: true,
-      syncing: false,
-      cardLabel: 'Blue Cash Preferred®',
-      cardIndex: 1,
-      cardsInPhase: 2,
-      phaseLabel: 'eligible',
-    }),
-    '',
-  );
-  assert.equal(
-    amexCoverStatusLine({
-      switching: false,
       syncing: false,
       cardLabel: 'Blue Cash Preferred®',
       cardIndex: 1,
@@ -832,27 +820,30 @@ test('amexCoverStatusLine is blank while switch-only; shows N-of-M only while sy
   );
   assert.equal(
     amexCoverStatusLine({
-      switching: false,
       syncing: true,
       cardLabel: 'Platinum Card®',
+      cardIndex: 1,
+      cardsInPhase: 2,
+    }),
+    'Platinum Card® · card 1 of 2',
+  );
+  assert.equal(
+    amexCoverStatusLine({
+      syncing: true,
+      cardLabel: 'Blue Cash Preferred®',
       cardIndex: 2,
       cardsInPhase: 2,
-      phaseLabel: 'eligible',
-      syncedCount: 1,
     }),
-    'Platinum Card® · card 2 of 2 · eligible · 1 saved',
+    'Blue Cash Preferred® · card 2 of 2',
   );
-  // Capture in flight wins over a lingering switching flag.
-  assert.match(
+  assert.doesNotMatch(
     amexCoverStatusLine({
-      switching: true,
       syncing: true,
       cardLabel: 'Platinum Card®',
       cardIndex: 1,
       cardsInPhase: 2,
-      phaseLabel: 'activated',
     }),
-    /Platinum Card® · card 1 of 2 · activated/,
+    /eligible|activated|saved/i,
   );
 });
 
@@ -888,7 +879,7 @@ test('SyncWebView wires Amex auto-start with cards-ready gate and arm-before-swi
     /const startAmexCapture = \(\) => \{[\s\S]*?startingAmexRef\.current = false;\r?\n  \};/,
   )?.[0] || '';
   assert.match(startAmexBlock, /buildAmexJsonCaptureJs/);
-  assert.match(startAmexBlock, /switchToNextAmexCard/);
+  assert.match(startAmexBlock, /captureNextAmexCardInOrder/);
   assert.match(startAmexBlock, /__amexJsonCaptureArmed = false/);
   assert.match(startAmexBlock, /AMEX_OPEN_AND_DETECT_JS/);
   // NeedsInput resume must not call Chase planner.

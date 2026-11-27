@@ -309,24 +309,19 @@ export function amexCoverProgress(args) {
 }
 
 /**
- * Amex cover subtitle. Switch-only / idle steps show nothing — cover detail
- * is only for an in-flight capture (card name + honest N of M).
+ * Amex cover subtitle. Blank unless actively capturing.
+ * No "eligible"/"activated", no mid-walk "N saved" — just card name + monotonic N of M.
  */
 export function amexCoverStatusLine({
-  switching = false,
   syncing = false,
   cardLabel = '',
   cardIndex = 1,
   cardsInPhase = 1,
-  phaseLabel = 'eligible',
-  syncedCount = 0,
 } = {}) {
   if (!syncing) return '';
   const index = Math.max(1, Number(cardIndex) || 1);
   const total = Math.max(1, Number(cardsInPhase) || 1);
-  const base = `${cardLabel || 'card'} · card ${index} of ${total} · ${phaseLabel || 'eligible'}`;
-  const saved = Number(syncedCount) || 0;
-  return saved > 0 ? `${base} · ${saved} saved` : base;
+  return `${cardLabel || 'card'} · card ${index} of ${total}`;
 }
 
 /**
