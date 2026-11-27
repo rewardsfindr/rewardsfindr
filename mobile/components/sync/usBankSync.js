@@ -434,10 +434,13 @@ export const buildUsBankForceLoginJs = (loginUrl = US_BANK_LOGIN_URL) => `
 `;
 
 // Poll for stash / page offers instead of a fixed sleep after offers-ready.
-// Matches Chase/Wells capture-when-ready: auto-start often fires on
-// US_BANK_ON_OFFERS before getInsights stash lands.
-export const US_BANK_CAPTURE_READY_TIMEOUT_MS = 2800;
+// Auto-start often fires on US_BANK_ON_OFFERS before getInsights lands, and
+// CardLytics loads more ads as the deals list scrolls — do not capture on the
+// first non-empty page.
+export const US_BANK_CAPTURE_READY_TIMEOUT_MS = 12000;
 export const US_BANK_CAPTURE_POLL_MS = 120;
+/** Stash offer count must stay unchanged this long before we post US_BANK_OFFERS. */
+export const US_BANK_CAPTURE_STABLE_MS = 1500;
 
 // Shared helpers + runUsBankCapture() for one-shot read and when-ready.
 // The raw getInsights response never leaves the page.
@@ -530,21 +533,73 @@ export const buildUsBankReadJs = () => `
   true;
 `;
 
-// Poll until stash / window / frames are ready, then capture.
-// Posts the same US_BANK_OFFERS / US_BANK_CAPTURE_UNAVAILABLE messages as read.
+// Poll until the getInsights stash stops growing, scrolling to load more pages,
+// then capture. Posts the same US_BANK_OFFERS / US_BANK_CAPTURE_UNAVAILABLE
+// messages as read. A first partial page must not win the race.
 export const buildUsBankCaptureWhenReadyJs = (
   timeoutMs = US_BANK_CAPTURE_READY_TIMEOUT_MS,
   intervalMs = US_BANK_CAPTURE_POLL_MS,
+  stableMs = US_BANK_CAPTURE_STABLE_MS,
 ) => `
   (async function() {
     try {
       ${usBankCaptureBodySource}
+      function stashCount() {
+        var stash = resolveStash();
+        return stash && Array.isArray(stash.ads) ? stash.ads.length : 0;
+      }
+      function nudgeScroll() {
+        try {
+          var roots = [];
+          try { if (document.scrollingElement) roots.push(document.scrollingElement); } catch (e) {}
+          try { if (document.documentElement) roots.push(document.documentElement); } catch (e) {}
+          try { if (document.body) roots.push(document.body); } catch (e) {}
+          try {
+            var nodes = document.querySelectorAll
+              ? document.querySelectorAll('[class*="scroll"],[class*="Scroll"],main,section')
+              : [];
+            for (var i = 0; i < nodes.length && i < 16; i++) roots.push(nodes[i]);
+          } catch (e) {}
+          for (var r = 0; r < roots.length; r++) {
+            var el = roots[r];
+            if (!el) continue;
+            try {
+              var top = typeof el.scrollTop === 'number' ? el.scrollTop : 0;
+              var height = typeof el.scrollHeight === 'number' ? el.scrollHeight : 0;
+              if (height > top + 40) el.scrollTop = height;
+            } catch (e) {}
+          }
+          try {
+            var step = Math.max(600, window.innerHeight || 800);
+            window.scrollBy(0, step);
+          } catch (e) {}
+          try {
+            var maxH = Math.max(
+              (document.body && document.body.scrollHeight) || 0,
+              (document.documentElement && document.documentElement.scrollHeight) || 0,
+            );
+            if (maxH > 0) window.scrollTo(0, maxH);
+          } catch (e) {}
+        } catch (e) {}
+      }
       var started = Date.now();
+      var lastCount = 0;
+      var stableSince = 0;
       while (Date.now() - started < ${timeoutMs}) {
-        if (usBankCaptureReady()) {
-          runUsBankCapture();
-          return;
+        var count = stashCount();
+        if (count > 0) {
+          if (count !== lastCount) {
+            lastCount = count;
+            stableSince = Date.now();
+          } else if (stableSince && (Date.now() - stableSince >= ${stableMs})) {
+            runUsBankCapture();
+            return;
+          }
+        } else {
+          lastCount = 0;
+          stableSince = 0;
         }
+        nudgeScroll();
         await new Promise(function(resolve) { setTimeout(resolve, ${intervalMs}); });
       }
       if (usBankCaptureReady()) {

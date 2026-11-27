@@ -91,6 +91,7 @@ import {
   buildUsBankCaptureWhenReadyJs,
   US_BANK_CAPTURE_READY_TIMEOUT_MS,
   US_BANK_CAPTURE_POLL_MS,
+  US_BANK_CAPTURE_STABLE_MS,
   US_BANK_LOGIN_URL,
 } from './sync/usBankSync.js';
 import { parseCardLabel }                                 from './sync/cardLabel.js';
@@ -1006,7 +1007,11 @@ export default function SyncWebView({ visible, bank, onClose, onSuccess }) {
     // first auto-start often races US_BANK_ON_OFFERS before getInsights lands.
     webViewRef.current?.injectJavaScript(buildUsBankOfferCaptureJs());
     webViewRef.current?.injectJavaScript(
-      buildUsBankCaptureWhenReadyJs(US_BANK_CAPTURE_READY_TIMEOUT_MS, US_BANK_CAPTURE_POLL_MS),
+      buildUsBankCaptureWhenReadyJs(
+        US_BANK_CAPTURE_READY_TIMEOUT_MS,
+        US_BANK_CAPTURE_POLL_MS,
+        US_BANK_CAPTURE_STABLE_MS,
+      ),
     );
     startingUsBankRef.current = false;
   };

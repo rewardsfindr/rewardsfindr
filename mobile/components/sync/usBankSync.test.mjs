@@ -16,6 +16,7 @@ import {
   buildUsBankCaptureWhenReadyJs,
   US_BANK_CAPTURE_READY_TIMEOUT_MS,
   US_BANK_CAPTURE_POLL_MS,
+  US_BANK_CAPTURE_STABLE_MS,
   US_BANK_LOGIN_URL,
   US_BANK_OFFERS_URL,
   stripUsBankOffers,
@@ -625,35 +626,58 @@ test('hooks getInsights on fetch and ignores a non-2xx response', async () => {
   assert.ok(window.__usBankLastOffers?.ads?.length >= 4);
 });
 
-test('capture-when-ready posts as soon as the getInsights stash lands', async () => {
+function flatOffer(offerId, merchantName = 'Ready Cafe') {
+  return {
+    offerId,
+    merchantName,
+    activationState: 'SERVED',
+    endDate: '2027-01-01T04:59:59Z',
+    headline: '5% cash back',
+    shortPreMessage: '',
+    rewardType: 'PERCENT_AMOUNT_PURCHASE',
+    rewardAmount: 5,
+    maxRewardAmount: null,
+    minSpendAmount: null,
+  };
+}
+
+test('capture-when-ready waits until getInsights stash count stays stable', async () => {
   assert.ok(US_BANK_CAPTURE_POLL_MS <= 150);
-  assert.ok(US_BANK_CAPTURE_READY_TIMEOUT_MS >= 2000);
+  assert.ok(US_BANK_CAPTURE_READY_TIMEOUT_MS >= 8000);
+  assert.ok(US_BANK_CAPTURE_STABLE_MS >= 800);
 
   const messages = [];
   const window = {
     __usBankLastOffers: null,
     ReactNativeWebView: { postMessage(raw) { messages.push(JSON.parse(raw)); } },
+    scrollBy() {},
+    scrollTo() {},
+    innerHeight: 800,
   };
-  new Function('window', 'document', buildUsBankCaptureWhenReadyJs(500, 40))(window, {});
-  await new Promise((r) => setTimeout(r, 80));
+  const document = {
+    scrollingElement: { scrollTop: 0, scrollHeight: 2400 },
+    documentElement: { scrollTop: 0, scrollHeight: 2400 },
+    body: { scrollTop: 0, scrollHeight: 2400 },
+    querySelectorAll() { return []; },
+  };
+  // timeout 900 / poll 40 / stable 200 — first page must not post before growth settles
+  new Function('window', 'document', buildUsBankCaptureWhenReadyJs(900, 40, 200))(window, document);
+  await new Promise((r) => setTimeout(r, 60));
   assert.equal(messages.length, 0);
 
+  window.__usBankLastOffers = { ads: [flatOffer('READYOFFER1')] };
+  await new Promise((r) => setTimeout(r, 100));
+  assert.equal(messages.length, 0, 'first partial page must not capture yet');
+
   window.__usBankLastOffers = {
-    ads: [{
-      offerId: 'READYOFFER1',
-      merchantName: 'Ready Cafe',
-      activationState: 'SERVED',
-      endDate: '2027-01-01T04:59:59Z',
-      headline: '5% cash back',
-      shortPreMessage: '',
-      rewardType: 'PERCENT_AMOUNT_PURCHASE',
-      rewardAmount: 5,
-      maxRewardAmount: null,
-      minSpendAmount: null,
-    }],
+    ads: [flatOffer('READYOFFER1'), flatOffer('READYOFFER2', 'Second Spot')],
   };
-  await new Promise((r) => setTimeout(r, 120));
+  await new Promise((r) => setTimeout(r, 100));
+  assert.equal(messages.length, 0, 'count just grew — settle clock resets');
+
+  await new Promise((r) => setTimeout(r, 280));
   assert.equal(messages.at(-1)?.type, 'US_BANK_OFFERS');
+  assert.equal(messages.at(-1)?.offers.ads.length, 2);
   assert.equal(messages.at(-1)?.offers.ads[0].offerId, 'READYOFFER1');
 });
 
@@ -661,8 +685,17 @@ test('capture-when-ready times out with US_BANK_CAPTURE_UNAVAILABLE when stash n
   const messages = [];
   const window = {
     ReactNativeWebView: { postMessage(raw) { messages.push(JSON.parse(raw)); } },
+    scrollBy() {},
+    scrollTo() {},
+    innerHeight: 800,
   };
-  new Function('window', 'document', buildUsBankCaptureWhenReadyJs(120, 40))(window, {});
+  const document = {
+    scrollingElement: { scrollTop: 0, scrollHeight: 100 },
+    documentElement: { scrollTop: 0, scrollHeight: 100 },
+    body: { scrollTop: 0, scrollHeight: 100 },
+    querySelectorAll() { return []; },
+  };
+  new Function('window', 'document', buildUsBankCaptureWhenReadyJs(120, 40, 80))(window, document);
   await new Promise((r) => setTimeout(r, 220));
   assert.equal(messages.at(-1)?.type, 'US_BANK_CAPTURE_UNAVAILABLE');
 });
