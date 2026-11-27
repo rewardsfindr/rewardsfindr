@@ -776,6 +776,15 @@ test('Amex NeedsInput resume continues walk without Chase planner', () => {
     }),
     { action: 'full_start' },
   );
+  // Enrolled-complete → full_start (visited >= total on enrolled phase).
+  assert.deepEqual(
+    planAmexNeedsInputResume({
+      cardOptionsLength: 4,
+      visitedCount: 4,
+      syncPhase: 'enrolled',
+    }),
+    { action: 'full_start' },
+  );
   assert.notEqual(
     planAmexNeedsInputResume({
       cardOptionsLength: 4,
