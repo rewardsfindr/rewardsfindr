@@ -4,23 +4,30 @@ Code no longer deploys or runs a RewardsFindr Express API. The `api/` package, `
 
 This monorepo also must **not** expect Vercel / GitHub Environment deploys. Marketing stays on [`rewardsfindr-web`](https://github.com/rewardsfindr/rewardsfindr-web) → rewardsfindr.com. PRs here only need CI (mobile tests).
 
-Deleting GCP resources and clearing the PR **Deployments** panel are **manual** (console / GitHub settings). Agents cannot delete Environments with the integration token.
+Deleting GCP resources remains **manual** (console). Agents cannot delete Environments with the integration token.
 
-## Why PRs show “No deployments”
+## Why PRs showed “No deployments”
 
-GitHub still has Environments named **Preview** and **Production** on this repo (created by past `vercel[bot]` deployments). When those Environments exist, the PR sidebar shows Deployments even though nothing deploys anymore — hence “This branch has not been deployed / No deployments.”
+GitHub previously had Environments named **Preview** and **Production** on this repo (created by past `vercel[bot]` deployments). While those Environments existed, the PR sidebar showed Deployments even though nothing deployed anymore — hence “This branch has not been deployed / No deployments.”
 
 There is no required status check named Deploy, no `vercel.json`, and no Cloud Run workflow left in `.github/workflows/`.
 
-## Clear the Deployments panel (do this)
+## Environments cleanup (done 2026-11-26)
 
-1. Open **Settings → Environments** for this repo:  
+**Preview** and **Production** were deleted from **Settings → Environments**. New PRs should no longer show an empty Deployments expectation.
+
+If those Environments reappear (e.g. a stray Vercel link recreates them):
+
+1. Open **Settings → Environments**:  
    https://github.com/rewardsfindr/rewardsfindr/settings/environments
-2. Delete **Preview** and **Production**.
-3. (Recommended) In the Vercel dashboard, unlink / remove any project that still points at **`rewardsfindr/rewardsfindr`**. Keep the project for **`rewardsfindr-web`** unchanged.
-4. Optional follow-up PR: remove root `.vercelignore` only after Vercel is fully disconnected from this repo (it currently ignores all paths so a stray link cannot rebuild).
+2. Delete **Preview** and **Production** again.
 
-After step 2, new PRs should stop showing an empty Deployments expectation.
+Optional follow-ups (still open):
+
+1. In the Vercel dashboard, unlink / remove any project that still points at **`rewardsfindr/rewardsfindr`**. Keep the project for **`rewardsfindr-web`** unchanged.
+2. Optional follow-up PR: remove root `.vercelignore` only after Vercel is fully disconnected from this repo (it currently ignores all paths so a stray link cannot rebuild).
+
+Historical `vercel[bot]` deployment *records* may still appear in the Deployments API; that does not mean Environments need deleting again.
 
 ## GCP service (optional)
 

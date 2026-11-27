@@ -18,7 +18,7 @@ rewardsfindr/
 └── .github/       # CI workflows
 ```
 
-There is **no RewardsFindr HTTP API** in this repo. Bank sync, offer catalog, search, and history live on the phone (AsyncStorage + Firebase Auth). The former Express / Cloud Run service was removed; see [docs/retire-cloud-run.md](docs/retire-cloud-run.md) for GCP cleanup and clearing unused GitHub Deployments (Preview/Production Environments).
+There is **no RewardsFindr HTTP API** in this repo. Bank sync, offer catalog, search, and history live on the phone (AsyncStorage + Firebase Auth). The former Express / Cloud Run service was removed; see [docs/retire-cloud-run.md](docs/retire-cloud-run.md) for GCP cleanup notes (GitHub Preview/Production Environments already cleared).
 
 ## Related Repositories
 

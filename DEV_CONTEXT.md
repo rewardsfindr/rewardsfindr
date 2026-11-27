@@ -261,7 +261,7 @@ The current list is in **Where we left off** at the top of this file. The March 
 10. ☐ Add tests — Mobile (React Native Testing Library)
 11. ☐ EAS production builds — Android/iOS app store builds
 12. ☐ Capital One scraper
-13. ☐ Clear unused GitHub Environments (Preview/Production) so PRs stop showing Deployments — see `docs/retire-cloud-run.md`
+13. ☑ Clear unused GitHub Environments (Preview/Production) so PRs stop showing Deployments — done 2026-11-26; see `docs/retire-cloud-run.md`
 
 
 ---
