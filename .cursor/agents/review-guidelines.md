@@ -29,4 +29,4 @@ These are the reviewer's rules. Apply them as written. Do not relax one to appro
 
 - Every new behavior has a test that fails if that behavior is removed.
 - Behavior the diff changes is still covered by a test that executes the changed branch.
-- Run `npm test` in `mobile` when `mobile/` changes. Run `npm test` in `api` when `api/` changes. A green suite that never reaches the new code is a finding.
+- Run `npm test` in `mobile` when `mobile/` changes. A green suite that never reaches the new code is a finding.

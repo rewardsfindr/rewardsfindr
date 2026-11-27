@@ -5,70 +5,46 @@
 Find the best credit card rewards for any store. Search any merchant and instantly see which credit card gives you the highest cashback or points rate.
 
 🌐 **Website:** [rewardsfindr.com](https://rewardsfindr.com) ([web repo](https://github.com/rewardsfindr/rewardsfindr-web))  
-📱 **Mobile App:** Coming soon (iOS & Android)  
-🔌 **Browser Extension:** Chrome extension (in development)
+📱 **Mobile App:** Expo (iOS & Android) — offers sync and search run on-device
 
 ## Repository Structure
 
-This is a monorepo containing multiple components of the RewardsFindr platform:
-
 ```
 rewardsfindr/
-├── api/           # Backend API (Node.js/Express)
-├── mobile/        # React Native mobile app
-├── extension/     # Chrome browser extension
-├── shared/        # Shared utilities and types
+├── mobile/        # React Native / Expo app (product)
+├── shared/        # Shared utilities
 ├── src/shared/    # Shared constants used across projects
-└── .github/       # CI/CD workflows
+├── docs/          # Ops / product notes
+└── .github/       # CI workflows
 ```
+
+There is **no RewardsFindr HTTP API** in this repo. Bank sync, offer catalog, search, and history live on the phone (AsyncStorage + Firebase Auth). The former Express / Cloud Run service was removed; see [docs/retire-cloud-run.md](docs/retire-cloud-run.md) for GCP cleanup.
 
 ## Related Repositories
 
 - **[rewardsfindr-web](https://github.com/rewardsfindr/rewardsfindr-web)** - Marketing landing page (React, deployed on Vercel)
-- **[rewardsfindr-mobile](https://github.com/rewardsfindr/rewardsfindr-mobile)** - Mobile app (coming soon)
-- **[rewardsfindr-api](https://github.com/rewardsfindr/rewardsfindr-api)** - Backend API (coming soon)
 
 ## Development
 
-### API Development
-```bash
-cd api
-npm install
-npm run dev
-```
-
-### Mobile Development
 ```bash
 cd mobile
 npm install
 npm start
 ```
 
-### Extension Development
-```bash
-cd extension
-npm install
-npm run build
-# Load unpacked extension in Chrome from extension/dist
-```
+Firebase Auth env vars are documented in `mobile/.env.example`. No backend URL is required for normal use.
 
 ## Testing
 
 ```bash
-# Run all tests
-npm run test:all
-
-# Run specific test suites
-npm run test:shared
-npm run test:extension
+cd mobile && npm test
 ```
 
 ## Tech Stack
 
-- **Frontend:** React, React Native
-- **Backend:** Node.js, Express, Firebase/Firestore
-- **Deployment:** Vercel (web), Firebase (backend)
-- **Testing:** Jest
+- **Mobile:** React Native, Expo, Firebase Auth
+- **Offers:** On-device catalog under `mobile/lib/catalog/`
+- **Web (separate repo):** React / Vercel
 
 ## Contributing
 

@@ -12,7 +12,7 @@ import { useLocalSearchParams, useRouter, Stack } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { colors, radii, shadow } from '../shared/theme.js';
 import { summarizeOfferTerms } from '../components/sync/chaseSync.js';
-import { chaseOfferUrl } from '../../api/lib/offers/chaseSnapshot.js';
+import { chaseOfferUrl } from '../lib/catalog/chaseSnapshot.js';
 import { getAuthInstance } from '../lib/firebaseClient.js';
 import { searchStoredOffers } from '../lib/offerStore.js';
 import { formatOfferExpiry } from '../lib/savedOffers.js';

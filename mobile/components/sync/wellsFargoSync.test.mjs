@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { BANK_LIST, FAQ_ITEMS } from '../../shared/constants.js';
 import { BANK_CONFIG } from './bankConfig.js';
 import { formatOfferExpiry } from '../../lib/savedOffers.js';
-import { wellsFargoRecords } from '../../../api/lib/offers/deviceCatalog.js';
+import { wellsFargoRecords } from '../../lib/catalog/deviceCatalog.js';
 import {
   buildWellsFargoOfferCaptureJs,
   buildWellsFargoReadJs,

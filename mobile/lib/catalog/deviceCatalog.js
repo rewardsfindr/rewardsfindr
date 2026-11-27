@@ -9,7 +9,7 @@ import {
   toChaseOfferFields,
 } from './chaseSnapshot.js';
 import { isCurrentOffer } from './offerFreshness.js';
-import { parseAmexOffers } from '../parsers/amex.js';
+import { parseAmexOffers } from './parsers/amex.js';
 
 function amexPayloadReady(json, phase) {
   if (!json || typeof json !== 'object') return false;

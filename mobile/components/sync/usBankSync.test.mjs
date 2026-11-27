@@ -6,7 +6,7 @@ import { fileURLToPath } from 'node:url';
 import { BANK_LIST, FAQ_ITEMS } from '../../shared/constants.js';
 import { CONNECT_BANK_COPY, ONBOARDING_PAGES } from '../../lib/onboardingContent.js';
 import { BANK_CONFIG } from './bankConfig.js';
-import { replaceCardOffers, usBankRecords } from '../../../api/lib/offers/deviceCatalog.js';
+import { replaceCardOffers, usBankRecords } from '../../lib/catalog/deviceCatalog.js';
 import {
   buildUsBankOfferCaptureJs,
   buildUsBankOffersVisibleJs,
