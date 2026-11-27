@@ -114,12 +114,11 @@ export function partialAbortCopy({ syncedCount = 0, totalCards = 0 } = {}) {
 }
 
 /**
- * Capture cover for banks with auto-start (Chase + Wells + Citi + Amex).
- * Manual Sync Offers banks (US Bank) stay uncovered until their auto slice lands.
+ * Capture cover for banks with auto-start (Chase + Wells + Citi + Amex + US Bank).
  */
 export function shouldShowSyncCover({ bank, syncMode } = {}) {
   return (
-    (bank === 'chase' || bank === 'wells_fargo' || bank === 'citi' || bank === 'amex')
+    (bank === 'chase' || bank === 'wells_fargo' || bank === 'citi' || bank === 'amex' || bank === 'us_bank')
     && syncMode === SYNC_MODES.CAPTURING
   );
 }
@@ -168,6 +167,35 @@ export function shouldAutoStartCiti({
 } = {}) {
   if (!visible) return false;
   if (bank !== 'citi') return false;
+  if (syncStarted) return false;
+  if (onLoginPage) return false;
+  if (!onOffersPage) return false;
+  if (signedIn !== true) return false;
+
+  if (syncMode === SYNC_MODES.NEEDS_INPUT) return true;
+  if (syncMode === SYNC_MODES.AUTH) return !autoStartConsumed;
+  return false;
+}
+
+/**
+ * US Bank auto-start / resume gate. Requires a positive Cash Back Deals surface
+ * AND honest signedIn (never URL-only deals / !onLoginPage alone — deals URL
+ * alone is not enough even after login redirects).
+ * First start: syncMode === auth and !autoStartConsumed.
+ * Resume: syncMode === needsInput (consumed flag ignored).
+ */
+export function shouldAutoStartUsBank({
+  bank,
+  syncMode,
+  onOffersPage,
+  onLoginPage,
+  signedIn,
+  syncStarted,
+  autoStartConsumed,
+  visible = true,
+} = {}) {
+  if (!visible) return false;
+  if (bank !== 'us_bank') return false;
   if (syncStarted) return false;
   if (onLoginPage) return false;
   if (!onOffersPage) return false;
@@ -262,6 +290,52 @@ export function shouldForceCitiOffersRedirect({
   if (onOffers) return false;
   if (onLoginForm) return false;
   return signedIn === true;
+}
+
+/**
+ * Expired / signed-out US Bank shell → one-shot navigate to official login.
+ * Do not fire when Account login / Username+Password is already visible, or
+ * when honestly signed in (happy path stays on Cash Back Deals). Arkose stays
+ * on the login page as human NeedsInput — never auto-click Continue.
+ */
+export function shouldForceUsBankLogin({
+  expired = false,
+  onLoginForm = false,
+  signedIn = false,
+  syncStarted = false,
+  loginForced = false,
+} = {}) {
+  if (syncStarted) return false;
+  if (loginForced) return false;
+  if (signedIn === true) return false;
+  if (onLoginForm) return false;
+  return expired === true;
+}
+
+/**
+ * After US Bank sign-on (fresh or expired→login), land on Cash Back Deals.
+ * Hop when signedIn chrome is present, or after Account login when the bank
+ * drops the user on online-banking home (Log out often menu-only).
+ * Do not yank from MFA / Arkose / soft-token pages that lack Username+Password
+ * and are not a home shell after login.
+ */
+export function shouldForceUsBankOffersRedirect({
+  onOffers = false,
+  signedIn = false,
+  onLoginForm = false,
+  syncStarted = false,
+  offersRedirected = false,
+  leftLogin = false,
+  onHomeShell = false,
+} = {}) {
+  if (syncStarted) return false;
+  if (offersRedirected) return false;
+  if (onOffers) return false;
+  if (onLoginForm) return false;
+  if (signedIn === true) return true;
+  // Post Account-login banking home → Cash Back Deals (Citi goToOffers shape).
+  if (leftLogin === true && onHomeShell === true) return true;
+  return false;
 }
 
 /**

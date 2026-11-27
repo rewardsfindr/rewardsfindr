@@ -75,12 +75,15 @@ export const BANK_CONFIG = {
     loginPaths: ['/login', '/signon', '/sign-on', 'parent-interstitial', 'pageNotFound', 'www.citi.com'],
   },
   us_bank: {
-    // Cash Back Deals — redirects to /auth/login when the session is gone.
-    url: 'https://onlinebanking.usbank.com/digital/servicing/dominjection/cashback-deals',
+    // Open Account login first — cashback-deals / stale cookies bounce signed-out
+    // users to www.usbank.com marketing. After sign-on, SyncWebView goToOffers →
+    // offersUrl (Cash Back Deals). Force-login also recovers marketing/home shells.
+    url: 'https://onlinebanking.usbank.com/auth/login/?channel=mobileweb',
     offersUrl: 'https://onlinebanking.usbank.com/digital/servicing/dominjection/cashback-deals',
+    loginUrl: 'https://onlinebanking.usbank.com/auth/login/?channel=mobileweb',
     label: 'US Bank Offers',
     color: '#0c2074',
     offersPaths: ['cashback-deals', 'dominjection/cashback-deals'],
-    loginPaths: ['/auth/login'],
+    loginPaths: ['/auth/login', 'www.usbank.com'],
   },
 };
