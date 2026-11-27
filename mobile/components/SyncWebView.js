@@ -652,6 +652,10 @@ export default function SyncWebView({ visible, bank, onClose, onSuccess }) {
     if (cards.length === 0) {
       // Cards not in ref yet — re-open detect (when-ready) instead of failing loudly
       // on auto-start; Sync Offers still alerts when the user taps manually.
+      console.log('[amex-auto-start] cards missing in ref; re-detect');
+      cardsDiscovered.current = false;
+      setAmexCardsReady(false);
+      amexCardsReadyRef.current = false;
       webViewRef.current?.injectJavaScript(buildAmexJsonCaptureJs());
       webViewRef.current?.injectJavaScript(AMEX_OPEN_AND_DETECT_JS);
       if (syncModeRef.current === SYNC_MODES.FAILED) {
@@ -1471,24 +1475,24 @@ export default function SyncWebView({ visible, bank, onClose, onSuccess }) {
               selected: c.selected,
             })),
           });
+          // Only mark discovered when we actually have cards. An earlier empty
+          // detect must not lock cardOptionsRef empty (fire → Waiting stuck).
+          if (cardOptionsRef.current.length === 0) {
+            cardOptionsRef.current = data.cards;
+            setCardCount(data.cards.length);
+            const activeIdx = data.cards.findIndex(c => c.selected);
+            cardIndexRef.current = activeIdx >= 0 ? activeIdx : 0;
+            setCardIndexUi(cardIndexRef.current);
+          }
+          cardsDiscovered.current = true;
+          setCurrentCard(data.selectedLabel || null);
+          setAmexCardsReady(true);
+          amexCardsReadyRef.current = true;
         } else if (data.error) {
           console.log('[amex-cards] empty', { error: data.error });
         }
-        if (!cardsDiscovered.current && hasCards && cardOptionsRef.current.length === 0) {
-          cardOptionsRef.current = data.cards;
-          setCardCount(data.cards.length);
-          const activeIdx = data.cards.findIndex(c => c.selected);
-          cardIndexRef.current = activeIdx >= 0 ? activeIdx : 0;
-          setCardIndexUi(cardIndexRef.current);
-        }
-        if (!cardsDiscovered.current) cardsDiscovered.current = true;
-        setCurrentCard(data.selectedLabel || null);
-        if (hasCards) {
-          setAmexCardsReady(true);
-          amexCardsReadyRef.current = true;
-        }
 
-        if (syncPhaseRef.current === 'enrolled' && syncStartedRef.current) {
+        if (hasCards && syncPhaseRef.current === 'enrolled' && syncStartedRef.current) {
           const activeCard = data.cards?.find(c => c.selected) ?? cardOptionsRef.current[0];
           initialActiveRef.current = activeCard?.testId ?? null;
           webViewRef.current?.injectJavaScript(`window.__amexJsonCaptureArmed = false; true;`);
