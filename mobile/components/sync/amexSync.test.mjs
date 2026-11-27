@@ -7,6 +7,7 @@ import {
   AMEX_OPEN_AND_DETECT_JS,
   AMEX_SWITCH_TIMEOUT_MS,
   applyAmexCardsDetected,
+  resolveAmexCaptureAttribution,
   buildAmexJsonCaptureJs,
   buildAmexSwitchCardJs,
 } from './amexSync.js';
@@ -499,7 +500,7 @@ test('SyncWebView applies Amex cards via applyAmexCardsDetected (no empty latch)
   const src = readFileSync(join(HERE, '..', 'SyncWebView.js'), 'utf8');
   assert.match(src, /applyAmexCardsDetected/);
   const handler = src.match(
-    /if \(data\.type === 'AMEX_CARDS_DETECTED'\) \{[\s\S]*?return;\n      \}/,
+    /if \(data\.type === 'AMEX_CARDS_DETECTED'\) \{[\s\S]*?return;\r?\n      \}/,
   )?.[0] || '';
   assert.match(handler, /applyAmexCardsDetected/);
   assert.doesNotMatch(
@@ -507,4 +508,48 @@ test('SyncWebView applies Amex cards via applyAmexCardsDetected (no empty latch)
     /if \(!cardsDiscovered\.current\) cardsDiscovered\.current = true/,
   );
   assert.match(handler, /cardsDiscovered\.current = applied\.cardsDiscovered/);
+});
+
+test('resolveAmexCaptureAttribution prefers expectedTestId over lagging DOM label', () => {
+  const cards = [
+    { label: 'Platinum Card®', last4: '2009', testId: 'CARD_PRODUCT_PLAT' },
+    { label: 'Blue Cash Preferred®', last4: '1008', testId: 'CARD_PRODUCT_BCP' },
+  ];
+  const attributed = resolveAmexCaptureAttribution({
+    cards,
+    expectedTestId: 'CARD_PRODUCT_PLAT',
+    pendingCardLabel: 'Platinum Card® (...2009)',
+    // DOM still showing the card we left — classic Amex lag.
+    domCardLabel: 'Blue Cash Preferred® (...1008)',
+  });
+  assert.equal(attributed.source, 'expectedTestId');
+  assert.equal(attributed.capturedTestId, 'CARD_PRODUCT_PLAT');
+  assert.equal(attributed.cardLabel, 'Platinum Card® (...2009)');
+  assert.equal(attributed.labelMismatch, true);
+});
+
+test('resolveAmexCaptureAttribution falls back to DOM when expected is unknown', () => {
+  const cards = [
+    { label: 'Blue Cash Preferred®', last4: '1008', testId: 'CARD_PRODUCT_BCP' },
+  ];
+  const attributed = resolveAmexCaptureAttribution({
+    cards,
+    expectedTestId: null,
+    domCardLabel: 'Blue Cash Preferred® (...1008)',
+  });
+  assert.equal(attributed.source, 'domCardLabel');
+  assert.equal(attributed.capturedTestId, 'CARD_PRODUCT_BCP');
+  assert.equal(attributed.labelMismatch, false);
+});
+
+test('SyncWebView pins amexExpectedRef before switch and attributes CAPTURE_JSON via helper', () => {
+  const src = readFileSync(join(HERE, '..', 'SyncWebView.js'), 'utf8');
+  assert.match(src, /resolveAmexCaptureAttribution/);
+  assert.match(src, /amexExpectedRef\.current = next\.testId/);
+  const captureHandler = src.match(
+    /if \(data\.type === 'CAPTURE_JSON' && bank === 'amex'\) \{[\s\S]*?return;\r?\n      \}/,
+  )?.[0] || '';
+  assert.match(captureHandler, /resolveAmexCaptureAttribution/);
+  assert.match(captureHandler, /\[amex-capture\]/);
+  assert.match(captureHandler, /attributed\.cardLabel/);
 });

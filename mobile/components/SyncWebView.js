@@ -59,6 +59,7 @@ import {
   buildAmexClearFiltersJs,
   amexHandleLoadEnd,
   applyAmexCardsDetected,
+  resolveAmexCaptureAttribution,
 } from './sync/amexSync.js';
 import {
   buildWellsFargoDealsVisibleJs,
@@ -421,6 +422,13 @@ export default function SyncWebView({ visible, bank, onClose, onSuccess }) {
     setCardIndexUi(idx);
     setSwitching(true);
     armStepTimer();
+
+    // Pin attribution BEFORE inject — CAPTURE_JSON often arrives before
+    // CARD_SWITCHED, and DOM cardLabel can still show the previous card.
+    amexExpectedRef.current = next.testId;
+    pendingCardLabelRef.current = next.label
+      + (next.last4 ? ` (...${next.last4})` : '');
+    setCurrentCard(pendingCardLabelRef.current);
 
     // Arm BOTH the RN ref AND the window flag BEFORE injecting switch JS.
     // Amex fires ReadOffersHubPresentation (REPLACE) immediately when the card
@@ -1715,11 +1723,25 @@ export default function SyncWebView({ visible, bank, onClose, onSuccess }) {
         if (!captureArmed.current) return;
         captureArmed.current = false;
 
-        const cards = cardOptionsRef.current;
-        const capturedCard = cards.find(c =>
-          data.cardLabel && (c.label + (c.last4 ? ` (...${c.last4})` : '')) === data.cardLabel
-        );
-        const capturedTestId = capturedCard?.testId ?? null;
+        // Prefer the switch target (expectedTestId). DOM cardLabel can lag and
+        // mis-attribute the next card's JSON onto the previous cardName.
+        const attributed = resolveAmexCaptureAttribution({
+          cards: cardOptionsRef.current,
+          expectedTestId: amexExpectedRef.current,
+          pendingCardLabel: pendingCardLabelRef.current,
+          domCardLabel: data.cardLabel,
+        });
+        const capturedTestId = attributed.capturedTestId;
+        console.log('[amex-capture]', {
+          phase: syncPhaseRef.current,
+          source: attributed.source,
+          cardLabel: attributed.cardLabel,
+          domCardLabel: attributed.domCardLabel,
+          expectedTestId: amexExpectedRef.current,
+          labelMismatch: attributed.labelMismatch,
+          visited: visitedCardsRef.current.size,
+          total: cardOptionsRef.current.length,
+        });
         clearAmexWait();
         clearStepTimer();
         if (capturedTestId && visitedCardsRef.current.has(capturedTestId)) {
@@ -1729,7 +1751,7 @@ export default function SyncWebView({ visible, bank, onClose, onSuccess }) {
 
         await handleCaptureResult({
           payload:         data.json,
-          cardLabel:       data.cardLabel,
+          cardLabel:       attributed.cardLabel || data.cardLabel,
           phase:           syncPhaseRef.current,
           capturedTestId,
         });

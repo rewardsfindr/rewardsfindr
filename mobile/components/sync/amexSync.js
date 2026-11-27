@@ -354,6 +354,64 @@ export const amexHandleLoadEnd = ({
 };
 
 /**
+ * Attribute a CAPTURE_JSON to the card we switched to, not the DOM label.
+ *
+ * Amex can keep the previous card's display name for a beat after click, while
+ * ReadOffersHubPresentation already returned the new card's offers. Trusting
+ * DOM cardLabel then collapses both saves onto one name via replaceCardPass
+ * (Home tile "1 card" after an of-2 walk). Prefer expectedTestId from
+ * CARD_SWITCHED / buildAmexSwitchCardJs.
+ */
+export function resolveAmexCaptureAttribution({
+  cards = [],
+  expectedTestId = null,
+  pendingCardLabel = null,
+  domCardLabel = null,
+} = {}) {
+  const list = Array.isArray(cards) ? cards : [];
+  const labelFor = (card) => {
+    if (!card) return null;
+    const name = card.label || '';
+    return name + (card.last4 ? ` (...${card.last4})` : '');
+  };
+  const byExpected = expectedTestId
+    ? list.find((c) => c && c.testId === expectedTestId)
+    : null;
+  if (byExpected) {
+    const cardLabel = labelFor(byExpected);
+    return {
+      capturedTestId: byExpected.testId,
+      cardLabel,
+      source: 'expectedTestId',
+      domCardLabel: domCardLabel || null,
+      labelMismatch: Boolean(domCardLabel && cardLabel && domCardLabel !== cardLabel),
+    };
+  }
+  const byDom = domCardLabel
+    ? list.find((c) => c && labelFor(c) === domCardLabel)
+    : null;
+  if (byDom) {
+    return {
+      capturedTestId: byDom.testId,
+      cardLabel: domCardLabel,
+      source: 'domCardLabel',
+      domCardLabel,
+      labelMismatch: false,
+    };
+  }
+  const cardLabel = pendingCardLabel || domCardLabel || null;
+  return {
+    capturedTestId: null,
+    cardLabel,
+    source: pendingCardLabel ? 'pendingCardLabel' : (domCardLabel ? 'domOnly' : 'none'),
+    domCardLabel: domCardLabel || null,
+    labelMismatch: Boolean(
+      pendingCardLabel && domCardLabel && pendingCardLabel !== domCardLabel,
+    ),
+  };
+}
+
+/**
  * Apply one AMEX_CARDS_DETECTED message to RN walk state.
  * Chase-shaped: only latch cardsDiscovered / populate when hasCards.
  * Empty detects must not block a later honest card list (auto-start needs
