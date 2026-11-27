@@ -352,3 +352,42 @@ export const amexHandleLoadEnd = ({
 
   return { onOffersPage, onLogin: !!onLogin, detectedPhase };
 };
+
+/**
+ * Apply one AMEX_CARDS_DETECTED message to RN walk state.
+ * Chase-shaped: only latch cardsDiscovered / populate when hasCards.
+ * Empty detects must not block a later honest card list (auto-start needs
+ * cardOptions filled once amexCardsReady flips true).
+ */
+export function applyAmexCardsDetected({
+  cards = [],
+  cardsDiscovered = false,
+  cardOptions = [],
+} = {}) {
+  const list = Array.isArray(cards) ? cards : [];
+  const hasCards = list.length > 0;
+  if (!hasCards) {
+    return {
+      hasCards: false,
+      cardsDiscovered: !!cardsDiscovered,
+      cardOptions: Array.isArray(cardOptions) ? cardOptions : [],
+      populated: false,
+      amexCardsReady: false,
+      selectedIndex: -1,
+    };
+  }
+
+  const prior = Array.isArray(cardOptions) ? cardOptions : [];
+  const shouldPopulate = !cardsDiscovered || prior.length === 0;
+  const nextOptions = shouldPopulate ? list : prior;
+  const selectedIndex = nextOptions.findIndex((c) => c && c.selected);
+
+  return {
+    hasCards: true,
+    cardsDiscovered: true,
+    cardOptions: nextOptions,
+    populated: shouldPopulate,
+    amexCardsReady: true,
+    selectedIndex: selectedIndex >= 0 ? selectedIndex : 0,
+  };
+}

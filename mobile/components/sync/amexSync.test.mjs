@@ -1,11 +1,17 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
+import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import {
   AMEX_OPEN_AND_DETECT_JS,
   AMEX_SWITCH_TIMEOUT_MS,
+  applyAmexCardsDetected,
   buildAmexJsonCaptureJs,
   buildAmexSwitchCardJs,
 } from './amexSync.js';
+
+const HERE = dirname(fileURLToPath(import.meta.url));
 
 test('AMEX_SWITCH_TIMEOUT_MS is the prior shared Amex switch wait', () => {
   assert.equal(AMEX_SWITCH_TIMEOUT_MS, 3500);
@@ -426,4 +432,79 @@ test('an unarmed Amex capture posts nothing', async () => {
   xhr.send();
   await wait(900);
   assert.deepEqual(messages, []);
+});
+
+test('empty AMEX_CARDS_DETECTED does not latch discovered (Chase-shaped)', () => {
+  const empty = applyAmexCardsDetected({
+    cards: [],
+    cardsDiscovered: false,
+    cardOptions: [],
+  });
+  assert.equal(empty.hasCards, false);
+  assert.equal(empty.cardsDiscovered, false);
+  assert.equal(empty.populated, false);
+  assert.equal(empty.amexCardsReady, false);
+  assert.deepEqual(empty.cardOptions, []);
+});
+
+test('empty then honest cards populates cardOptions for startAmexCapture', () => {
+  const afterEmpty = applyAmexCardsDetected({
+    cards: [],
+    cardsDiscovered: false,
+    cardOptions: [],
+  });
+  const twoCards = [
+    { label: 'Blue Cash', last4: '1008', testId: 'CARD_PRODUCT_1', selected: true },
+    { label: 'Gold', last4: '2009', testId: 'CARD_PRODUCT_2', selected: false },
+  ];
+  const afterCards = applyAmexCardsDetected({
+    cards: twoCards,
+    cardsDiscovered: afterEmpty.cardsDiscovered,
+    cardOptions: afterEmpty.cardOptions,
+  });
+  assert.equal(afterCards.hasCards, true);
+  assert.equal(afterCards.cardsDiscovered, true);
+  assert.equal(afterCards.populated, true);
+  assert.equal(afterCards.amexCardsReady, true);
+  assert.equal(afterCards.cardOptions.length, 2);
+  assert.equal(afterCards.selectedIndex, 0);
+  // startAmexCapture requires cardOptionsRef.length > 0 once ready.
+  assert.ok(afterCards.amexCardsReady && afterCards.cardOptions.length > 0);
+});
+
+test('already-populated list is not overwritten by a later detect', () => {
+  const first = [
+    { label: 'Blue Cash', last4: '1008', testId: 'CARD_PRODUCT_1', selected: true },
+  ];
+  const second = [
+    { label: 'Gold', last4: '2009', testId: 'CARD_PRODUCT_2', selected: true },
+    { label: 'Platinum', last4: '3001', testId: 'CARD_PRODUCT_3', selected: false },
+  ];
+  const seeded = applyAmexCardsDetected({
+    cards: first,
+    cardsDiscovered: false,
+    cardOptions: [],
+  });
+  const again = applyAmexCardsDetected({
+    cards: second,
+    cardsDiscovered: seeded.cardsDiscovered,
+    cardOptions: seeded.cardOptions,
+  });
+  assert.equal(again.populated, false);
+  assert.equal(again.cardOptions.length, 1);
+  assert.equal(again.cardOptions[0].testId, 'CARD_PRODUCT_1');
+});
+
+test('SyncWebView applies Amex cards via applyAmexCardsDetected (no empty latch)', () => {
+  const src = readFileSync(join(HERE, '..', 'SyncWebView.js'), 'utf8');
+  assert.match(src, /applyAmexCardsDetected/);
+  const handler = src.match(
+    /if \(data\.type === 'AMEX_CARDS_DETECTED'\) \{[\s\S]*?return;\n      \}/,
+  )?.[0] || '';
+  assert.match(handler, /applyAmexCardsDetected/);
+  assert.doesNotMatch(
+    handler,
+    /if \(!cardsDiscovered\.current\) cardsDiscovered\.current = true/,
+  );
+  assert.match(handler, /cardsDiscovered\.current = applied\.cardsDiscovered/);
 });

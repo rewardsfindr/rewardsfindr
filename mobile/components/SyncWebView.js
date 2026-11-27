@@ -58,6 +58,7 @@ import {
   buildAmexJsonCaptureJs,
   buildAmexClearFiltersJs,
   amexHandleLoadEnd,
+  applyAmexCardsDetected,
 } from './sync/amexSync.js';
 import {
   buildWellsFargoDealsVisibleJs,
@@ -1475,21 +1476,27 @@ export default function SyncWebView({ visible, bank, onClose, onSuccess }) {
               selected: c.selected,
             })),
           });
-          // Only mark discovered when we actually have cards. An earlier empty
-          // detect must not lock cardOptionsRef empty (fire → Waiting stuck).
-          if (cardOptionsRef.current.length === 0) {
-            cardOptionsRef.current = data.cards;
-            setCardCount(data.cards.length);
-            const activeIdx = data.cards.findIndex(c => c.selected);
-            cardIndexRef.current = activeIdx >= 0 ? activeIdx : 0;
-            setCardIndexUi(cardIndexRef.current);
-          }
-          cardsDiscovered.current = true;
-          setCurrentCard(data.selectedLabel || null);
-          setAmexCardsReady(true);
-          amexCardsReadyRef.current = true;
         } else if (data.error) {
           console.log('[amex-cards] empty', { error: data.error });
+        }
+        // Chase-shaped latch: empty detects must not set cardsDiscovered, or a
+        // later honest list never populates cardOptionsRef and auto-start stalls.
+        const applied = applyAmexCardsDetected({
+          cards: data.cards,
+          cardsDiscovered: cardsDiscovered.current,
+          cardOptions: cardOptionsRef.current,
+        });
+        if (applied.populated) {
+          cardOptionsRef.current = applied.cardOptions;
+          setCardCount(applied.cardOptions.length);
+          cardIndexRef.current = applied.selectedIndex;
+          setCardIndexUi(applied.selectedIndex);
+        }
+        cardsDiscovered.current = applied.cardsDiscovered;
+        setCurrentCard(data.selectedLabel || null);
+        if (applied.amexCardsReady) {
+          setAmexCardsReady(true);
+          amexCardsReadyRef.current = true;
         }
 
         if (hasCards && syncPhaseRef.current === 'enrolled' && syncStartedRef.current) {

@@ -811,6 +811,12 @@ test('SyncWebView wires Amex auto-start with cards-ready gate and arm-before-swi
   assert.match(src, /AMEX_SWITCH_TIMEOUT_MS/);
   assert.match(src, /amexCoverProgress/);
   assert.match(src, /abortAmexCaptureConfirmed/);
+  assert.match(src, /applyAmexCardsDetected/);
+  // Empty AMEX_CARDS_DETECTED must not latch cardsDiscovered (Chase-shaped).
+  assert.doesNotMatch(
+    src,
+    /AMEX_CARDS_DETECTED[\s\S]{0,900}if \(!cardsDiscovered\.current\) cardsDiscovered\.current = true/,
+  );
   // Gate requires amexCardsReady — not Chase hasCards/hookReady.
   const amexGateBlock = src.match(
     /shouldAutoStartAmex\(\{[\s\S]*?\}\)/,
