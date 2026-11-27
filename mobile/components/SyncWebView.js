@@ -1461,6 +1461,19 @@ export default function SyncWebView({ visible, bank, onClose, onSuccess }) {
 
       if (data.type === 'AMEX_CARDS_DETECTED') {
         const hasCards = data.cards?.length > 0;
+        if (hasCards) {
+          console.log('[amex-cards]', {
+            count: data.cards.length,
+            cards: data.cards.map((c) => ({
+              label: c.label,
+              last4: c.last4,
+              testId: c.testId,
+              selected: c.selected,
+            })),
+          });
+        } else if (data.error) {
+          console.log('[amex-cards] empty', { error: data.error });
+        }
         if (!cardsDiscovered.current && hasCards && cardOptionsRef.current.length === 0) {
           cardOptionsRef.current = data.cards;
           setCardCount(data.cards.length);

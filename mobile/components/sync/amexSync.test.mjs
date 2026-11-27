@@ -201,34 +201,119 @@ test('card detection reads an already open menu without clicking it shut', () =>
   assert.equal(messages[0].cards[0].selected, true);
 });
 
-test('card detection falls back to every option when product options are absent', () => {
-  const option = new El({
-    role: 'option',
-    'data-testid': 'offer-filter',
-    'aria-selected': 'false',
-  }, [
-    new El({ 'data-testid': 'simple_switcher_display_name', text: 'Blue Cash' }),
-    new El({ 'data-testid': 'simple_switcher_display_number_val', text: '1008' }),
-  ]);
+function amexSwitcherDocument({ products = [], extras = [], listboxId = 'simple-switcher-listbox' } = {}) {
   const combobox = new El({
     'data-testid': 'simple_switcher_combobox',
     'aria-expanded': 'true',
+    'aria-controls': listboxId,
   });
-  const document = {
+  const listbox = new El({
+    id: listboxId,
+    role: 'listbox',
+    'data-testid': 'simple_switcher_listbox',
+  }, products);
+  const roots = [combobox, listbox, ...extras];
+  const byId = { [listboxId]: listbox };
+  return {
+    getElementById(id) { return byId[id] || null; },
     querySelector(selector) { return this.querySelectorAll(selector)[0] || null; },
     querySelectorAll(selector) {
       const found = [];
-      for (const root of [combobox, option]) {
+      for (const root of roots) {
         if (matches(root, selector)) found.push(root);
         found.push(...root.querySelectorAll(selector));
       }
       return found;
     },
   };
+}
+
+test('card detection ignores offer filter role=option rows (no phantom cards)', () => {
+  const platinum = new El({
+    role: 'option',
+    'data-testid': 'simple_switcher_product_option_CARD_PRODUCT_ONE',
+    'aria-selected': 'true',
+  }, [
+    new El({ 'data-testid': 'simple_switcher_display_name', text: 'Platinum' }),
+    new El({ 'data-testid': 'simple_switcher_display_number_val', text: '2009' }),
+  ]);
+  const blue = new El({
+    role: 'option',
+    'data-testid': 'simple_switcher_product_option_CARD_PRODUCT_TWO',
+    'aria-selected': 'false',
+  }, [
+    new El({ 'data-testid': 'simple_switcher_display_name', text: 'Blue Cash' }),
+    new El({ 'data-testid': 'simple_switcher_display_number_val', text: '1008' }),
+  ]);
+  const filters = [
+    'multiSelectONLINE',
+    'multiSelectIN_STORE',
+    'multiSelectNEW',
+    'multiSelectFEATURED',
+    'multiSelectSTATEMENT_CREDIT',
+    'multiSelectEXTRA_REWARDS',
+    'selectCustomDINING',
+    'selectCustomTRAVEL',
+    'selectCustomSHOPPING',
+    'selectCustomENTERTAINMENT',
+    'selectCustomSERVICES',
+  ].map((testId) => new El({ role: 'option', 'data-testid': testId, 'aria-selected': 'false' }, [
+    new El({ attrs: {}, children: [] }),
+  ]));
+  // Give filters visible text like the live DOM (no display_name).
+  filters.forEach((f, i) => { f.attrs.text = `Filter${i}`; });
+
+  const document = amexSwitcherDocument({
+    products: [platinum, blue],
+    extras: filters,
+  });
+  const { messages } = runScript(AMEX_OPEN_AND_DETECT_JS, document);
+  assert.equal(messages[0].cards.length, 2);
+  assert.deepEqual(
+    messages[0].cards.map((c) => c.label),
+    ['Platinum', 'Blue Cash'],
+  );
+});
+
+test('card detection returns no cards for filters-only role=option (no CARD_PRODUCT)', () => {
+  const filters = ['multiSelectONLINE', 'selectCustomDINING'].map(
+    (testId) => new El({ role: 'option', 'data-testid': testId, text: 'Online' }),
+  );
+  const document = amexSwitcherDocument({ products: [], extras: filters });
+  const { messages } = runScript(AMEX_OPEN_AND_DETECT_JS, document);
+  assert.equal(messages[0].cards.length, 0);
+});
+
+test('card detection skips Overview, closed checking, and keeps enrolled product options', () => {
+  const overview = new El({
+    role: 'option',
+    'data-testid': 'simple_switcher_static_option_ALL',
+  }, [
+    new El({ 'data-testid': 'simple_switcher_display_name', text: 'Overview' }),
+  ]);
+  const checking = new El({
+    role: 'option',
+    'data-testid': 'simple_switcher_product_option_AEXP_PERSONAL_CHECKING_ACCOUNT_X',
+    text: 'American Express Rewards Checking ••••0154 Closed',
+  }, [
+    new El({ 'data-testid': 'simple_switcher_display_name', text: 'American Express Rewards Checking' }),
+    new El({ 'data-testid': 'simple_switcher_display_number_val', text: '0154' }),
+  ]);
+  const enrolled = new El({
+    role: 'option',
+    'data-testid': 'simple_switcher_product_option_12345',
+    'aria-selected': 'true',
+  }, [
+    new El({ 'data-testid': 'simple_switcher_display_name', text: 'Platinum' }),
+    new El({ 'data-testid': 'simple_switcher_display_number_val', text: '2009' }),
+  ]);
+  const document = amexSwitcherDocument({
+    products: [overview, checking, enrolled],
+  });
   const { messages } = runScript(AMEX_OPEN_AND_DETECT_JS, document);
   assert.equal(messages[0].cards.length, 1);
-  assert.equal(messages[0].cards[0].label, 'Blue Cash');
-  assert.equal(messages[0].cards[0].testId, 'offer-filter');
+  assert.equal(messages[0].cards[0].label, 'Platinum');
+  assert.equal(messages[0].cards[0].testId, 'simple_switcher_product_option_12345');
 });
 
 class DeferredXHR {

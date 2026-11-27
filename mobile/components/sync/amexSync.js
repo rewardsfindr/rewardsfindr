@@ -32,12 +32,48 @@
 //   switch JS — not in the CARD_SWITCHED handler.
 // ─────────────────────────────────────────────
 
+// Honest card list only. Never fall back to document-wide [role="option"] —
+// Amex offers filters (multiSelect* / selectCustom*) are also role=option and
+// were counted as phantom "cards" (e.g. 11 filters when Rakesh has 2 cards).
 const DETECT_CARDS_INNER = `
   (function detectAmexCards() {
+    function switcherListbox() {
+      var combobox = document.querySelector('[data-testid="simple_switcher_combobox"]');
+      if (!combobox) return null;
+      var listboxId = combobox.getAttribute('aria-controls');
+      if (listboxId) {
+        var byId = document.getElementById(listboxId);
+        if (byId) return byId;
+      }
+      return document.querySelector('[data-testid="simple_switcher_listbox"]')
+        || document.querySelector('[role="listbox"]');
+    }
+    function isAmexCardOption(opt) {
+      var testId = opt.getAttribute('data-testid') || '';
+      if (!testId) return false;
+      if (testId.indexOf('multiSelect') === 0) return false;
+      if (testId.indexOf('selectCustom') === 0) return false;
+      if (testId.indexOf('simple_switcher_static_option') === 0) return false;
+      if (testId.indexOf('CHECKING_ACCOUNT') !== -1) return false;
+      var text = opt.innerText || '';
+      if (/\\bClosed\\b/i.test(text)) return false;
+      var nameEl = opt.querySelector('[data-testid="simple_switcher_display_name"]');
+      if (!nameEl || !nameEl.innerText.trim()) return false;
+      return true;
+    }
+    var root = switcherListbox();
+    // Eligible page: CARD_PRODUCT rows (safe document-wide — filters lack this).
     var options = document.querySelectorAll('[role="option"][data-testid*="CARD_PRODUCT"]');
-    if (!options.length) options = document.querySelectorAll('[role="option"]');
+    // Enrolled page: product options live under the switcher listbox only.
+    if (!options.length && root) {
+      options = root.querySelectorAll('[role="option"][data-testid*="simple_switcher_product_option"]');
+    }
+    if (!options.length && root) {
+      options = root.querySelectorAll('[role="option"]');
+    }
     var cards = [];
-    options.forEach(function(opt, i) {
+    options.forEach(function(opt) {
+      if (!isAmexCardOption(opt)) return;
       var nameEl   = opt.querySelector('[data-testid="simple_switcher_display_name"]');
       var numEl    = opt.querySelector('[data-testid="simple_switcher_display_number_val"]');
       var name     = nameEl ? nameEl.innerText.trim() : '';
@@ -45,7 +81,7 @@ const DETECT_CARDS_INNER = `
       var last4    = numRaw.replace(/[^\\d]/g, '').slice(-4);
       var selected = opt.getAttribute('aria-selected') === 'true';
       var testId   = opt.getAttribute('data-testid') || '';
-      cards.push({ label: name, last4: last4, testId: testId, index: i, selected: selected });
+      cards.push({ label: name, last4: last4, testId: testId, index: cards.length, selected: selected });
     });
     var selectedCard = cards.find(function(c) { return c.selected; });
     window.ReactNativeWebView.postMessage(JSON.stringify({
