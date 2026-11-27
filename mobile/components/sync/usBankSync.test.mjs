@@ -316,6 +316,30 @@ test('US_BANK_ON_OFFERS posts signedIn false on logged-out deals URL', () => {
   assert.equal(onOffers.signedIn, false);
 });
 
+test('US_BANK_ON_OFFERS posts signedIn true on OfferHub deals without Log out chrome', () => {
+  const messages = [];
+  const window = {
+    location: { href: 'https://onlinebanking.usbank.com/digital/servicing/dominjection/cashback-deals' },
+    ReactNativeWebView: { postMessage(raw) { messages.push(JSON.parse(raw)); } },
+  };
+  const document = {
+    body: {
+      // OfferHub often hides Log out in a menu — deals + % cash back still mean session ok.
+      innerText: 'Cash Back Deals\nFragranceNet.com\n5% cash back\nQVC\n10% cash back\nActivate',
+    },
+  };
+  new Function('window', 'document', buildUsBankOffersVisibleJs())(window, document);
+  const pageState = messages.find((m) => m.type === 'US_BANK_PAGE_STATE');
+  const onOffers = messages.find((m) => m.type === 'US_BANK_ON_OFFERS');
+  assert.ok(pageState);
+  assert.equal(pageState.onOffers, true);
+  assert.equal(pageState.onLoginForm, false);
+  assert.equal(pageState.signedIn, true);
+  assert.equal(pageState.expired, false);
+  assert.ok(onOffers);
+  assert.equal(onOffers.signedIn, true);
+});
+
 test('US_BANK_ON_OFFERS posts signedIn true with Log out chrome on deals', () => {
   const messages = [];
   const window = {

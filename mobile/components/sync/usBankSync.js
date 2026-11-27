@@ -337,7 +337,8 @@ export const buildUsBankOffersVisibleJs = () => `
       var onOffers = href.indexOf('cashback-deals') !== -1
         || href.indexOf('dominjection/cashback-deals') !== -1
         || /cash\\s*back\\s*deals/i.test(text);
-      // Honest signed-in chrome only — never force true from URL match alone.
+      // Honest signed-in chrome — Log out is often hidden in a closed menu on
+      // OfferHub / post-login home, so also accept authenticated deals UI.
       var signedIn = (/log\\s*out/i.test(text) || /sign\\s*off/i.test(text))
         && !/log\\s*in/i.test(leading)
         && !/sign\\s*on/i.test(leading);
@@ -356,12 +357,20 @@ export const buildUsBankOffersVisibleJs = () => `
       var onMarketingHome = href.indexOf('www.usbank.com') !== -1
         || (/^https?:\\/\\/([^/]*\\.)?usbank\\.com(\\/|$)/i.test(href)
           && href.indexOf('onlinebanking.usbank.com') === -1);
-      // Stale cookie: not-found, logged-out deals, home/dashboard, or marketing home.
+      // OfferHub with live deals and no Account login / Log in chrome ≈ session ok.
+      if (!signedIn && onOffers && !onLoginForm
+          && !/account\\s*login/i.test(leading)
+          && !/log\\s*in/i.test(leading)
+          && (/cash\\s*back/i.test(text) || /\\d+\\s*%/.test(text) || /activate/i.test(text))) {
+        signedIn = true;
+      }
+      // Stale cookie: not-found, logged-out deals, Log-in home shell, or marketing.
+      // Authenticated post-login home (no Log in) is NOT expired — goToOffers hops.
       // Do NOT treat MFA / soft-token pages (non-login, non-offers) as expired.
       var expired = !signedIn && !onLoginForm && (
         pageNotFound
         || (onOffers && /log\\s*in/i.test(leading))
-        || onHomeShell
+        || (onHomeShell && /log\\s*in/i.test(leading))
         || onMarketingHome
       );
       if (window.ReactNativeWebView) {
@@ -370,6 +379,7 @@ export const buildUsBankOffersVisibleJs = () => `
           onOffers: !!onOffers,
           signedIn: !!signedIn,
           onLoginForm: !!onLoginForm,
+          onHomeShell: !!onHomeShell,
           expired: !!expired,
         }));
         // Keep legacy offers message so auto-start / older handlers still see it.

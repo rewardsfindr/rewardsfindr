@@ -185,6 +185,8 @@ export default function SyncWebView({ visible, bank, onClose, onSuccess }) {
   const usBankSignedInRef   = useRef(false);
   const citiLoginForcedRef  = useRef(false);
   const usBankLoginForcedRef = useRef(false);
+  /** Saw US Bank Account login this sheet — enables post-login home → offers hop. */
+  const usBankSawLoginRef   = useRef(false);
   const amexCardsReadyRef   = useRef(false);
 
   const [syncMode, setSyncMode]             = useState(SYNC_MODES.AUTH);
@@ -506,6 +508,7 @@ export default function SyncWebView({ visible, bank, onClose, onSuccess }) {
       usBankSignedInRef.current   = false;
       citiLoginForcedRef.current  = false;
       usBankLoginForcedRef.current = false;
+      usBankSawLoginRef.current   = false;
       amexCardsReadyRef.current   = false;
       syncModeRef.current         = SYNC_MODES.AUTH;
       if (amexWaitRef.current) clearTimeout(amexWaitRef.current);
@@ -878,6 +881,7 @@ export default function SyncWebView({ visible, bank, onClose, onSuccess }) {
         setUsBankSignedIn(false);
         // Allow a fresh force-login if we leave and return to a stale shell.
         usBankLoginForcedRef.current = false;
+        usBankSawLoginRef.current = true;
       }
       return;
     }
@@ -2240,13 +2244,18 @@ export default function SyncWebView({ visible, bank, onClose, onSuccess }) {
         const onOffers = data.onOffers === true;
         const signedIn = data.signedIn === true;
         const onLoginForm = data.onLoginForm === true;
+        const onHomeShell = data.onHomeShell === true;
         const expired = data.expired === true;
         if (onOffers) offersRedirectRef.current = false;
         setOnOffersPage(onOffers);
         setUsBankSignedIn(signedIn);
         setOnLoginPage(onLoginForm || (expired && !signedIn && !onOffers));
         if (signedIn) setOnLoginPage(false);
-        if (onLoginForm) usBankLoginForcedRef.current = false;
+        if (onLoginForm) {
+          usBankLoginForcedRef.current = false;
+          usBankSawLoginRef.current = true;
+        }
+        const leftLogin = usBankSawLoginRef.current && !onLoginForm;
 
         const waiting =
           syncModeRef.current === SYNC_MODES.AUTH
@@ -2272,6 +2281,8 @@ export default function SyncWebView({ visible, bank, onClose, onSuccess }) {
             onLoginForm,
             syncStarted: syncStartedRef.current,
             offersRedirected: offersRedirectRef.current,
+            leftLogin,
+            onHomeShell,
           })
         ) {
           goToOffers();

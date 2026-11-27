@@ -720,6 +720,19 @@ test('force US Bank Cash Back Deals after login (fresh or expired→login)', () 
     shouldForceUsBankOffersRedirect({
       onOffers: false,
       signedIn: false,
+      onLoginForm: false,
+      leftLogin: true,
+      onHomeShell: true,
+      syncStarted: false,
+      offersRedirected: false,
+    }),
+    true,
+    'post Account-login banking home → Cash Back Deals',
+  );
+  assert.equal(
+    shouldForceUsBankOffersRedirect({
+      onOffers: false,
+      signedIn: false,
       onLoginForm: true,
       syncStarted: false,
       offersRedirected: false,
@@ -736,6 +749,19 @@ test('force US Bank Cash Back Deals after login (fresh or expired→login)', () 
     }),
     false,
     'must not yank off MFA / Arkose (no login form, not signedIn yet)',
+  );
+  assert.equal(
+    shouldForceUsBankOffersRedirect({
+      onOffers: false,
+      signedIn: false,
+      onLoginForm: false,
+      leftLogin: true,
+      onHomeShell: false,
+      syncStarted: false,
+      offersRedirected: false,
+    }),
+    false,
+    'left login alone (MFA mid-auth) must not goToOffers',
   );
   assert.equal(
     shouldForceUsBankOffersRedirect({
@@ -1186,10 +1212,13 @@ test('SyncWebView wires US Bank auto-start without Chase-only gates', () => {
   // Offers-ready only from honest signedIn message — not URL cashback-deals alone.
   assert.match(src, /data\.signedIn === true/);
   assert.match(src, /URL alone never marks offers-ready/);
-  // Expired / signed-out → official loginUrl; signedIn → offersUrl (Citi-shaped).
+  // Expired / signed-out → official loginUrl; signedIn / post-login home → offersUrl.
   assert.match(src, /US_BANK_PAGE_STATE/);
   assert.match(src, /shouldForceUsBankLogin/);
   assert.match(src, /shouldForceUsBankOffersRedirect/);
+  assert.match(src, /usBankSawLoginRef/);
+  assert.match(src, /leftLogin/);
+  assert.match(src, /onHomeShell/);
   assert.match(src, /goToUsBankLogin/);
   assert.match(src, /buildUsBankForceLoginJs/);
   assert.match(src, /const goToOffers = \(\) => \{[\s\S]*?config\.offersUrl/);

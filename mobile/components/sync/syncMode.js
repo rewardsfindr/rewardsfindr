@@ -314,8 +314,10 @@ export function shouldForceUsBankLogin({
 
 /**
  * After US Bank sign-on (fresh or expired→login), land on Cash Back Deals.
- * Only hop once honest Log out / Sign Off chrome is present (`signedIn`).
- * Do not yank from MFA / Arkose / soft-token pages that lack Username+Password.
+ * Hop when signedIn chrome is present, or after Account login when the bank
+ * drops the user on online-banking home (Log out often menu-only).
+ * Do not yank from MFA / Arkose / soft-token pages that lack Username+Password
+ * and are not a home shell after login.
  */
 export function shouldForceUsBankOffersRedirect({
   onOffers = false,
@@ -323,12 +325,17 @@ export function shouldForceUsBankOffersRedirect({
   onLoginForm = false,
   syncStarted = false,
   offersRedirected = false,
+  leftLogin = false,
+  onHomeShell = false,
 } = {}) {
   if (syncStarted) return false;
   if (offersRedirected) return false;
   if (onOffers) return false;
   if (onLoginForm) return false;
-  return signedIn === true;
+  if (signedIn === true) return true;
+  // Post Account-login banking home → Cash Back Deals (Citi goToOffers shape).
+  if (leftLogin === true && onHomeShell === true) return true;
+  return false;
 }
 
 /**
