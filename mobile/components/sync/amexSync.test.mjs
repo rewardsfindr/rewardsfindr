@@ -1,11 +1,17 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
+import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import {
   AMEX_OPEN_AND_DETECT_JS,
   AMEX_SWITCH_TIMEOUT_MS,
+  applyAmexCardsDetected,
   buildAmexJsonCaptureJs,
   buildAmexSwitchCardJs,
 } from './amexSync.js';
+
+const HERE = dirname(fileURLToPath(import.meta.url));
 
 test('AMEX_SWITCH_TIMEOUT_MS is the prior shared Amex switch wait', () => {
   assert.equal(AMEX_SWITCH_TIMEOUT_MS, 3500);
@@ -201,34 +207,119 @@ test('card detection reads an already open menu without clicking it shut', () =>
   assert.equal(messages[0].cards[0].selected, true);
 });
 
-test('card detection falls back to every option when product options are absent', () => {
-  const option = new El({
-    role: 'option',
-    'data-testid': 'offer-filter',
-    'aria-selected': 'false',
-  }, [
-    new El({ 'data-testid': 'simple_switcher_display_name', text: 'Blue Cash' }),
-    new El({ 'data-testid': 'simple_switcher_display_number_val', text: '1008' }),
-  ]);
+function amexSwitcherDocument({ products = [], extras = [], listboxId = 'simple-switcher-listbox' } = {}) {
   const combobox = new El({
     'data-testid': 'simple_switcher_combobox',
     'aria-expanded': 'true',
+    'aria-controls': listboxId,
   });
-  const document = {
+  const listbox = new El({
+    id: listboxId,
+    role: 'listbox',
+    'data-testid': 'simple_switcher_listbox',
+  }, products);
+  const roots = [combobox, listbox, ...extras];
+  const byId = { [listboxId]: listbox };
+  return {
+    getElementById(id) { return byId[id] || null; },
     querySelector(selector) { return this.querySelectorAll(selector)[0] || null; },
     querySelectorAll(selector) {
       const found = [];
-      for (const root of [combobox, option]) {
+      for (const root of roots) {
         if (matches(root, selector)) found.push(root);
         found.push(...root.querySelectorAll(selector));
       }
       return found;
     },
   };
+}
+
+test('card detection ignores offer filter role=option rows (no phantom cards)', () => {
+  const platinum = new El({
+    role: 'option',
+    'data-testid': 'simple_switcher_product_option_CARD_PRODUCT_ONE',
+    'aria-selected': 'true',
+  }, [
+    new El({ 'data-testid': 'simple_switcher_display_name', text: 'Platinum' }),
+    new El({ 'data-testid': 'simple_switcher_display_number_val', text: '2009' }),
+  ]);
+  const blue = new El({
+    role: 'option',
+    'data-testid': 'simple_switcher_product_option_CARD_PRODUCT_TWO',
+    'aria-selected': 'false',
+  }, [
+    new El({ 'data-testid': 'simple_switcher_display_name', text: 'Blue Cash' }),
+    new El({ 'data-testid': 'simple_switcher_display_number_val', text: '1008' }),
+  ]);
+  const filters = [
+    'multiSelectONLINE',
+    'multiSelectIN_STORE',
+    'multiSelectNEW',
+    'multiSelectFEATURED',
+    'multiSelectSTATEMENT_CREDIT',
+    'multiSelectEXTRA_REWARDS',
+    'selectCustomDINING',
+    'selectCustomTRAVEL',
+    'selectCustomSHOPPING',
+    'selectCustomENTERTAINMENT',
+    'selectCustomSERVICES',
+  ].map((testId) => new El({ role: 'option', 'data-testid': testId, 'aria-selected': 'false' }, [
+    new El({ attrs: {}, children: [] }),
+  ]));
+  // Give filters visible text like the live DOM (no display_name).
+  filters.forEach((f, i) => { f.attrs.text = `Filter${i}`; });
+
+  const document = amexSwitcherDocument({
+    products: [platinum, blue],
+    extras: filters,
+  });
+  const { messages } = runScript(AMEX_OPEN_AND_DETECT_JS, document);
+  assert.equal(messages[0].cards.length, 2);
+  assert.deepEqual(
+    messages[0].cards.map((c) => c.label),
+    ['Platinum', 'Blue Cash'],
+  );
+});
+
+test('card detection returns no cards for filters-only role=option (no CARD_PRODUCT)', () => {
+  const filters = ['multiSelectONLINE', 'selectCustomDINING'].map(
+    (testId) => new El({ role: 'option', 'data-testid': testId, text: 'Online' }),
+  );
+  const document = amexSwitcherDocument({ products: [], extras: filters });
+  const { messages } = runScript(AMEX_OPEN_AND_DETECT_JS, document);
+  assert.equal(messages[0].cards.length, 0);
+});
+
+test('card detection skips Overview, closed checking, and keeps enrolled product options', () => {
+  const overview = new El({
+    role: 'option',
+    'data-testid': 'simple_switcher_static_option_ALL',
+  }, [
+    new El({ 'data-testid': 'simple_switcher_display_name', text: 'Overview' }),
+  ]);
+  const checking = new El({
+    role: 'option',
+    'data-testid': 'simple_switcher_product_option_AEXP_PERSONAL_CHECKING_ACCOUNT_X',
+    text: 'American Express Rewards Checking ••••0154 Closed',
+  }, [
+    new El({ 'data-testid': 'simple_switcher_display_name', text: 'American Express Rewards Checking' }),
+    new El({ 'data-testid': 'simple_switcher_display_number_val', text: '0154' }),
+  ]);
+  const enrolled = new El({
+    role: 'option',
+    'data-testid': 'simple_switcher_product_option_12345',
+    'aria-selected': 'true',
+  }, [
+    new El({ 'data-testid': 'simple_switcher_display_name', text: 'Platinum' }),
+    new El({ 'data-testid': 'simple_switcher_display_number_val', text: '2009' }),
+  ]);
+  const document = amexSwitcherDocument({
+    products: [overview, checking, enrolled],
+  });
   const { messages } = runScript(AMEX_OPEN_AND_DETECT_JS, document);
   assert.equal(messages[0].cards.length, 1);
-  assert.equal(messages[0].cards[0].label, 'Blue Cash');
-  assert.equal(messages[0].cards[0].testId, 'offer-filter');
+  assert.equal(messages[0].cards[0].label, 'Platinum');
+  assert.equal(messages[0].cards[0].testId, 'simple_switcher_product_option_12345');
 });
 
 class DeferredXHR {
@@ -341,4 +432,79 @@ test('an unarmed Amex capture posts nothing', async () => {
   xhr.send();
   await wait(900);
   assert.deepEqual(messages, []);
+});
+
+test('empty AMEX_CARDS_DETECTED does not latch discovered (Chase-shaped)', () => {
+  const empty = applyAmexCardsDetected({
+    cards: [],
+    cardsDiscovered: false,
+    cardOptions: [],
+  });
+  assert.equal(empty.hasCards, false);
+  assert.equal(empty.cardsDiscovered, false);
+  assert.equal(empty.populated, false);
+  assert.equal(empty.amexCardsReady, false);
+  assert.deepEqual(empty.cardOptions, []);
+});
+
+test('empty then honest cards populates cardOptions for startAmexCapture', () => {
+  const afterEmpty = applyAmexCardsDetected({
+    cards: [],
+    cardsDiscovered: false,
+    cardOptions: [],
+  });
+  const twoCards = [
+    { label: 'Blue Cash', last4: '1008', testId: 'CARD_PRODUCT_1', selected: true },
+    { label: 'Gold', last4: '2009', testId: 'CARD_PRODUCT_2', selected: false },
+  ];
+  const afterCards = applyAmexCardsDetected({
+    cards: twoCards,
+    cardsDiscovered: afterEmpty.cardsDiscovered,
+    cardOptions: afterEmpty.cardOptions,
+  });
+  assert.equal(afterCards.hasCards, true);
+  assert.equal(afterCards.cardsDiscovered, true);
+  assert.equal(afterCards.populated, true);
+  assert.equal(afterCards.amexCardsReady, true);
+  assert.equal(afterCards.cardOptions.length, 2);
+  assert.equal(afterCards.selectedIndex, 0);
+  // startAmexCapture requires cardOptionsRef.length > 0 once ready.
+  assert.ok(afterCards.amexCardsReady && afterCards.cardOptions.length > 0);
+});
+
+test('already-populated list is not overwritten by a later detect', () => {
+  const first = [
+    { label: 'Blue Cash', last4: '1008', testId: 'CARD_PRODUCT_1', selected: true },
+  ];
+  const second = [
+    { label: 'Gold', last4: '2009', testId: 'CARD_PRODUCT_2', selected: true },
+    { label: 'Platinum', last4: '3001', testId: 'CARD_PRODUCT_3', selected: false },
+  ];
+  const seeded = applyAmexCardsDetected({
+    cards: first,
+    cardsDiscovered: false,
+    cardOptions: [],
+  });
+  const again = applyAmexCardsDetected({
+    cards: second,
+    cardsDiscovered: seeded.cardsDiscovered,
+    cardOptions: seeded.cardOptions,
+  });
+  assert.equal(again.populated, false);
+  assert.equal(again.cardOptions.length, 1);
+  assert.equal(again.cardOptions[0].testId, 'CARD_PRODUCT_1');
+});
+
+test('SyncWebView applies Amex cards via applyAmexCardsDetected (no empty latch)', () => {
+  const src = readFileSync(join(HERE, '..', 'SyncWebView.js'), 'utf8');
+  assert.match(src, /applyAmexCardsDetected/);
+  const handler = src.match(
+    /if \(data\.type === 'AMEX_CARDS_DETECTED'\) \{[\s\S]*?return;\n      \}/,
+  )?.[0] || '';
+  assert.match(handler, /applyAmexCardsDetected/);
+  assert.doesNotMatch(
+    handler,
+    /if \(!cardsDiscovered\.current\) cardsDiscovered\.current = true/,
+  );
+  assert.match(handler, /cardsDiscovered\.current = applied\.cardsDiscovered/);
 });
