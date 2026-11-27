@@ -258,11 +258,11 @@ The current list is in **Where we left off** at the top of this file. The March 
 9. ☐ **Amex offer sync** — Wire up Amex bank in SyncWebView (config already present)
 
 ### Post-MVP
-10. ☐ Add tests — API (Jest + supertest), Mobile (React Native Testing Library)
-11. ☐ Deploy API — Railway or Render with prod Firebase project
-12. ☐ EAS production builds — Android/iOS app store builds
-13. ☐ Capital One scraper
-14. ☐ Consider further repo splits (mobile/api) if needed
+10. ☐ Add tests — Mobile (React Native Testing Library)
+11. ☐ EAS production builds — Android/iOS app store builds
+12. ☐ Capital One scraper
+13. ☑ Clear unused GitHub Environments (Preview/Production) so PRs stop showing Deployments — done 2026-11-26; see `docs/retire-cloud-run.md`
+
 
 ---
 
