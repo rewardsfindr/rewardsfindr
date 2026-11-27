@@ -32,7 +32,22 @@ test('Amex capture wait constants and nudge re-click keep capture armed', () => 
   assert.match(nudge, /__amexCaptureGeneration/);
   const refresh = buildAmexForceOffersRefreshJs();
   assert.match(refresh, /__amexJsonCaptureArmed = true/);
+  // Live Amex filters use multiSelect*/selectCustom*, not only *filter*.
+  assert.match(refresh, /multiSelect/);
+  assert.match(refresh, /selectCustom/);
   assert.match(refresh, /filter/);
+});
+
+test('Amex switch JS can poke offer filters soon after an armed card click', () => {
+  const plain = buildAmexSwitchCardJs('CARD_PRODUCT_1');
+  assert.doesNotMatch(plain, /pokeOffersRefresh/);
+  assert.doesNotMatch(plain, /multiSelect/);
+  const armed = buildAmexSwitchCardJs('CARD_PRODUCT_1', AMEX_SWITCH_TIMEOUT_MS, {
+    refreshAfterClick: true,
+  });
+  assert.match(armed, /multiSelect/);
+  assert.match(armed, /pokeOffersRefresh/);
+  assert.match(armed, /setTimeout\(pokeOffersRefresh, 600\)/);
 });
 
 class El {
@@ -585,6 +600,8 @@ test('SyncWebView never advances Amex walk on capture timeout; walks display ord
   assert.match(src, /timeout without CAPTURE_JSON/);
   assert.match(src, /ignore stale CARD_SWITCHED/);
   assert.match(src, /bounce via other card/);
+  assert.match(src, /refreshAfterClick:\s*true/);
+  assert.match(src, /buildAmexSwitchCardJs\(other\.testId, 1200\)/);
   assert.doesNotMatch(src, /advanceAmexSync\(amexExpectedRef\.current\)/);
   // Opaque cover (no WebView flash through alpha).
   assert.match(src, /backgroundColor: '#F0F7EE'/);

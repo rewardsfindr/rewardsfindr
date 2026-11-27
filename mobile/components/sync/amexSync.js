@@ -162,31 +162,80 @@ export const buildAmexNudgeRecaptureJs = (testId) => `
 `;
 
 /**
+ * Shared filter-chip poke used to force ReadOffersHubPresentation.
+ * Amex offer filters are role=option with multiSelect* / selectCustom* testIds
+ * (not data-testid*="filter") — those are what live CDP counted as "phantom cards".
+ */
+const AMEX_FORCE_OFFERS_REFRESH_INNER = `
+  window.__amexJsonCaptureArmed = true;
+  function amexOfferFilterChip(selectedOnly) {
+    var selected = document.querySelector(
+      '[role="option"][data-testid^="multiSelect"][aria-selected="true"],' +
+      '[role="option"][data-testid^="selectCustom"][aria-selected="true"],' +
+      '[data-testid*="filter"][aria-pressed="true"],' +
+      '[data-testid*="filter"][aria-selected="true"]'
+    );
+    if (selectedOnly) return selected;
+    return selected
+      || document.querySelector(
+        '[role="option"][data-testid^="multiSelect"],' +
+        '[role="option"][data-testid^="selectCustom"],' +
+        '[data-testid*="filter-all"],' +
+        '[data-testid*="RECOMMENDED"]'
+      );
+  }
+  function toggleChip(chip) {
+    if (!chip) return false;
+    chip.click();
+    setTimeout(function() {
+      try { chip.click(); } catch (e2) {}
+    }, 450);
+    return true;
+  }
+  if (toggleChip(amexOfferFilterChip(false))) {
+    /* toggled */
+  }
+`;
+
+/**
  * After the target card is selected, poke Amex filters so ReadOffersHubPresentation
  * fires even when the SPA would otherwise reuse a cached card payload.
  */
 export const buildAmexForceOffersRefreshJs = () => `
   (function() {
     try {
-      window.__amexJsonCaptureArmed = true;
-      var pressed = document.querySelector(
-        '[data-testid*="filter"][aria-pressed="true"], [data-testid*="filter"][aria-selected="true"]'
-      );
-      if (pressed) {
-        pressed.click();
-        setTimeout(function() {
-          try { pressed.click(); } catch (e2) {}
-        }, 450);
-        return;
-      }
-      var allChip = document.querySelector('[data-testid*="filter-all"], [data-testid*="RECOMMENDED"]');
-      if (allChip) allChip.click();
+      ${AMEX_FORCE_OFFERS_REFRESH_INNER}
     } catch (e) { /* best-effort */ }
   })();
   true;
 `;
 
-export const buildAmexSwitchCardJs = (testId, timeoutMs = AMEX_SWITCH_TIMEOUT_MS) => `
+/**
+ * @param {string} testId
+ * @param {number} [timeoutMs]
+ * @param {{ refreshAfterClick?: boolean }} [opts]
+ *   When refreshAfterClick, poke offer filters ~600ms after the option click so a
+ *   cached card still emits ReadOffersHubPresentation before CARD_SWITCHED.
+ */
+export const buildAmexSwitchCardJs = (
+  testId,
+  timeoutMs = AMEX_SWITCH_TIMEOUT_MS,
+  opts = {},
+) => {
+  const refreshAfterClick = Boolean(opts && opts.refreshAfterClick);
+  const refreshHelper = refreshAfterClick
+    ? `
+      function pokeOffersRefresh() {
+        try {
+          ${AMEX_FORCE_OFFERS_REFRESH_INNER}
+        } catch (eRefresh) { /* best-effort */ }
+      }
+    `
+    : '';
+  const refreshCall = refreshAfterClick
+    ? 'setTimeout(pokeOffersRefresh, 600);'
+    : '';
+  return `
   (function() {
     try {
       var combobox = document.querySelector('[data-testid="simple_switcher_combobox"]');
@@ -195,6 +244,7 @@ export const buildAmexSwitchCardJs = (testId, timeoutMs = AMEX_SWITCH_TIMEOUT_MS
         return;
       }
       var requested = ${JSON.stringify(testId)};
+      ${refreshHelper}
       function choose(attempt) {
         var option = document.querySelector('[data-testid="' + requested + '"]');
         if (!option) {
@@ -212,6 +262,7 @@ export const buildAmexSwitchCardJs = (testId, timeoutMs = AMEX_SWITCH_TIMEOUT_MS
         window.__amexBest = null;
         clearTimeout(window.__amexQuietTimer);
         option.click();
+        ${refreshCall}
         setTimeout(function() {
           var displayEl = document.querySelector('[data-testid="simple_switcher_selected_option_display"]');
           var nameEl    = displayEl ? displayEl.querySelector('[data-testid="simple_switcher_display_name"]') : null;
@@ -238,6 +289,7 @@ export const buildAmexSwitchCardJs = (testId, timeoutMs = AMEX_SWITCH_TIMEOUT_MS
   })();
   true;
 `;
+};
 
 export const AMEX_READ_CARD_LABEL_JS = `
   (function() {
@@ -256,11 +308,19 @@ export const buildAmexClearFiltersJs = () => `
   (function() {
     try {
       var activeFilters = document.querySelectorAll(
-        '[data-testid*="filter"][aria-pressed="true"], [data-testid*="filter"][aria-selected="true"]'
+        '[role="option"][data-testid^="multiSelect"][aria-selected="true"],' +
+        '[role="option"][data-testid^="selectCustom"][aria-selected="true"],' +
+        '[data-testid*="filter"][aria-pressed="true"],' +
+        '[data-testid*="filter"][aria-selected="true"]'
       );
       activeFilters.forEach(function(chip) { chip.click(); });
-      var allChip = document.querySelector('[data-testid*="filter-all"], [data-testid*="RECOMMENDED"]');
-      if (allChip && allChip.getAttribute('aria-pressed') !== 'true') {
+      var allChip = document.querySelector(
+        '[data-testid*="filter-all"], [data-testid*="RECOMMENDED"],' +
+        '[role="option"][data-testid^="multiSelect"],' +
+        '[role="option"][data-testid^="selectCustom"]'
+      );
+      if (allChip && allChip.getAttribute('aria-selected') !== 'true'
+          && allChip.getAttribute('aria-pressed') !== 'true') {
         allChip.click();
       }
     } catch(e) { /* silent — filter clear is best-effort */ }

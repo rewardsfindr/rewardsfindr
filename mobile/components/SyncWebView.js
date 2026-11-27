@@ -480,11 +480,17 @@ export default function SyncWebView({ visible, bank, onClose, onSuccess }) {
     armStepTimer();
     webViewRef.current?.injectJavaScript(buildAmexJsonCaptureJs());
 
-    const alreadyOn = amexDomSelectedRef.current === card.testId;
+    // Prefer live DOM selection ref; fall back to detect's selected flag so the
+    // first walk card still bounces when Amex opened already on that product.
+    const domSelected = amexDomSelectedRef.current
+      || cards.find((c) => c?.selected)?.testId
+      || null;
+    const alreadyOn = domSelected === card.testId;
     if (alreadyOn) {
       const other = cards.find((c) => c?.testId && c.testId !== card.testId);
       if (other) {
         // Bounce off this card unarmed, then CARD_SWITCHED arms the real switch back.
+        // Short confirm — we only need the SPA to leave the cached card.
         console.log('[amex-capture] bounce via other card', {
           target: card.testId,
           via: other.testId,
@@ -497,7 +503,7 @@ export default function SyncWebView({ visible, bank, onClose, onSuccess }) {
         setSyncing(false);
         setSwitching(true);
         webViewRef.current?.injectJavaScript(
-          buildAmexSwitchCardJs(other.testId, AMEX_SWITCH_TIMEOUT_MS),
+          buildAmexSwitchCardJs(other.testId, 1200),
         );
         return true;
       }
@@ -521,7 +527,9 @@ export default function SyncWebView({ visible, bank, onClose, onSuccess }) {
     setSyncing(false);
     setSwitching(true);
     webViewRef.current?.injectJavaScript(
-      buildAmexSwitchCardJs(card.testId, AMEX_SWITCH_TIMEOUT_MS),
+      buildAmexSwitchCardJs(card.testId, AMEX_SWITCH_TIMEOUT_MS, {
+        refreshAfterClick: true,
+      }),
     );
     return true;
   };
