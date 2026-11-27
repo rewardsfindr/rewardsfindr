@@ -75,10 +75,12 @@ export const BANK_CONFIG = {
     loginPaths: ['/login', '/signon', '/sign-on', 'parent-interstitial', 'pageNotFound', 'www.citi.com'],
   },
   us_bank: {
-    // Mobile-web sign-on entry. After login, navigate / detect Cash Back Deals
-    // via offersUrl + offersPaths; auto-start still needs honest signedIn.
-    url: 'https://onlinebanking.usbank.com/auth/login/?channel=mobileweb',
+    // Cash Back Deals entry — warm sessions stay here. Expired/stale cookies can
+    // paint home / not-found / signed-out deals; SyncWebView then forces loginUrl
+    // and returns to offersUrl after sign-on (same idea as Citi #87).
+    url: 'https://onlinebanking.usbank.com/digital/servicing/dominjection/cashback-deals',
     offersUrl: 'https://onlinebanking.usbank.com/digital/servicing/dominjection/cashback-deals',
+    loginUrl: 'https://onlinebanking.usbank.com/auth/login/?channel=mobileweb',
     label: 'US Bank Offers',
     color: '#0c2074',
     offersPaths: ['cashback-deals', 'dominjection/cashback-deals'],

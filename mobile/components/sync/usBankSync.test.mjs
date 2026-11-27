@@ -11,10 +11,13 @@ import {
   buildUsBankOfferCaptureJs,
   buildUsBankOffersVisibleJs,
   buildUsBankChallengeVisibleJs,
+  buildUsBankForceLoginJs,
   buildUsBankReadJs,
   buildUsBankCaptureWhenReadyJs,
   US_BANK_CAPTURE_READY_TIMEOUT_MS,
   US_BANK_CAPTURE_POLL_MS,
+  US_BANK_LOGIN_URL,
+  US_BANK_OFFERS_URL,
   stripUsBankOffers,
 } from './usBankSync.js';
 
@@ -111,7 +114,7 @@ function readOffers(window, messages) {
   return messages.at(-1);
 }
 
-test('US Bank opens mobile-web login and is marked supported', () => {
+test('US Bank opens Cash Back Deals with loginUrl force path and is marked supported', () => {
   const usBank = BANK_LIST.find((bank) => bank.id === 'us_bank');
   assert.equal(usBank.supported, true);
   assert.equal(usBank.label, 'US Bank');
@@ -120,17 +123,13 @@ test('US Bank opens mobile-web login and is marked supported', () => {
     assert.equal(BANK_LIST.find((bank) => bank.id === id).supported, false);
   }
   const config = BANK_CONFIG.us_bank;
-  assert.equal(
-    config.url,
-    'https://onlinebanking.usbank.com/auth/login/?channel=mobileweb',
-  );
-  assert.equal(
-    config.offersUrl,
-    'https://onlinebanking.usbank.com/digital/servicing/dominjection/cashback-deals',
-  );
-  assert.notEqual(config.url, config.offersUrl);
+  assert.equal(config.url, US_BANK_OFFERS_URL);
+  assert.equal(config.offersUrl, US_BANK_OFFERS_URL);
+  assert.equal(config.loginUrl, US_BANK_LOGIN_URL);
+  assert.equal(config.url, config.offersUrl);
+  assert.notEqual(config.loginUrl, config.offersUrl);
   assert.ok(config.loginPaths.some((path) => path.includes('/auth/login')));
-  assert.ok(config.url.toLowerCase().includes('/auth/login'));
+  assert.ok(config.loginUrl.toLowerCase().includes('/auth/login'));
   assert.ok(config.offersPaths.some((path) => config.offersUrl.toLowerCase().includes(path.toLowerCase())));
 
   const faq = FAQ_ITEMS.find((item) => item.q === 'Which banks are supported?');
@@ -141,27 +140,24 @@ test('US Bank opens mobile-web login and is marked supported', () => {
   assert.equal(CONNECT_BANK_COPY.footnote.includes('US Bank'), false);
 });
 
-test('SyncWebView post-login goToOffers targets US Bank offersUrl', () => {
+test('SyncWebView force-login and post-login goToOffers target US Bank loginUrl/offersUrl', () => {
   const syncSource = readRepoFile('..', 'SyncWebView.js');
-  const usBankLoadEnd = syncSource.match(
-    /if \(bank === 'us_bank'\) \{[\s\S]*?return;\n    \}\n\n    if \(bank === 'amex'\)/,
-  )?.[0] || '';
-  assert.match(usBankLoadEnd, /goToOffers\(\)/);
-  assert.match(usBankLoadEnd, /onOffersUrl/);
-  assert.match(usBankLoadEnd, /SYNC_MODES\.AUTH/);
-  assert.match(usBankLoadEnd, /SYNC_MODES\.NEEDS_INPUT/);
+  assert.match(syncSource, /shouldForceUsBankLogin/);
+  assert.match(syncSource, /shouldForceUsBankOffersRedirect/);
+  assert.match(syncSource, /goToUsBankLogin/);
+  assert.match(syncSource, /buildUsBankForceLoginJs/);
+  assert.match(syncSource, /US_BANK_PAGE_STATE/);
   const goToOffersBlock = syncSource.match(
     /const goToOffers = \(\) => \{[\s\S]*?\};\n/,
   )?.[0] || '';
   assert.match(goToOffersBlock, /config\.offersUrl \|\| config\.url/);
-  assert.equal(
-    BANK_CONFIG.us_bank.offersUrl,
-    'https://onlinebanking.usbank.com/digital/servicing/dominjection/cashback-deals',
-  );
-  assert.equal(
-    BANK_CONFIG.us_bank.url,
-    'https://onlinebanking.usbank.com/auth/login/?channel=mobileweb',
-  );
+  const goToLoginBlock = syncSource.match(
+    /const goToUsBankLogin = \(\) => \{[\s\S]*?\};\n/,
+  )?.[0] || '';
+  assert.match(goToLoginBlock, /config\.loginUrl \|\| US_BANK_LOGIN_URL/);
+  assert.equal(BANK_CONFIG.us_bank.offersUrl, US_BANK_OFFERS_URL);
+  assert.equal(BANK_CONFIG.us_bank.loginUrl, US_BANK_LOGIN_URL);
+  assert.equal(BANK_CONFIG.us_bank.url, US_BANK_OFFERS_URL);
 });
 
 test('home BankGrid treats supported US Bank as tappable (+ Add), not Coming Soon', () => {
@@ -182,7 +178,9 @@ test('SyncWebView wires US Bank capture/when-ready/save like Wells Fargo', () =>
   assert.match(syncSource, /US_BANK_CAPTURE_READY_TIMEOUT_MS/);
   assert.match(syncSource, /bank === 'us_bank'/);
   assert.match(syncSource, /US_BANK_ON_OFFERS/);
+  assert.match(syncSource, /US_BANK_PAGE_STATE/);
   assert.match(syncSource, /US_BANK_CHALLENGE/);
+  assert.match(syncSource, /isAutoBank/);
   assert.match(syncSource, /US_BANK_CAPTURE_UNAVAILABLE/);
   assert.match(syncSource, /US_BANK_OFFERS/);
   assert.match(syncSource, /bank: 'us_bank'/);
@@ -230,6 +228,60 @@ test('US_BANK_CHALLENGE stays silent on plain login form', () => {
   assert.equal(messages.length, 0);
 });
 
+test('US_BANK_PAGE_STATE marks logged-out deals as expired; login form is not', () => {
+  function run(href, text) {
+    const messages = [];
+    const window = {
+      location: { href },
+      ReactNativeWebView: { postMessage(raw) { messages.push(JSON.parse(raw)); } },
+    };
+    const document = { body: { innerText: text } };
+    new Function('window', 'document', buildUsBankOffersVisibleJs())(window, document);
+    return messages;
+  }
+  const dead = run(
+    'https://onlinebanking.usbank.com/digital/servicing/dominjection/cashback-deals',
+    'usbank\nLog in\nYour cash-back deals\nActivate deals',
+  );
+  const pageState = dead.find((m) => m.type === 'US_BANK_PAGE_STATE');
+  assert.ok(pageState);
+  assert.equal(pageState.onOffers, true);
+  assert.equal(pageState.signedIn, false);
+  assert.equal(pageState.onLoginForm, false);
+  assert.equal(pageState.expired, true);
+
+  const login = run(
+    'https://onlinebanking.usbank.com/auth/login/?channel=mobileweb',
+    'Account login\nUsername\nPassword\nLog in',
+  );
+  const loginState = login.find((m) => m.type === 'US_BANK_PAGE_STATE');
+  assert.ok(loginState);
+  assert.equal(loginState.onLoginForm, true);
+  assert.equal(loginState.expired, false);
+  assert.equal(loginState.signedIn, false);
+});
+
+test('force login clears storage and replaces to official loginUrl', () => {
+  assert.equal(US_BANK_LOGIN_URL, 'https://onlinebanking.usbank.com/auth/login/?channel=mobileweb');
+  const forceJs = buildUsBankForceLoginJs();
+  assert.match(forceJs, /localStorage/);
+  assert.match(forceJs, /sessionStorage/);
+  assert.match(forceJs, /location\.replace/);
+  assert.match(forceJs, /onlinebanking\.usbank\.com\/auth\/login/);
+  let replaced = null;
+  const window = {
+    localStorage: { clear() {} },
+    sessionStorage: { clear() {} },
+    location: {
+      replace(url) { replaced = url; },
+      href: 'https://onlinebanking.usbank.com/digital/servicing/dominjection/cashback-deals',
+    },
+  };
+  const document = { cookie: 'a=1; b=2' };
+  new Function('window', 'document', buildUsBankForceLoginJs(US_BANK_LOGIN_URL))(window, document);
+  assert.equal(replaced, US_BANK_LOGIN_URL);
+});
+
 test('US_BANK_ON_OFFERS posts signedIn false on logged-out deals URL', () => {
   const messages = [];
   const window = {
@@ -242,9 +294,13 @@ test('US_BANK_ON_OFFERS posts signedIn false on logged-out deals URL', () => {
     },
   };
   new Function('window', 'document', buildUsBankOffersVisibleJs())(window, document);
-  assert.equal(messages.length, 1);
-  assert.equal(messages[0].type, 'US_BANK_ON_OFFERS');
-  assert.equal(messages[0].signedIn, false);
+  const pageState = messages.find((m) => m.type === 'US_BANK_PAGE_STATE');
+  const onOffers = messages.find((m) => m.type === 'US_BANK_ON_OFFERS');
+  assert.ok(pageState);
+  assert.equal(pageState.signedIn, false);
+  assert.equal(pageState.expired, true);
+  assert.ok(onOffers);
+  assert.equal(onOffers.signedIn, false);
 });
 
 test('US_BANK_ON_OFFERS posts signedIn true with Log out chrome on deals', () => {
@@ -259,9 +315,13 @@ test('US_BANK_ON_OFFERS posts signedIn true with Log out chrome on deals', () =>
     },
   };
   new Function('window', 'document', buildUsBankOffersVisibleJs())(window, document);
-  assert.equal(messages.length, 1);
-  assert.equal(messages[0].type, 'US_BANK_ON_OFFERS');
-  assert.equal(messages[0].signedIn, true);
+  const pageState = messages.find((m) => m.type === 'US_BANK_PAGE_STATE');
+  const onOffers = messages.find((m) => m.type === 'US_BANK_ON_OFFERS');
+  assert.ok(pageState);
+  assert.equal(pageState.signedIn, true);
+  assert.equal(pageState.expired, false);
+  assert.ok(onOffers);
+  assert.equal(onOffers.signedIn, true);
 });
 
 test('stripUsBankOffers keeps offer fields and strips tokens and tracking', () => {

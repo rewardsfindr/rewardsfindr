@@ -87,9 +87,11 @@ import {
   buildUsBankOfferCaptureJs,
   buildUsBankOffersVisibleJs,
   buildUsBankChallengeVisibleJs,
+  buildUsBankForceLoginJs,
   buildUsBankCaptureWhenReadyJs,
   US_BANK_CAPTURE_READY_TIMEOUT_MS,
   US_BANK_CAPTURE_POLL_MS,
+  US_BANK_LOGIN_URL,
 } from './sync/usBankSync.js';
 import { parseCardLabel }                                 from './sync/cardLabel.js';
 import {
@@ -112,6 +114,8 @@ import {
   shouldForceChaseOffersRedirect,
   shouldForceCitiLogin,
   shouldForceCitiOffersRedirect,
+  shouldForceUsBankLogin,
+  shouldForceUsBankOffersRedirect,
   chaseCoverProgress,
   amexCoverProgress,
   amexCoverStatusLine,
@@ -180,6 +184,7 @@ export default function SyncWebView({ visible, bank, onClose, onSuccess }) {
   const citiSignedInRef     = useRef(false);
   const usBankSignedInRef   = useRef(false);
   const citiLoginForcedRef  = useRef(false);
+  const usBankLoginForcedRef = useRef(false);
   const amexCardsReadyRef   = useRef(false);
 
   const [syncMode, setSyncMode]             = useState(SYNC_MODES.AUTH);
@@ -500,6 +505,7 @@ export default function SyncWebView({ visible, bank, onClose, onSuccess }) {
       citiSignedInRef.current     = false;
       usBankSignedInRef.current   = false;
       citiLoginForcedRef.current  = false;
+      usBankLoginForcedRef.current = false;
       amexCardsReadyRef.current   = false;
       syncModeRef.current         = SYNC_MODES.AUTH;
       if (amexWaitRef.current) clearTimeout(amexWaitRef.current);
@@ -863,25 +869,15 @@ export default function SyncWebView({ visible, bank, onClose, onSuccess }) {
       webViewRef.current?.injectJavaScript(buildUsBankChallengeVisibleJs());
       if (!url) return;
       const onLogin = (config.loginPaths || []).some(p => url.includes(p.toLowerCase()));
-      const onOffersUrl = urlMatchesAnyPath(url, config.offersPaths);
-      // Never mark offers-ready from URL alone — honest signedIn arrives via
-      // US_BANK_ON_OFFERS. After login entry, leave Auth/NeedsInput dashboard
-      // for Cash Back Deals via goToOffers → config.offersUrl (Amex-shaped).
+      const onOffers = !onLogin && (config.offersPaths || []).some(p => url.includes(p.toLowerCase()));
+      // URL alone never marks offers-ready for auto-start — PAGE_STATE / signedIn
+      // drive force-login and post-login goToOffers (Citi-shaped).
+      setOnOffersPage(onOffers);
+      setOnLoginPage(onLogin && !onOffers);
       if (onLogin) {
-        setOnLoginPage(true);
-        setOnOffersPage(false);
         setUsBankSignedIn(false);
-        offersRedirectRef.current = false;
-      } else {
-        setOnLoginPage(false);
-        if (onOffersUrl) {
-          offersRedirectRef.current = false;
-        } else if (
-          (syncModeRef.current === SYNC_MODES.AUTH || syncModeRef.current === SYNC_MODES.NEEDS_INPUT)
-          && !syncStartedRef.current
-        ) {
-          goToOffers();
-        }
+        // Allow a fresh force-login if we leave and return to a stale shell.
+        usBankLoginForcedRef.current = false;
       }
       return;
     }
@@ -929,6 +925,14 @@ export default function SyncWebView({ visible, bank, onClose, onSuccess }) {
     citiLoginForcedRef.current = true;
     const target = config.loginUrl || CITI_LOGIN_URL;
     webViewRef.current?.injectJavaScript(buildCitiForceLoginJs(target));
+  };
+
+  const goToUsBankLogin = () => {
+    if (bank !== 'us_bank') return;
+    if (usBankLoginForcedRef.current || syncStartedRef.current) return;
+    usBankLoginForcedRef.current = true;
+    const target = config.loginUrl || US_BANK_LOGIN_URL;
+    webViewRef.current?.injectJavaScript(buildUsBankForceLoginJs(target));
   };
 
   /** Shared Chase start path for auto-start, Sync Offers, and Try again. */
@@ -2232,17 +2236,56 @@ export default function SyncWebView({ visible, bank, onClose, onSuccess }) {
         return;
       }
 
-      if (data.type === 'US_BANK_ON_OFFERS' && bank === 'us_bank') {
-        offersRedirectRef.current = false;
-        if (data.signedIn === true) {
-          setUsBankSignedIn(true);
-          setOnLoginPage(false);
-          setOnOffersPage(true);
-        } else {
-          // Logged-out deals / marketing shell — stay Auth until honest sign-in.
-          setUsBankSignedIn(false);
-          setOnOffersPage(false);
+      if (data.type === 'US_BANK_PAGE_STATE' && bank === 'us_bank') {
+        const onOffers = data.onOffers === true;
+        const signedIn = data.signedIn === true;
+        const onLoginForm = data.onLoginForm === true;
+        const expired = data.expired === true;
+        if (onOffers) offersRedirectRef.current = false;
+        setOnOffersPage(onOffers);
+        setUsBankSignedIn(signedIn);
+        setOnLoginPage(onLoginForm || (expired && !signedIn && !onOffers));
+        if (signedIn) setOnLoginPage(false);
+        if (onLoginForm) usBankLoginForcedRef.current = false;
+
+        const waiting =
+          syncModeRef.current === SYNC_MODES.AUTH
+          || syncModeRef.current === SYNC_MODES.NEEDS_INPUT;
+        if (
+          waiting
+          && shouldForceUsBankLogin({
+            expired,
+            onLoginForm,
+            signedIn,
+            syncStarted: syncStartedRef.current,
+            loginForced: usBankLoginForcedRef.current,
+          })
+        ) {
+          goToUsBankLogin();
+          return;
         }
+        if (
+          waiting
+          && shouldForceUsBankOffersRedirect({
+            onOffers,
+            signedIn,
+            onLoginForm,
+            syncStarted: syncStartedRef.current,
+            offersRedirected: offersRedirectRef.current,
+          })
+        ) {
+          goToOffers();
+        }
+        return;
+      }
+
+      if (data.type === 'US_BANK_ON_OFFERS' && bank === 'us_bank') {
+        // Legacy offers-only signal (still emitted alongside US_BANK_PAGE_STATE).
+        offersRedirectRef.current = false;
+        setOnOffersPage(true);
+        const signedIn = data.signedIn === true;
+        setUsBankSignedIn(signedIn);
+        if (signedIn) setOnLoginPage(false);
         return;
       }
 
@@ -2464,7 +2507,16 @@ export default function SyncWebView({ visible, bank, onClose, onSuccess }) {
       );
     }
 
-    const ready = onOffersPage && pageLoaded && (bank !== 'amex' || amexCardsReady);
+    // Auto-sync banks: never show Sync Offers on the happy / waiting path —
+    // only the failed footer keeps it as a manual fallback (Chase/Amex/Citi).
+    const isAutoBank = bank === 'chase'
+      || bank === 'wells_fargo'
+      || bank === 'citi'
+      || bank === 'us_bank'
+      || bank === 'amex';
+    if (isAutoBank) return null;
+
+    const ready = onOffersPage && pageLoaded;
     if (ready) return renderSyncButton();
     return null;
   };

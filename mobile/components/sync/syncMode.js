@@ -293,6 +293,45 @@ export function shouldForceCitiOffersRedirect({
 }
 
 /**
+ * Expired / signed-out US Bank shell → one-shot navigate to official login.
+ * Do not fire when Account login / Username+Password is already visible, or
+ * when honestly signed in (happy path stays on Cash Back Deals). Arkose stays
+ * on the login page as human NeedsInput — never auto-click Continue.
+ */
+export function shouldForceUsBankLogin({
+  expired = false,
+  onLoginForm = false,
+  signedIn = false,
+  syncStarted = false,
+  loginForced = false,
+} = {}) {
+  if (syncStarted) return false;
+  if (loginForced) return false;
+  if (signedIn === true) return false;
+  if (onLoginForm) return false;
+  return expired === true;
+}
+
+/**
+ * After US Bank sign-on (fresh or expired→login), land on Cash Back Deals.
+ * Only hop once honest Log out / Sign Off chrome is present (`signedIn`).
+ * Do not yank from MFA / Arkose / soft-token pages that lack Username+Password.
+ */
+export function shouldForceUsBankOffersRedirect({
+  onOffers = false,
+  signedIn = false,
+  onLoginForm = false,
+  syncStarted = false,
+  offersRedirected = false,
+} = {}) {
+  if (syncStarted) return false;
+  if (offersRedirected) return false;
+  if (onOffers) return false;
+  if (onLoginForm) return false;
+  return signedIn === true;
+}
+
+/**
  * After MFA / NeedsInput, plan the Chase resume action.
  * Never same-card switch — buildSwitchCardJs posts CARD_SWITCH_ERROR when the
  * menu stays on the current card, which would falsely enter failed.

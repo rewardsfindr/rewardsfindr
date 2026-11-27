@@ -296,6 +296,11 @@ export const buildUsBankOfferCaptureJs = () => `
   true;
 `;
 
+// Official US Bank mobile-web sign-on. Used when expired cookies leave Cash
+// Back Deals / home / not-found as a signed-out shell (same idea as Citi).
+export const US_BANK_LOGIN_URL = 'https://onlinebanking.usbank.com/auth/login/?channel=mobileweb';
+export const US_BANK_OFFERS_URL = 'https://onlinebanking.usbank.com/digital/servicing/dominjection/cashback-deals';
+
 // Detect Arkose / adaptive "Confirm you're a person" on the login shell.
 // Emulator/automation clicks are rejected — RN only uses this to uncover and
 // show NeedsInput copy so a human can tap Continue once. Never auto-click.
@@ -321,11 +326,8 @@ export const buildUsBankChallengeVisibleJs = () => `
   true;
 `;
 
-// Tells the app Cash Back Deals is on screen AND the user is signed in.
-// Entry often lands on the cashback-deals URL while logged out (marketing /
-// Log in chrome) — URL or "cash back deals" text alone must NOT fire.
-// Honest signedIn: Log out / Sign Off chrome without Log in / Sign On in the
-// leading text (same honesty bar as Citi Slice C).
+// Page probe for AUTH: offers surface, honest signedIn, real login form, and
+// expired/signed-out shells that must be forced to loginUrl.
 export const buildUsBankOffersVisibleJs = () => `
   (function() {
     try {
@@ -335,16 +337,73 @@ export const buildUsBankOffersVisibleJs = () => `
       var onOffers = href.indexOf('cashback-deals') !== -1
         || href.indexOf('dominjection/cashback-deals') !== -1
         || /cash\\s*back\\s*deals/i.test(text);
+      // Honest signed-in chrome only — never force true from URL match alone.
       var signedIn = (/log\\s*out/i.test(text) || /sign\\s*off/i.test(text))
         && !/log\\s*in/i.test(leading)
         && !/sign\\s*on/i.test(leading);
-      if (onOffers && window.ReactNativeWebView) {
+      // Real Account login form (or already on /auth/login). Arkose overlays this.
+      var onLoginForm = href.indexOf('/auth/login') !== -1
+        || ((/username/i.test(text) || /user\\s*id/i.test(text))
+          && /password/i.test(text)
+          && /log\\s*in/i.test(text));
+      var pageNotFound = href.indexOf('pagenotfound') !== -1
+        || href.indexOf('page-not-found') !== -1
+        || /page\\s*not\\s*found/i.test(text)
+        || /looks like that information isn.?t here/i.test(text);
+      var onHomeShell = /\\/(home|dashboard|overview|accounts?)(\\b|\\/|\\?|#|$)/i.test(href)
+        || /welcome\\s*to\\s*online\\s*banking/i.test(leading);
+      // Stale cookie: not-found, logged-out deals, or home/dashboard shell.
+      // Do NOT treat MFA / soft-token pages (non-login, non-offers) as expired.
+      var expired = !signedIn && !onLoginForm && (
+        pageNotFound
+        || (onOffers && /log\\s*in/i.test(leading))
+        || onHomeShell
+      );
+      if (window.ReactNativeWebView) {
         window.ReactNativeWebView.postMessage(JSON.stringify({
-          type: 'US_BANK_ON_OFFERS',
+          type: 'US_BANK_PAGE_STATE',
+          onOffers: !!onOffers,
           signedIn: !!signedIn,
+          onLoginForm: !!onLoginForm,
+          expired: !!expired,
         }));
+        // Keep legacy offers message so auto-start / older handlers still see it.
+        if (onOffers) {
+          window.ReactNativeWebView.postMessage(JSON.stringify({
+            type: 'US_BANK_ON_OFFERS',
+            signedIn: !!signedIn,
+          }));
+        }
       }
     } catch (e) {}
+  })();
+  true;
+`;
+
+// Clear same-origin storage + best-effort cookies, then open official login.
+// HttpOnly cookies cannot be cleared from JS; navigating to loginUrl still
+// presents Account login when the session is dead.
+export const buildUsBankForceLoginJs = (loginUrl = US_BANK_LOGIN_URL) => `
+  (function() {
+    try {
+      try { window.localStorage && window.localStorage.clear(); } catch (e) {}
+      try { window.sessionStorage && window.sessionStorage.clear(); } catch (e) {}
+      try {
+        var cookies = String(document.cookie || '').split(';');
+        for (var i = 0; i < cookies.length; i++) {
+          var part = cookies[i];
+          var eq = part.indexOf('=');
+          var name = (eq === -1 ? part : part.slice(0, eq)).replace(/^\\s+|\\s+$/g, '');
+          if (!name) continue;
+          document.cookie = name + '=; expires=Thu, 01 Jan 1970 00:00:00 GMT; path=/';
+          document.cookie = name + '=; expires=Thu, 01 Jan 1970 00:00:00 GMT; path=/; domain=.usbank.com';
+          document.cookie = name + '=; expires=Thu, 01 Jan 1970 00:00:00 GMT; path=/; domain=.onlinebanking.usbank.com';
+        }
+      } catch (e) {}
+      window.location.replace(${JSON.stringify(String(loginUrl || US_BANK_LOGIN_URL))});
+    } catch (e) {
+      try { window.location.href = ${JSON.stringify(String(loginUrl || US_BANK_LOGIN_URL))}; } catch (e2) {}
+    }
   })();
   true;
 `;

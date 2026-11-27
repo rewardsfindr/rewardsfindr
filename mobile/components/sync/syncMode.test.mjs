@@ -21,6 +21,8 @@ import {
   shouldForceChaseOffersRedirect,
   shouldForceCitiLogin,
   shouldForceCitiOffersRedirect,
+  shouldForceUsBankLogin,
+  shouldForceUsBankOffersRedirect,
   chaseCoverProgress,
   amexCoverProgress,
   amexCoverStatusLine,
@@ -636,6 +638,117 @@ test('force Citi Merchant Offers after login (fresh or expired→login)', () => 
   );
 });
 
+test('force US Bank login only for expired shells, not happy-path or login form', () => {
+  assert.equal(
+    shouldForceUsBankLogin({
+      expired: true,
+      onLoginForm: false,
+      signedIn: false,
+      syncStarted: false,
+      loginForced: false,
+    }),
+    true,
+  );
+  assert.equal(
+    shouldForceUsBankLogin({
+      expired: true,
+      onLoginForm: true,
+      signedIn: false,
+      syncStarted: false,
+      loginForced: false,
+    }),
+    false,
+    'already on Account login / Username+Password',
+  );
+  assert.equal(
+    shouldForceUsBankLogin({
+      expired: true,
+      onLoginForm: false,
+      signedIn: true,
+      syncStarted: false,
+      loginForced: false,
+    }),
+    false,
+    'honest signed-in session must stay on Cash Back Deals',
+  );
+  assert.equal(
+    shouldForceUsBankLogin({
+      expired: false,
+      onLoginForm: false,
+      signedIn: false,
+      syncStarted: false,
+      loginForced: false,
+    }),
+    false,
+  );
+  assert.equal(
+    shouldForceUsBankLogin({
+      expired: true,
+      onLoginForm: false,
+      signedIn: false,
+      syncStarted: false,
+      loginForced: true,
+    }),
+    false,
+    'one-shot only',
+  );
+  assert.equal(
+    shouldForceUsBankLogin({
+      expired: true,
+      onLoginForm: false,
+      signedIn: false,
+      syncStarted: true,
+      loginForced: false,
+    }),
+    false,
+  );
+});
+
+test('force US Bank Cash Back Deals after login (fresh or expired→login)', () => {
+  assert.equal(
+    shouldForceUsBankOffersRedirect({
+      onOffers: false,
+      signedIn: true,
+      onLoginForm: false,
+      syncStarted: false,
+      offersRedirected: false,
+    }),
+    true,
+    'signed-in off offers → Cash Back Deals',
+  );
+  assert.equal(
+    shouldForceUsBankOffersRedirect({
+      onOffers: false,
+      signedIn: false,
+      onLoginForm: true,
+      syncStarted: false,
+      offersRedirected: false,
+    }),
+    false,
+  );
+  assert.equal(
+    shouldForceUsBankOffersRedirect({
+      onOffers: false,
+      signedIn: false,
+      onLoginForm: false,
+      syncStarted: false,
+      offersRedirected: false,
+    }),
+    false,
+    'must not yank off MFA / Arkose (no login form, not signedIn yet)',
+  );
+  assert.equal(
+    shouldForceUsBankOffersRedirect({
+      onOffers: true,
+      signedIn: true,
+      onLoginForm: false,
+      syncStarted: false,
+      offersRedirected: false,
+    }),
+    false,
+  );
+});
+
 test('Citi offers redirect stays put on MFA / soft-token / challenge mid-auth', () => {
   // Regression: after Sign On was seen, challenge pages lack User ID+Password
   // and are not yet signedIn — must NOT one-shot goToOffers() mid-auth.
@@ -1072,22 +1185,28 @@ test('SyncWebView wires US Bank auto-start without Chase-only gates', () => {
   assert.doesNotMatch(usBankGateBlock, /chaseHookReady/);
   // Offers-ready only from honest signedIn message — not URL cashback-deals alone.
   assert.match(src, /data\.signedIn === true/);
-  assert.match(src, /Never mark offers-ready from URL alone/);
-  // Post-login: leave dashboard for Cash Back Deals via goToOffers → offersUrl.
-  const usBankLoadEnd = src.match(
-    /if \(bank === 'us_bank'\) \{[\s\S]*?return;\r?\n    \}\r?\n\r?\n    if \(bank === 'amex'\)/,
-  )?.[0] || '';
-  assert.match(usBankLoadEnd, /goToOffers\(\)/);
-  assert.match(usBankLoadEnd, /onOffersUrl/);
-  assert.match(usBankLoadEnd, /SYNC_MODES\.AUTH/);
+  assert.match(src, /URL alone never marks offers-ready/);
+  // Expired / signed-out → official loginUrl; signedIn → offersUrl (Citi-shaped).
+  assert.match(src, /US_BANK_PAGE_STATE/);
+  assert.match(src, /shouldForceUsBankLogin/);
+  assert.match(src, /shouldForceUsBankOffersRedirect/);
+  assert.match(src, /goToUsBankLogin/);
+  assert.match(src, /buildUsBankForceLoginJs/);
   assert.match(src, /const goToOffers = \(\) => \{[\s\S]*?config\.offersUrl/);
+  // Happy / waiting path must not show Sync Offers (failed footer only).
+  assert.match(src, /isAutoBank/);
+  assert.match(src, /if \(isAutoBank\) return null/);
   assert.equal(
     BANK_CONFIG.us_bank.url,
-    'https://onlinebanking.usbank.com/auth/login/?channel=mobileweb',
+    'https://onlinebanking.usbank.com/digital/servicing/dominjection/cashback-deals',
   );
   assert.equal(
     BANK_CONFIG.us_bank.offersUrl,
     'https://onlinebanking.usbank.com/digital/servicing/dominjection/cashback-deals',
+  );
+  assert.equal(
+    BANK_CONFIG.us_bank.loginUrl,
+    'https://onlinebanking.usbank.com/auth/login/?channel=mobileweb',
   );
   // Cap One stays out; Chase AUTH re-probe stays Chase-only.
   assert.doesNotMatch(src, /shouldAutoStartCapitalOne|capital_one.*autoStart/);
