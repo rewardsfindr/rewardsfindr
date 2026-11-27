@@ -9,6 +9,7 @@ import {
   StyleSheet, SafeAreaView, Platform,
 } from 'react-native';
 import { Stack, useRouter } from 'expo-router';
+import Constants from 'expo-constants';
 import { GoogleSignin, statusCodes } from '@react-native-google-signin/google-signin';
 import {
   GoogleAuthProvider, OAuthProvider, getRedirectResult,
@@ -27,7 +28,16 @@ if (Platform.OS === 'ios') {
   }
 }
 
-const googleWebClientId = Platform.OS !== 'web' ? getGoogleWebClientId() : null;
+function googleWebClientIdFromExpoExtra() {
+  return (
+    Constants.expoConfig?.extra?.googleWebClientId ||
+    Constants.manifest?.extra?.googleWebClientId ||
+    Constants.manifest2?.extra?.expoClient?.extra?.googleWebClientId
+  );
+}
+
+const googleWebClientId =
+  Platform.OS !== 'web' ? getGoogleWebClientId(googleWebClientIdFromExpoExtra()) : null;
 
 if (Platform.OS !== 'web' && googleWebClientId) {
   GoogleSignin.configure({
