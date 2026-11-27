@@ -402,6 +402,8 @@ test('stripUsBankOffers keeps offer fields and strips tokens and tracking', () =
   const fixture = loadFixtureWithSecrets();
   const stripped = stripUsBankOffers(fixture);
   assert.ok(stripped.ads.length >= 4);
+  // Fixture cardDetails.offerCount is 75 with only a partial ads[] page.
+  assert.equal(stripped.offerCount, 75);
   const chevron = stripped.ads.find((ad) => ad.offerId === '1000399917');
   assert.equal(chevron.merchantName, 'Chevron');
   assert.equal(chevron.activationState, 'SERVED');
@@ -672,7 +674,7 @@ function flatOffer(offerId, merchantName = 'Ready Cafe') {
 
 test('capture-when-ready waits until getInsights stash count stays stable', async () => {
   assert.ok(US_BANK_CAPTURE_POLL_MS <= 150);
-  assert.ok(US_BANK_CAPTURE_READY_TIMEOUT_MS >= 8000);
+  assert.ok(US_BANK_CAPTURE_READY_TIMEOUT_MS >= 20000);
   assert.ok(US_BANK_CAPTURE_STABLE_MS >= 800);
 
   const messages = [];
@@ -710,6 +712,54 @@ test('capture-when-ready waits until getInsights stash count stays stable', asyn
   assert.equal(messages.at(-1)?.type, 'US_BANK_OFFERS');
   assert.equal(messages.at(-1)?.offers.ads.length, 2);
   assert.equal(messages.at(-1)?.offers.ads[0].offerId, 'READYOFFER1');
+});
+
+test('capture-when-ready keeps scrolling until ads length reaches offerCount', async () => {
+  const messages = [];
+  const window = {
+    location: { href: US_BANK_OFFERS_URL },
+    __usBankLastOffers: null,
+    ReactNativeWebView: { postMessage(raw) { messages.push(JSON.parse(raw)); } },
+    scrollBy() {},
+    scrollTo() {},
+    innerHeight: 800,
+  };
+  const document = {
+    scrollingElement: { scrollTop: 0, scrollHeight: 4000 },
+    documentElement: { scrollTop: 0, scrollHeight: 4000 },
+    body: { scrollTop: 0, scrollHeight: 4000 },
+    querySelectorAll() { return []; },
+  };
+  new Function('window', 'document', buildUsBankCaptureWhenReadyJs(800, 40, 80))(window, document);
+
+  // Partial page with declared total 4 — must NOT settle at 2.
+  window.__usBankLastOffers = {
+    ads: [flatOffer('A'), flatOffer('B')],
+    fromDeals: true,
+    offerCount: 4,
+  };
+  await new Promise((r) => setTimeout(r, 200));
+  assert.equal(messages.length, 0, 'stable partial must wait for offerCount');
+
+  window.__usBankLastOffers = {
+    ads: [flatOffer('A'), flatOffer('B'), flatOffer('C'), flatOffer('D')],
+    fromDeals: true,
+    offerCount: 4,
+  };
+  await new Promise((r) => setTimeout(r, 120));
+  assert.equal(messages.at(-1)?.type, 'US_BANK_OFFERS');
+  assert.equal(messages.at(-1)?.offers.ads.length, 4);
+});
+
+test('hooks stash CardLytics offerCount from getInsights', () => {
+  const { window } = installHook(US_BANK_OFFERS_URL);
+  const xhr = new window.XMLHttpRequest();
+  xhr.open('POST', 'https://onlinebanking.usbank.com/graphql/v2');
+  xhr.responseText = JSON.stringify(loadFixture());
+  xhr.send(JSON.stringify({ operationName: 'getInsights', useCaseId: 'CardLytics' }));
+  assert.equal(window.__usBankLastOffers.offerCount, 75);
+  assert.ok(window.__usBankLastOffers.ads.length >= 4);
+  assert.ok(window.__usBankLastOffers.ads.length < 75);
 });
 
 test('capture-when-ready refuses customer-dashboard even with a home stash', async () => {

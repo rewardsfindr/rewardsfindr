@@ -9,23 +9,39 @@
 const stripUsBankOffersSource = `function stripUsBankOffers(parsed) {
   if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return null;
 
+  function parseOfferCount(value) {
+    if (typeof value === 'number' && isFinite(value) && value > 0) return Math.floor(value);
+    if (value == null) return null;
+    var n = parseInt(String(value).trim(), 10);
+    return isFinite(n) && n > 0 ? n : null;
+  }
+
+  // CardLytics often returns offerCount (e.g. 75) with only the first page of
+  // ads[] (~9). Keep the declared total so capture can wait for the rest.
   function collectAds(host) {
     if (!host || typeof host !== 'object' || Array.isArray(host)) return null;
-    if (Array.isArray(host.ads)) return host.ads;
+    if (Array.isArray(host.ads)) {
+      return { ads: host.ads, offerCount: parseOfferCount(host.offerCount) };
+    }
     var insights = host.data && host.data.getInsights && host.data.getInsights.insights;
     if (!insights && host.getInsights) insights = host.getInsights.insights;
     if (!Array.isArray(insights)) return null;
     var ads = [];
+    var offerCount = null;
     for (var i = 0; i < insights.length; i++) {
       var card = insights[i] && insights[i].cardDetails;
       if (!card || !Array.isArray(card.ads)) continue;
+      var cardCount = parseOfferCount(card.offerCount);
+      if (cardCount != null) offerCount = Math.max(offerCount || 0, cardCount);
       for (var a = 0; a < card.ads.length; a++) ads.push(card.ads[a]);
     }
-    return ads;
+    return { ads: ads, offerCount: offerCount };
   }
 
-  var rawAds = collectAds(parsed);
-  if (!rawAds) return null;
+  var collected = collectAds(parsed);
+  if (!collected || !collected.ads) return null;
+  var rawAds = collected.ads;
+  var declaredCount = collected.offerCount;
 
   function stripAd(item) {
     if (!item || typeof item !== 'object' || Array.isArray(item)) return null;
@@ -88,7 +104,13 @@ const stripUsBankOffersSource = `function stripUsBankOffers(parsed) {
     var stripped = stripAd(rawAds[i]);
     if (stripped) ads.push(stripped);
   }
-  return { ads: ads };
+  var out = { ads: ads };
+  if (declaredCount != null) out.offerCount = declaredCount;
+  else {
+    var passthrough = parseOfferCount(parsed.offerCount);
+    if (passthrough != null) out.offerCount = passthrough;
+  }
+  return out;
 }`;
 
 export const stripUsBankOffers = new Function(`return (${stripUsBankOffersSource})`)();
@@ -147,9 +169,9 @@ const unwrapUsBankPayloadSource = `function unwrapUsBankPayload(parsed) {
 export const buildUsBankOfferCaptureJs = () => `
   (function() {
     try {
-      if (window.__usBankOfferHookVersion === 2) return;
-      // Drop any home/dashboard getInsights stash from older hooks before we
-      // install deals-only remember.
+      if (window.__usBankOfferHookVersion === 3) return;
+      // Drop any home/dashboard or pre-offerCount stash from older hooks before
+      // we install deals-only remember that tracks CardLytics offerCount.
       window.__usBankLastOffers = null;
       var stripUsBankOffers = ${stripUsBankOffersSource};
       var unwrapUsBankPayload = ${unwrapUsBankPayloadSource};
@@ -203,7 +225,14 @@ export const buildUsBankOfferCaptureJs = () => `
         take(incoming);
         var ads = [];
         for (var j = 0; j < order.length; j++) ads.push(map[order[j]]);
-        window.__usBankLastOffers = { ads: ads, fromDeals: true };
+        var prevCount = window.__usBankLastOffers && window.__usBankLastOffers.offerCount;
+        var nextCount = stripped && stripped.offerCount;
+        var offerCount = null;
+        if (typeof prevCount === 'number') offerCount = prevCount;
+        if (typeof nextCount === 'number') {
+          offerCount = offerCount == null ? nextCount : Math.max(offerCount, nextCount);
+        }
+        window.__usBankLastOffers = { ads: ads, fromDeals: true, offerCount: offerCount };
         window.__usBankHookError = '';
       }
 
@@ -235,70 +264,93 @@ export const buildUsBankOfferCaptureJs = () => `
         }
       }
 
+      // Mutable handler so a version bump rebinds remember without stacking
+      // another XHR/fetch wrapper on top of an older closed-over remember.
+      window.__usBankOfferMaybeRemember = maybeRemember;
+      window.__usBankOfferWatchUrl = watchUrl;
+      window.__usBankOfferWatchBody = watchBody;
+
       function watchSend(xhr, url, body) {
         xhr.addEventListener('load', function() {
           if (xhr.status < 200 || xhr.status >= 300) return;
-          maybeRemember(xhr.responseText, watchUrl(url) || watchBody(body), url);
+          var run = window.__usBankOfferMaybeRemember;
+          if (typeof run !== 'function') return;
+          run(
+            xhr.responseText,
+            (window.__usBankOfferWatchUrl && window.__usBankOfferWatchUrl(url))
+              || (window.__usBankOfferWatchBody && window.__usBankOfferWatchBody(body)),
+            url,
+          );
         });
       }
 
-      var OrigXHR = window.XMLHttpRequest;
-      var proto = OrigXHR && OrigXHR.prototype;
-      if (proto && proto.open && proto.send && !proto.__usBankOfferHooked) {
-        var protoOpen = proto.open;
-        var protoSend = proto.send;
-        proto.open = function(method, url) {
-          try { this.__usBankUrl = url || ''; } catch (e) {}
-          return protoOpen.apply(this, arguments);
-        };
-        proto.send = function(body) {
-          try { watchSend(this, this.__usBankUrl, body); } catch (e) {}
-          return protoSend.apply(this, arguments);
-        };
-        proto.__usBankOfferHooked = true;
-      }
+      if (!window.__usBankOfferNetworkHooked) {
+        var OrigXHR = window.XMLHttpRequest;
+        var proto = OrigXHR && OrigXHR.prototype;
+        if (proto && proto.open && proto.send && !proto.__usBankOfferHooked) {
+          var protoOpen = proto.open;
+          var protoSend = proto.send;
+          proto.open = function(method, url) {
+            try { this.__usBankUrl = url || ''; } catch (e) {}
+            return protoOpen.apply(this, arguments);
+          };
+          proto.send = function(body) {
+            try { watchSend(this, this.__usBankUrl, body); } catch (e) {}
+            return protoSend.apply(this, arguments);
+          };
+          proto.__usBankOfferHooked = true;
+        }
 
-      function PatchedXHR() {
-        var xhr = new OrigXHR();
-        var url = '';
-        var origOpen = xhr.open;
-        var origSend = xhr.send;
-        if (origOpen) {
-          xhr.open = function(method, nextUrl) {
-            url = nextUrl || '';
-            return origOpen.apply(xhr, arguments);
+        function PatchedXHR() {
+          var xhr = new OrigXHR();
+          var url = '';
+          var origOpen = xhr.open;
+          var origSend = xhr.send;
+          if (origOpen) {
+            xhr.open = function(method, nextUrl) {
+              url = nextUrl || '';
+              return origOpen.apply(xhr, arguments);
+            };
+          }
+          if (origSend) {
+            xhr.send = function(body) {
+              try { watchSend(xhr, url, body); } catch (e) {}
+              return origSend.apply(xhr, arguments);
+            };
+          }
+          return xhr;
+        }
+        if (OrigXHR) {
+          PatchedXHR.prototype = OrigXHR.prototype;
+          window.XMLHttpRequest = PatchedXHR;
+        }
+
+        if (window.fetch) {
+          var origFetch = window.fetch;
+          window.fetch = function(input, init) {
+            var url = (typeof input === 'string' ? input : (input && input.url)) || '';
+            var reqBody = init && init.body;
+            var pending = origFetch.apply(window, arguments);
+            return pending.then(function(response) {
+              if (response.ok) {
+                response.clone().text().then(function(text) {
+                  var run = window.__usBankOfferMaybeRemember;
+                  if (typeof run !== 'function') return;
+                  run(
+                    text,
+                    (window.__usBankOfferWatchUrl && window.__usBankOfferWatchUrl(url))
+                      || (window.__usBankOfferWatchBody && window.__usBankOfferWatchBody(reqBody)),
+                    url,
+                  );
+                });
+              }
+              return response;
+            });
           };
         }
-        if (origSend) {
-          xhr.send = function(body) {
-            try { watchSend(xhr, url, body); } catch (e) {}
-            return origSend.apply(xhr, arguments);
-          };
-        }
-        return xhr;
+        window.__usBankOfferNetworkHooked = true;
       }
-      if (OrigXHR) {
-        PatchedXHR.prototype = OrigXHR.prototype;
-        window.XMLHttpRequest = PatchedXHR;
-      }
-
-      if (window.fetch) {
-        var origFetch = window.fetch;
-        window.fetch = function(input, init) {
-          var url = (typeof input === 'string' ? input : (input && input.url)) || '';
-          var reqBody = init && init.body;
-          var pending = origFetch.apply(window, arguments);
-          return pending.then(function(response) {
-            if (response.ok) {
-              response.clone().text().then(function(text) {
-                maybeRemember(text, watchUrl(url) || watchBody(reqBody), url);
-              });
-            }
-            return response;
-          });
-        };
-      }
-      window.__usBankOfferHookVersion = 2;
+      window.__usBankOfferHookVersion = 3;
     } catch (e) {
       window.__usBankHookError = 'unreadable';
     }
@@ -446,11 +498,11 @@ export const buildUsBankForceLoginJs = (loginUrl = US_BANK_LOGIN_URL) => `
 
 // Poll for stash / page offers instead of a fixed sleep after offers-ready.
 // Auto-start often fires on US_BANK_ON_OFFERS before getInsights lands, and
-// CardLytics loads more ads as the deals list scrolls — do not capture on the
-// first non-empty page.
-export const US_BANK_CAPTURE_READY_TIMEOUT_MS = 12000;
+// CardLytics returns offerCount (e.g. 75) with only the first ads[] page (~9) —
+// keep scrolling until stash length reaches offerCount (or timeout).
+export const US_BANK_CAPTURE_READY_TIMEOUT_MS = 25000;
 export const US_BANK_CAPTURE_POLL_MS = 120;
-/** Stash offer count must stay unchanged this long before we post US_BANK_OFFERS. */
+/** When offerCount is unknown, stash length must stay unchanged this long. */
 export const US_BANK_CAPTURE_STABLE_MS = 1500;
 
 // Shared helpers + runUsBankCapture() for one-shot read and when-ready.
@@ -582,6 +634,29 @@ export const buildUsBankCaptureWhenReadyJs = (
         var stash = resolveStash();
         return stash && Array.isArray(stash.ads) ? stash.ads.length : 0;
       }
+      function declaredOfferCount() {
+        var raw = window.__usBankLastOffers;
+        var n = raw && raw.offerCount;
+        return typeof n === 'number' && n > 0 ? n : 0;
+      }
+      function nudgeAllDealsTab() {
+        try {
+          var nodes = document.querySelectorAll
+            ? document.querySelectorAll('a,button,[role="tab"],[role="button"],span,div,p')
+            : [];
+          for (var i = 0; i < nodes.length && i < 250; i++) {
+            var el = nodes[i];
+            var t = '';
+            try { t = String(el.innerText || el.textContent || ''); } catch (e) { continue; }
+            t = t.replace(/\\s+/g, ' ').trim().toLowerCase();
+            if (t === 'all deals' || t === 'available' || t === 'all') {
+              try { el.click(); } catch (e) {}
+              return true;
+            }
+          }
+        } catch (e) {}
+        return false;
+      }
       function nudgeScroll() {
         try {
           var roots = [];
@@ -590,9 +665,9 @@ export const buildUsBankCaptureWhenReadyJs = (
           try { if (document.body) roots.push(document.body); } catch (e) {}
           try {
             var nodes = document.querySelectorAll
-              ? document.querySelectorAll('[class*="scroll"],[class*="Scroll"],main,section')
+              ? document.querySelectorAll('[class*="scroll"],[class*="Scroll"],main,section,[class*="offer"],[class*="deal"]')
               : [];
-            for (var i = 0; i < nodes.length && i < 16; i++) roots.push(nodes[i]);
+            for (var i = 0; i < nodes.length && i < 24; i++) roots.push(nodes[i]);
           } catch (e) {}
           for (var r = 0; r < roots.length; r++) {
             var el = roots[r];
@@ -600,7 +675,7 @@ export const buildUsBankCaptureWhenReadyJs = (
             try {
               var top = typeof el.scrollTop === 'number' ? el.scrollTop : 0;
               var height = typeof el.scrollHeight === 'number' ? el.scrollHeight : 0;
-              if (height > top + 40) el.scrollTop = height;
+              if (height > top + 40) el.scrollTop = Math.min(height, top + Math.max(500, window.innerHeight || 800));
             } catch (e) {}
           }
           try {
@@ -619,13 +694,20 @@ export const buildUsBankCaptureWhenReadyJs = (
       var started = Date.now();
       var lastCount = 0;
       var stableSince = 0;
+      var tabNudged = false;
       while (Date.now() - started < ${timeoutMs}) {
         var count = stashCount();
+        var expected = declaredOfferCount();
+        if (count > 0 && expected && count >= expected) {
+          runUsBankCapture();
+          return;
+        }
         if (count > 0) {
           if (count !== lastCount) {
             lastCount = count;
             stableSince = Date.now();
-          } else if (stableSince && (Date.now() - stableSince >= ${stableMs})) {
+          } else if (!expected && stableSince && (Date.now() - stableSince >= ${stableMs})) {
+            // No offerCount in payload — settle on a stable partial only then.
             runUsBankCapture();
             return;
           }
@@ -633,9 +715,14 @@ export const buildUsBankCaptureWhenReadyJs = (
           lastCount = 0;
           stableSince = 0;
         }
+        if (!tabNudged && Date.now() - started > 400) {
+          tabNudged = nudgeAllDealsTab();
+        }
         nudgeScroll();
         await new Promise(function(resolve) { setTimeout(resolve, ${intervalMs}); });
       }
+      // Timeout: post whatever deals-page stash we have (better than aborting a
+      // long partial load), still refuse off cashback-deals via runUsBankCapture.
       if (usBankCaptureReady()) {
         runUsBankCapture();
         return;
