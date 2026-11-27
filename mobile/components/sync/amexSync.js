@@ -161,6 +161,31 @@ export const buildAmexNudgeRecaptureJs = (testId) => `
   true;
 `;
 
+/**
+ * After the target card is selected, poke Amex filters so ReadOffersHubPresentation
+ * fires even when the SPA would otherwise reuse a cached card payload.
+ */
+export const buildAmexForceOffersRefreshJs = () => `
+  (function() {
+    try {
+      window.__amexJsonCaptureArmed = true;
+      var pressed = document.querySelector(
+        '[data-testid*="filter"][aria-pressed="true"], [data-testid*="filter"][aria-selected="true"]'
+      );
+      if (pressed) {
+        pressed.click();
+        setTimeout(function() {
+          try { pressed.click(); } catch (e2) {}
+        }, 450);
+        return;
+      }
+      var allChip = document.querySelector('[data-testid*="filter-all"], [data-testid*="RECOMMENDED"]');
+      if (allChip) allChip.click();
+    } catch (e) { /* best-effort */ }
+  })();
+  true;
+`;
+
 export const buildAmexSwitchCardJs = (testId, timeoutMs = AMEX_SWITCH_TIMEOUT_MS) => `
   (function() {
     try {

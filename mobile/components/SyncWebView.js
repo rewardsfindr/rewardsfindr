@@ -56,6 +56,7 @@ import {
   AMEX_CAPTURE_READY_TIMEOUT_MS,
   buildAmexSwitchCardJs,
   buildAmexNudgeRecaptureJs,
+  buildAmexForceOffersRefreshJs,
   buildAmexJsonCaptureJs,
   buildAmexClearFiltersJs,
   amexHandleLoadEnd,
@@ -143,6 +144,8 @@ export default function SyncWebView({ visible, bank, onClose, onSuccess }) {
   const amexWaitRef         = useRef(null);
   const amexExpectedRef     = useRef(null);
   const amexNudgeUsedRef    = useRef(false);
+  const amexDomSelectedRef  = useRef(null);
+  const amexBounceTargetRef = useRef(null);
   const syncModeRef         = useRef(SYNC_MODES.AUTH);
   const autoStartConsumedRef = useRef(false);
   const stepTimerRef        = useRef(null);
@@ -281,6 +284,7 @@ export default function SyncWebView({ visible, bank, onClose, onSuccess }) {
       if (allowNudge && expected && !amexNudgeUsedRef.current) {
         amexNudgeUsedRef.current = true;
         console.log('[amex-capture] nudge re-click', { expectedTestId: expected });
+        webViewRef.current?.injectJavaScript(buildAmexForceOffersRefreshJs());
         webViewRef.current?.injectJavaScript(buildAmexNudgeRecaptureJs(expected));
         scheduleAmexCaptureWait(false);
         return;
@@ -399,6 +403,8 @@ export default function SyncWebView({ visible, bank, onClose, onSuccess }) {
       amexWaitRef.current         = null;
       amexExpectedRef.current     = null;
       amexNudgeUsedRef.current    = false;
+      amexDomSelectedRef.current  = null;
+      amexBounceTargetRef.current = null;
       setMode(SYNC_MODES.AUTH);
       setCurrentCard(null);
       setCurrentUrl('');
@@ -445,10 +451,20 @@ export default function SyncWebView({ visible, bank, onClose, onSuccess }) {
     }
   }, [visible, bank, onLoginPage]);
 
+  const markAmexDomSelected = (testId) => {
+    if (!testId) return;
+    amexDomSelectedRef.current = testId;
+    cardOptionsRef.current = cardOptionsRef.current.map((c) => ({
+      ...c,
+      selected: c.testId === testId,
+    }));
+  };
+
   /**
    * Capture one Amex card by list order. Cover index = position in cardOptions
-   * (monotonic 1..N). If already selected, nudge re-click to force REPLACE;
-   * otherwise switch. Cover stays blank until syncing=true (active wait).
+   * (monotonic 1..N). If already on that card in the DOM, bounce via another
+   * card (or force-refresh) so ReadOffersHubPresentation actually fires.
+   * Cover stays blank until syncing=true (active wait).
    */
   const beginAmexCardCapture = (card) => {
     if (!card?.testId) return false;
@@ -462,25 +478,46 @@ export default function SyncWebView({ visible, bank, onClose, onSuccess }) {
     setCurrentCard(label);
     amexNudgeUsedRef.current = false;
     armStepTimer();
-
-    captureArmed.current = true;
     webViewRef.current?.injectJavaScript(buildAmexJsonCaptureJs());
-    webViewRef.current?.injectJavaScript(
-      `clearTimeout(window.__amexQuietTimer); window.__amexBest = null; window.__amexJsonCaptureArmed = true; true;`,
-    );
-    webViewRef.current?.injectJavaScript(buildAmexClearFiltersJs());
 
-    const selected = cards.find((c) => c.selected);
-    const alreadyOn = selected?.testId === card.testId;
+    const alreadyOn = amexDomSelectedRef.current === card.testId;
     if (alreadyOn) {
-      // No arm-switch cover flash — wait for CAPTURE_JSON on this card.
+      const other = cards.find((c) => c?.testId && c.testId !== card.testId);
+      if (other) {
+        // Bounce off this card unarmed, then CARD_SWITCHED arms the real switch back.
+        console.log('[amex-capture] bounce via other card', {
+          target: card.testId,
+          via: other.testId,
+        });
+        amexBounceTargetRef.current = card.testId;
+        captureArmed.current = false;
+        webViewRef.current?.injectJavaScript(
+          `clearTimeout(window.__amexQuietTimer); window.__amexBest = null; window.__amexJsonCaptureArmed = false; true;`,
+        );
+        setSyncing(false);
+        setSwitching(true);
+        webViewRef.current?.injectJavaScript(
+          buildAmexSwitchCardJs(other.testId, AMEX_SWITCH_TIMEOUT_MS),
+        );
+        return true;
+      }
+      // Sole card: force a filter poke while armed.
+      captureArmed.current = true;
+      webViewRef.current?.injectJavaScript(
+        `clearTimeout(window.__amexQuietTimer); window.__amexBest = null; window.__amexJsonCaptureArmed = true; true;`,
+      );
       setSwitching(false);
       setSyncing(true);
+      webViewRef.current?.injectJavaScript(buildAmexForceOffersRefreshJs());
       webViewRef.current?.injectJavaScript(buildAmexNudgeRecaptureJs(card.testId));
       scheduleAmexCaptureWait(true);
       return true;
     }
 
+    captureArmed.current = true;
+    webViewRef.current?.injectJavaScript(
+      `clearTimeout(window.__amexQuietTimer); window.__amexBest = null; window.__amexJsonCaptureArmed = true; true;`,
+    );
     setSyncing(false);
     setSwitching(true);
     webViewRef.current?.injectJavaScript(
@@ -1561,6 +1598,9 @@ export default function SyncWebView({ visible, bank, onClose, onSuccess }) {
           setCardCount(applied.cardOptions.length);
           cardIndexRef.current = applied.selectedIndex;
           setCardIndexUi(applied.selectedIndex);
+          const selected = applied.cardOptions.find((c) => c.selected)
+            || applied.cardOptions[applied.selectedIndex];
+          if (selected?.testId) amexDomSelectedRef.current = selected.testId;
         }
         cardsDiscovered.current = applied.cardsDiscovered;
         setCurrentCard(data.selectedLabel || null);
@@ -1582,8 +1622,41 @@ export default function SyncWebView({ visible, bank, onClose, onSuccess }) {
       if (data.type === 'CARD_SWITCHED') {
         setSwitching(false);
         if (bank === 'amex') {
+          const switchedId = data.expectedTestId || null;
+          if (switchedId) markAmexDomSelected(switchedId);
+
+          // Bounce step: left the target unarmed; now arm-switch onto the real card.
+          if (amexBounceTargetRef.current) {
+            const targetId = amexBounceTargetRef.current;
+            amexBounceTargetRef.current = null;
+            const target = cardOptionsRef.current.find((c) => c.testId === targetId);
+            console.log('[amex-capture] bounce landing', { via: switchedId, target: targetId });
+            if (target) {
+              beginAmexCardCapture(target);
+              return;
+            }
+          }
+
+          // Stale CARD_SWITCHED from a prior card after we already advanced — ignore.
+          // (Was re-arming Blue Cash waits after CAPTURE_JSON and starving Platinum.)
+          if (
+            switchedId
+            && amexExpectedRef.current
+            && switchedId !== amexExpectedRef.current
+          ) {
+            console.log('[amex-capture] ignore stale CARD_SWITCHED', {
+              switchedId,
+              expectedTestId: amexExpectedRef.current,
+            });
+            return;
+          }
+          if (switchedId && visitedCardsRef.current.has(switchedId)) {
+            console.log('[amex-capture] ignore CARD_SWITCHED for visited card', { switchedId });
+            return;
+          }
+          if (!captureArmed.current) return;
+
           // Keep cover on the card we intended (expectedTestId), not lagging DOM.
-          if (data.expectedTestId) amexExpectedRef.current = data.expectedTestId;
           const expectedCard = cardOptionsRef.current.find(
             (c) => c.testId === amexExpectedRef.current,
           );
@@ -1596,6 +1669,8 @@ export default function SyncWebView({ visible, bank, onClose, onSuccess }) {
           }
           setSyncing(true);
           amexNudgeUsedRef.current = false;
+          // Poke filters so cached cards still emit ReadOffersHubPresentation.
+          webViewRef.current?.injectJavaScript(buildAmexForceOffersRefreshJs());
           scheduleAmexCaptureWait(true);
           return;
         }
@@ -1815,8 +1890,10 @@ export default function SyncWebView({ visible, bank, onClose, onSuccess }) {
         clearAmexWait();
         clearStepTimer();
         amexNudgeUsedRef.current = false;
+        amexBounceTargetRef.current = null;
         setSwitching(false);
         setSyncing(true);
+        if (capturedTestId) markAmexDomSelected(capturedTestId);
         if (capturedTestId && visitedCardsRef.current.has(capturedTestId)) {
           if (visitedCardsRef.current.size < cardOptionsRef.current.length) {
             captureNextAmexCardInOrder();

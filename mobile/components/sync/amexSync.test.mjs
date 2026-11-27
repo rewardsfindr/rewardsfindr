@@ -13,6 +13,7 @@ import {
   buildAmexJsonCaptureJs,
   buildAmexSwitchCardJs,
   buildAmexNudgeRecaptureJs,
+  buildAmexForceOffersRefreshJs,
 } from './amexSync.js';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
@@ -29,6 +30,9 @@ test('Amex capture wait constants and nudge re-click keep capture armed', () => 
   assert.match(nudge, /CARD_PRODUCT_PLAT/);
   assert.match(nudge, /__amexJsonCaptureArmed = true/);
   assert.match(nudge, /__amexCaptureGeneration/);
+  const refresh = buildAmexForceOffersRefreshJs();
+  assert.match(refresh, /__amexJsonCaptureArmed = true/);
+  assert.match(refresh, /filter/);
 });
 
 class El {
@@ -569,6 +573,7 @@ test('SyncWebView pins amexExpectedRef before switch and attributes CAPTURE_JSON
 test('SyncWebView never advances Amex walk on capture timeout; walks display order', () => {
   const src = readFileSync(join(HERE, '..', 'SyncWebView.js'), 'utf8');
   assert.match(src, /buildAmexNudgeRecaptureJs/);
+  assert.match(src, /buildAmexForceOffersRefreshJs/);
   assert.match(src, /AMEX_CAPTURE_NUDGE_AFTER_MS/);
   assert.match(src, /AMEX_CAPTURE_READY_TIMEOUT_MS/);
   assert.match(src, /amexCoverStatusLine/);
@@ -578,6 +583,8 @@ test('SyncWebView never advances Amex walk on capture timeout; walks display ord
   assert.match(src, /scheduleAmexCaptureWait/);
   assert.match(src, /nudge re-click/);
   assert.match(src, /timeout without CAPTURE_JSON/);
+  assert.match(src, /ignore stale CARD_SWITCHED/);
+  assert.match(src, /bounce via other card/);
   assert.doesNotMatch(src, /advanceAmexSync\(amexExpectedRef\.current\)/);
   // Opaque cover (no WebView flash through alpha).
   assert.match(src, /backgroundColor: '#F0F7EE'/);
@@ -587,4 +594,5 @@ test('SyncWebView never advances Amex walk on capture timeout; walks display ord
   )?.[0] || '';
   assert.match(switched, /amexCardDisplayLabel/);
   assert.match(switched, /scheduleAmexCaptureWait/);
+  assert.match(switched, /ignore stale CARD_SWITCHED/);
 });
