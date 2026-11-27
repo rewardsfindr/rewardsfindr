@@ -54,7 +54,10 @@ import {
 import {
   AMEX_OPEN_AND_DETECT_JS,
   AMEX_SWITCH_TIMEOUT_MS,
+  AMEX_CAPTURE_NUDGE_AFTER_MS,
+  AMEX_CAPTURE_READY_TIMEOUT_MS,
   buildAmexSwitchCardJs,
+  buildAmexNudgeRecaptureJs,
   buildAmexJsonCaptureJs,
   buildAmexClearFiltersJs,
   amexHandleLoadEnd,
@@ -101,6 +104,7 @@ import {
   shouldForceCitiOffersRedirect,
   chaseCoverProgress,
   amexCoverProgress,
+  amexCoverStatusLine,
   urlMatchesAnyPath,
 } from './sync/syncMode.js';
 import BankLogoIcon from './BankLogoIcon.js';
@@ -139,6 +143,7 @@ export default function SyncWebView({ visible, bank, onClose, onSuccess }) {
   const pendingCardLabelRef = useRef(null);
   const amexWaitRef         = useRef(null);
   const amexExpectedRef     = useRef(null);
+  const amexNudgeUsedRef    = useRef(false);
   const syncModeRef         = useRef(SYNC_MODES.AUTH);
   const autoStartConsumedRef = useRef(false);
   const stepTimerRef        = useRef(null);
@@ -364,6 +369,8 @@ export default function SyncWebView({ visible, bank, onClose, onSuccess }) {
       syncModeRef.current         = SYNC_MODES.AUTH;
       if (amexWaitRef.current) clearTimeout(amexWaitRef.current);
       amexWaitRef.current         = null;
+      amexExpectedRef.current     = null;
+      amexNudgeUsedRef.current    = false;
       setMode(SYNC_MODES.AUTH);
       setCurrentCard(null);
       setCurrentUrl('');
@@ -420,8 +427,11 @@ export default function SyncWebView({ visible, bank, onClose, onSuccess }) {
     const idx = cards.indexOf(next);
     cardIndexRef.current = idx;
     setCardIndexUi(idx);
+    // Switch-only cover: no "card N of M" until CAPTURE_JSON / CARD_SWITCHED wait.
+    setSyncing(false);
     setSwitching(true);
     armStepTimer();
+    amexNudgeUsedRef.current = false;
 
     // Pin attribution BEFORE inject — CAPTURE_JSON often arrives before
     // CARD_SWITCHED, and DOM cardLabel can still show the previous card.
@@ -1521,15 +1531,37 @@ export default function SyncWebView({ visible, bank, onClose, onSuccess }) {
         setCurrentCard(data.cardLabel || null);
         if (bank === 'amex') {
           pendingCardLabelRef.current = data.cardLabel || null;
-          amexExpectedRef.current = data.expectedTestId || null;
+          if (data.expectedTestId) amexExpectedRef.current = data.expectedTestId;
           setSyncing(true);
           clearAmexWait();
-          amexWaitRef.current = setTimeout(() => {
-            if (!syncStartedRef.current || !captureArmed.current) return;
-            captureArmed.current = false;
-            webViewRef.current?.injectJavaScript(`clearTimeout(window.__amexQuietTimer); window.__amexBest = null; window.__amexJsonCaptureArmed = false; true;`);
-            advanceAmexSync(amexExpectedRef.current);
-          }, 5000);
+          // Wait for CAPTURE_JSON. Never mark visited / advance on timeout —
+          // that skipped Platinum when the SPA reused a cached card with no XHR.
+          const scheduleAmexCaptureWait = (allowNudge) => {
+            clearAmexWait();
+            const waitMs = allowNudge
+              ? AMEX_CAPTURE_NUDGE_AFTER_MS
+              : AMEX_CAPTURE_READY_TIMEOUT_MS;
+            amexWaitRef.current = setTimeout(() => {
+              if (!syncStartedRef.current || !captureArmed.current) return;
+              const expected = amexExpectedRef.current;
+              if (allowNudge && expected && !amexNudgeUsedRef.current) {
+                amexNudgeUsedRef.current = true;
+                console.log('[amex-capture] nudge re-click', { expectedTestId: expected });
+                webViewRef.current?.injectJavaScript(buildAmexNudgeRecaptureJs(expected));
+                scheduleAmexCaptureWait(false);
+                return;
+              }
+              console.log('[amex-capture] timeout without CAPTURE_JSON', {
+                expectedTestId: expected,
+                phase: syncPhaseRef.current,
+              });
+              failAmexCapture(
+                'Timed out waiting for Amex offers on this card. Try again.',
+              );
+            }, waitMs);
+          };
+          amexNudgeUsedRef.current = false;
+          scheduleAmexCaptureWait(true);
         } else if (bank === 'chase') {
           // Poll hooked stash as soon as customer-offers lands — no fixed 2.5s sleep.
           clearPostSwitchTimeout();
@@ -1744,6 +1776,9 @@ export default function SyncWebView({ visible, bank, onClose, onSuccess }) {
         });
         clearAmexWait();
         clearStepTimer();
+        amexNudgeUsedRef.current = false;
+        setSwitching(false);
+        setSyncing(true);
         if (capturedTestId && visitedCardsRef.current.has(capturedTestId)) {
           if (visitedCardsRef.current.size < cardOptionsRef.current.length) switchToNextAmexCard();
           return;
@@ -1823,7 +1858,16 @@ export default function SyncWebView({ visible, bank, onClose, onSuccess }) {
     cardsInPhase,
     (cardIndexUi >= 0 ? cardIndexUi : 0) + 1,
   );
-  const statusText = switching
+  const amexCoverSub = amexCoverStatusLine({
+    switching,
+    syncing,
+    cardLabel: cardName || currentCard || 'card',
+    cardIndex: phaseCardIndex,
+    cardsInPhase,
+    phaseLabel,
+    syncedCount: syncedUiCount,
+  });
+  const statusText = switching && !syncing
     ? `Switching card...`
     : syncing
       ? bank === 'amex'
@@ -1992,9 +2036,8 @@ export default function SyncWebView({ visible, bank, onClose, onSuccess }) {
                   <>
                     <Text style={s.coverSub}>
                       {bank === 'amex'
-                        ? `${coverCardLabel} · card ${coverIndex} of ${cardsInPhase} · ${phaseLabel}`
-                        : `${coverCardLabel} · card ${coverIndex} of ${totalCards}`}
-                      {syncedUiCount > 0 ? ` · ${syncedUiCount} saved` : ''}
+                        ? amexCoverSub
+                        : `${coverCardLabel} · card ${coverIndex} of ${totalCards}${syncedUiCount > 0 ? ` · ${syncedUiCount} saved` : ''}`}
                     </Text>
                     <View style={s.progressTrack}>
                       <View style={[s.progressFill, { width: `${Math.round(progressFrac * 100)}%` }]} />

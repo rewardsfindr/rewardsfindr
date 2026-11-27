@@ -309,6 +309,30 @@ export function amexCoverProgress(args) {
 }
 
 /**
+ * Amex cover subtitle. Switch-only steps (arming the next card) must not claim
+ * "card N of M" — that line is only for an in-flight capture.
+ */
+export function amexCoverStatusLine({
+  switching = false,
+  syncing = false,
+  cardLabel = '',
+  cardIndex = 1,
+  cardsInPhase = 1,
+  phaseLabel = 'eligible',
+  syncedCount = 0,
+} = {}) {
+  if (switching && !syncing) return 'Switching card…';
+  if (syncing) {
+    const index = Math.max(1, Number(cardIndex) || 1);
+    const total = Math.max(1, Number(cardsInPhase) || 1);
+    const base = `${cardLabel || 'card'} · card ${index} of ${total} · ${phaseLabel || 'eligible'}`;
+    const saved = Number(syncedCount) || 0;
+    return saved > 0 ? `${base} · ${saved} saved` : base;
+  }
+  return 'Processing…';
+}
+
+/**
  * After MFA / NeedsInput, plan Amex resume without Chase walk semantics.
  * Continue the current eligible→enrolled walk from the next unsaved card;
  * never claim planChaseNeedsInputResume.

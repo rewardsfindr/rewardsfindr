@@ -6,10 +6,13 @@ import { fileURLToPath } from 'node:url';
 import {
   AMEX_OPEN_AND_DETECT_JS,
   AMEX_SWITCH_TIMEOUT_MS,
+  AMEX_CAPTURE_NUDGE_AFTER_MS,
+  AMEX_CAPTURE_READY_TIMEOUT_MS,
   applyAmexCardsDetected,
   resolveAmexCaptureAttribution,
   buildAmexJsonCaptureJs,
   buildAmexSwitchCardJs,
+  buildAmexNudgeRecaptureJs,
 } from './amexSync.js';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
@@ -17,6 +20,15 @@ const HERE = dirname(fileURLToPath(import.meta.url));
 test('AMEX_SWITCH_TIMEOUT_MS is the prior shared Amex switch wait', () => {
   assert.equal(AMEX_SWITCH_TIMEOUT_MS, 3500);
   assert.ok(buildAmexSwitchCardJs('CARD_PRODUCT_1').includes(String(AMEX_SWITCH_TIMEOUT_MS)));
+});
+
+test('Amex capture wait constants and nudge re-click keep capture armed', () => {
+  assert.equal(AMEX_CAPTURE_NUDGE_AFTER_MS, 4000);
+  assert.equal(AMEX_CAPTURE_READY_TIMEOUT_MS, 10000);
+  const nudge = buildAmexNudgeRecaptureJs('CARD_PRODUCT_PLAT');
+  assert.match(nudge, /CARD_PRODUCT_PLAT/);
+  assert.match(nudge, /__amexJsonCaptureArmed = true/);
+  assert.match(nudge, /__amexCaptureGeneration/);
 });
 
 class El {
@@ -552,4 +564,25 @@ test('SyncWebView pins amexExpectedRef before switch and attributes CAPTURE_JSON
   assert.match(captureHandler, /resolveAmexCaptureAttribution/);
   assert.match(captureHandler, /\[amex-capture\]/);
   assert.match(captureHandler, /attributed\.cardLabel/);
+});
+
+test('SyncWebView never advances Amex walk on capture timeout; nudges then fails', () => {
+  const src = readFileSync(join(HERE, '..', 'SyncWebView.js'), 'utf8');
+  assert.match(src, /buildAmexNudgeRecaptureJs/);
+  assert.match(src, /AMEX_CAPTURE_NUDGE_AFTER_MS/);
+  assert.match(src, /AMEX_CAPTURE_READY_TIMEOUT_MS/);
+  assert.match(src, /amexCoverStatusLine/);
+  const switched = src.match(
+    /if \(data\.type === 'CARD_SWITCHED'\) \{[\s\S]*?return;\r?\n      \}/,
+  )?.[0] || '';
+  assert.match(switched, /scheduleAmexCaptureWait/);
+  assert.match(switched, /nudge re-click/);
+  assert.match(switched, /failAmexCapture/);
+  assert.match(switched, /timeout without CAPTURE_JSON/);
+  // Must not mark visited via advanceAmexSync on the wait timeout path.
+  assert.doesNotMatch(
+    switched,
+    /advanceAmexSync\(amexExpectedRef\.current\)/,
+  );
+  assert.match(src, /setSyncing\(false\);\r?\n\s*setSwitching\(true\)/);
 });

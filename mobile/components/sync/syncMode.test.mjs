@@ -22,6 +22,7 @@ import {
   shouldForceCitiOffersRedirect,
   chaseCoverProgress,
   amexCoverProgress,
+  amexCoverStatusLine,
   urlMatchesAnyPath,
 } from './syncMode.js';
 import { BANK_CONFIG } from './bankConfig.js';
@@ -804,6 +805,44 @@ test('amexCoverProgress matches Chase math; AMEX_SWITCH_TIMEOUT_MS stays 3500', 
   assert.equal(
     amexCoverProgress({ syncedCount: 0, totalCards: 4, inFlight: true }).coverIndex,
     1,
+  );
+});
+
+test('amexCoverStatusLine omits N-of-M while switch-only; shows it while syncing', () => {
+  assert.equal(
+    amexCoverStatusLine({
+      switching: true,
+      syncing: false,
+      cardLabel: 'Blue Cash Preferred®',
+      cardIndex: 1,
+      cardsInPhase: 2,
+      phaseLabel: 'eligible',
+    }),
+    'Switching card…',
+  );
+  assert.equal(
+    amexCoverStatusLine({
+      switching: false,
+      syncing: true,
+      cardLabel: 'Platinum Card®',
+      cardIndex: 2,
+      cardsInPhase: 2,
+      phaseLabel: 'eligible',
+      syncedCount: 1,
+    }),
+    'Platinum Card® · card 2 of 2 · eligible · 1 saved',
+  );
+  // Capture in flight wins over a lingering switching flag.
+  assert.match(
+    amexCoverStatusLine({
+      switching: true,
+      syncing: true,
+      cardLabel: 'Platinum Card®',
+      cardIndex: 1,
+      cardsInPhase: 2,
+      phaseLabel: 'activated',
+    }),
+    /Platinum Card® · card 1 of 2 · activated/,
   );
 });
 

@@ -118,6 +118,42 @@ export const AMEX_OPEN_AND_DETECT_JS = `
 
 // Wait after clicking an Amex card option before posting CARD_SWITCHED.
 export const AMEX_SWITCH_TIMEOUT_MS = 3500;
+/** First wait for CAPTURE_JSON after CARD_SWITCHED; then one nudge + second wait. */
+export const AMEX_CAPTURE_NUDGE_AFTER_MS = 4000;
+export const AMEX_CAPTURE_READY_TIMEOUT_MS = 10000;
+
+/**
+ * Re-click the expected card to force a fresh ReadOffersHubPresentation when the
+ * SPA reused a cached card (common when returning to the initially selected card).
+ * Keeps capture armed; bumps generation so prior-card replies stay ignored.
+ */
+export const buildAmexNudgeRecaptureJs = (testId) => `
+  (function() {
+    try {
+      var requested = ${JSON.stringify(testId || '')};
+      if (!requested) return;
+      window.__amexCaptureGeneration = (window.__amexCaptureGeneration || 0) + 1;
+      window.__amexBest = null;
+      clearTimeout(window.__amexQuietTimer);
+      window.__amexJsonCaptureArmed = true;
+      var combobox = document.querySelector('[data-testid="simple_switcher_combobox"]');
+      function clickOption() {
+        var option = document.querySelector('[data-testid="' + requested + '"]');
+        if (option) option.click();
+      }
+      var option = document.querySelector('[data-testid="' + requested + '"]');
+      if (option) {
+        option.click();
+        return;
+      }
+      if (combobox) {
+        combobox.click();
+        setTimeout(clickOption, 600);
+      }
+    } catch (e) { /* best-effort nudge */ }
+  })();
+  true;
+`;
 
 export const buildAmexSwitchCardJs = (testId, timeoutMs = AMEX_SWITCH_TIMEOUT_MS) => `
   (function() {
