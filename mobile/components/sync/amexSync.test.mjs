@@ -6,9 +6,17 @@ import { fileURLToPath } from 'node:url';
 import {
   AMEX_OPEN_AND_DETECT_JS,
   AMEX_SWITCH_TIMEOUT_MS,
+  AMEX_CAPTURE_NUDGE_AFTER_MS,
+  AMEX_CAPTURE_READY_TIMEOUT_MS,
   applyAmexCardsDetected,
+  resolveAmexCaptureAttribution,
+  resolveAmexResumeCapture,
+  amexCardKey,
+  matchAmexCard,
   buildAmexJsonCaptureJs,
   buildAmexSwitchCardJs,
+  buildAmexNudgeRecaptureJs,
+  buildAmexForceOffersRefreshJs,
 } from './amexSync.js';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
@@ -16,6 +24,33 @@ const HERE = dirname(fileURLToPath(import.meta.url));
 test('AMEX_SWITCH_TIMEOUT_MS is the prior shared Amex switch wait', () => {
   assert.equal(AMEX_SWITCH_TIMEOUT_MS, 3500);
   assert.ok(buildAmexSwitchCardJs('CARD_PRODUCT_1').includes(String(AMEX_SWITCH_TIMEOUT_MS)));
+});
+
+test('Amex capture wait constants and nudge re-click keep capture armed', () => {
+  assert.equal(AMEX_CAPTURE_NUDGE_AFTER_MS, 5000);
+  assert.equal(AMEX_CAPTURE_READY_TIMEOUT_MS, 12000);
+  const nudge = buildAmexNudgeRecaptureJs('CARD_PRODUCT_PLAT');
+  assert.match(nudge, /CARD_PRODUCT_PLAT/);
+  assert.match(nudge, /__amexJsonCaptureArmed = true/);
+  assert.match(nudge, /__amexCaptureGeneration/);
+  const refresh = buildAmexForceOffersRefreshJs();
+  assert.match(refresh, /__amexJsonCaptureArmed = true/);
+  // Live Amex filters use multiSelect*/selectCustom*, not only *filter*.
+  assert.match(refresh, /multiSelect/);
+  assert.match(refresh, /selectCustom/);
+  assert.match(refresh, /filter/);
+});
+
+test('Amex switch JS can poke offer filters soon after an armed card click', () => {
+  const plain = buildAmexSwitchCardJs('CARD_PRODUCT_1');
+  assert.doesNotMatch(plain, /pokeOffersRefresh/);
+  assert.doesNotMatch(plain, /multiSelect/);
+  const armed = buildAmexSwitchCardJs('CARD_PRODUCT_1', AMEX_SWITCH_TIMEOUT_MS, {
+    refreshAfterClick: true,
+  });
+  assert.match(armed, /multiSelect/);
+  assert.match(armed, /pokeOffersRefresh/);
+  assert.match(armed, /setTimeout\(pokeOffersRefresh, 600\)/);
 });
 
 class El {
@@ -499,7 +534,7 @@ test('SyncWebView applies Amex cards via applyAmexCardsDetected (no empty latch)
   const src = readFileSync(join(HERE, '..', 'SyncWebView.js'), 'utf8');
   assert.match(src, /applyAmexCardsDetected/);
   const handler = src.match(
-    /if \(data\.type === 'AMEX_CARDS_DETECTED'\) \{[\s\S]*?return;\n      \}/,
+    /if \(data\.type === 'AMEX_CARDS_DETECTED'\) \{[\s\S]*?return;\r?\n      \}/,
   )?.[0] || '';
   assert.match(handler, /applyAmexCardsDetected/);
   assert.doesNotMatch(
@@ -507,4 +542,149 @@ test('SyncWebView applies Amex cards via applyAmexCardsDetected (no empty latch)
     /if \(!cardsDiscovered\.current\) cardsDiscovered\.current = true/,
   );
   assert.match(handler, /cardsDiscovered\.current = applied\.cardsDiscovered/);
+});
+
+test('resolveAmexCaptureAttribution prefers expectedTestId over lagging DOM label', () => {
+  const cards = [
+    { label: 'Platinum Card®', last4: '2009', testId: 'CARD_PRODUCT_PLAT' },
+    { label: 'Blue Cash Preferred®', last4: '1008', testId: 'CARD_PRODUCT_BCP' },
+  ];
+  const attributed = resolveAmexCaptureAttribution({
+    cards,
+    expectedTestId: 'CARD_PRODUCT_PLAT',
+    pendingCardLabel: 'Platinum Card® (...2009)',
+    // DOM still showing the card we left — classic Amex lag.
+    domCardLabel: 'Blue Cash Preferred® (...1008)',
+  });
+  assert.equal(attributed.source, 'expectedTestId');
+  assert.equal(attributed.capturedTestId, 'CARD_PRODUCT_PLAT');
+  assert.equal(attributed.cardLabel, 'Platinum Card® (...2009)');
+  assert.equal(attributed.labelMismatch, true);
+});
+
+test('resolveAmexCaptureAttribution falls back to DOM when expected is unknown', () => {
+  const cards = [
+    { label: 'Blue Cash Preferred®', last4: '1008', testId: 'CARD_PRODUCT_BCP' },
+  ];
+  const attributed = resolveAmexCaptureAttribution({
+    cards,
+    expectedTestId: null,
+    domCardLabel: 'Blue Cash Preferred® (...1008)',
+  });
+  assert.equal(attributed.source, 'domCardLabel');
+  assert.equal(attributed.capturedTestId, 'CARD_PRODUCT_BCP');
+  assert.equal(attributed.labelMismatch, false);
+});
+
+test('MFA resume prefers amexCycleCardRef over next unvisited (mid eligible→enrolled)', () => {
+  const platinum = {
+    label: 'Platinum Card®',
+    last4: '2009',
+    testId: 'ENROLLED_PLAT_99',
+  };
+  const blue = {
+    label: 'Blue Cash Preferred®',
+    last4: '1008',
+    testId: 'ENROLLED_BCP_01',
+  };
+  // Enrolled list order puts Blue first — naive next-unvisited would steal the walk.
+  const enrolledCards = [blue, platinum];
+  const cycleCard = {
+    label: 'Platinum Card®',
+    last4: '2009',
+    testId: 'CARD_PRODUCT_PLAT',
+    coverIndex: 1,
+  };
+  const visitedKeys = new Set(); // Platinum cycle not complete until enrolled saves
+
+  const resolved = resolveAmexResumeCapture({
+    cards: enrolledCards,
+    cycleCard,
+    visitedKeys,
+    eligibleOrder: [
+      { label: 'Platinum Card®', last4: '2009', testId: 'CARD_PRODUCT_PLAT' },
+      { label: 'Blue Cash Preferred®', last4: '1008', testId: 'CARD_PRODUCT_BCP' },
+    ],
+  });
+  assert.equal(resolved.action, 'capture_card');
+  assert.equal(resolved.reason, 'cycle');
+  assert.equal(resolved.card.testId, 'ENROLLED_PLAT_99');
+  assert.equal(amexCardKey(resolved.card), amexCardKey(cycleCard));
+
+  // Without cycle, first unvisited in list order would be Blue — the bug.
+  const naive = resolveAmexResumeCapture({
+    cards: enrolledCards,
+    cycleCard: null,
+    visitedKeys,
+  });
+  assert.equal(naive.card.testId, 'ENROLLED_BCP_01');
+  assert.notEqual(naive.card.testId, resolved.card.testId);
+
+  assert.equal(
+    matchAmexCard(enrolledCards, cycleCard)?.testId,
+    'ENROLLED_PLAT_99',
+  );
+});
+
+test('MFA resume with cycle but empty card list asks for redetect', () => {
+  const resolved = resolveAmexResumeCapture({
+    cards: [],
+    cycleCard: { label: 'Platinum Card®', last4: '2009', testId: 'CARD_PRODUCT_PLAT' },
+    visitedKeys: new Set(),
+  });
+  assert.equal(resolved.action, 'redetect');
+  assert.equal(resolved.reason, 'cycle_missing');
+});
+
+test('SyncWebView pins amexExpectedRef before switch and attributes CAPTURE_JSON via helper', () => {
+  const src = readFileSync(join(HERE, '..', 'SyncWebView.js'), 'utf8');
+  assert.match(src, /resolveAmexCaptureAttribution/);
+  assert.match(src, /amexExpectedRef\.current = card\.testId/);
+  const captureHandler = src.match(
+    /if \(data\.type === 'CAPTURE_JSON' && bank === 'amex'\) \{[\s\S]*?return;\r?\n      \}/,
+  )?.[0] || '';
+  assert.match(captureHandler, /resolveAmexCaptureAttribution/);
+  assert.match(captureHandler, /\[amex-capture\]/);
+  assert.match(captureHandler, /attributed\.cardLabel/);
+});
+
+test('SyncWebView never advances Amex walk on capture timeout; walks display order', () => {
+  const src = readFileSync(join(HERE, '..', 'SyncWebView.js'), 'utf8');
+  assert.match(src, /buildAmexNudgeRecaptureJs/);
+  assert.match(src, /buildAmexForceOffersRefreshJs/);
+  assert.match(src, /AMEX_CAPTURE_NUDGE_AFTER_MS/);
+  assert.match(src, /AMEX_CAPTURE_READY_TIMEOUT_MS/);
+  assert.match(src, /amexCoverStatusLine/);
+  assert.match(src, /amexCoverDetail/);
+  assert.match(src, /publishAmexCoverDetail/);
+  assert.match(src, /amexCycleCardRef/);
+  assert.match(src, /amexVisitedKeysRef/);
+  assert.match(src, /resolveAmexResumeCapture/);
+  assert.match(src, /\[amex-resume\]/);
+  assert.match(src, /one capture cycle per card|One cycle per card|Keep cover on this card through enrolled/);
+  assert.doesNotMatch(src, /scheduleAmexCoverReveal/);
+  assert.doesNotMatch(src, /phase_to_enrolled/);
+  assert.match(src, /Amex cards ready — starting sync/);
+  assert.match(src, /captureNextAmexCardInOrder/);
+  assert.match(src, /beginAmexCardCapture/);
+  assert.doesNotMatch(src, /switchToNextAmexCard/);
+  assert.match(src, /scheduleAmexCaptureWait/);
+  assert.match(src, /nudge re-click/);
+  assert.match(src, /timeout without CAPTURE_JSON/);
+  assert.match(src, /ignore stale CARD_SWITCHED/);
+  assert.match(src, /bounce via other card/);
+  assert.match(src, /refreshAfterClick:\s*true/);
+  assert.match(src, /buildAmexSwitchCardJs\(other\.testId, 1200\)/);
+  assert.doesNotMatch(src, /advanceAmexSync\(amexExpectedRef\.current\)/);
+  // Opaque cover (no WebView flash through alpha).
+  assert.match(src, /backgroundColor: '#F0F7EE'/);
+  // Keep cover stable through Amex save — do not blank before advance.
+  assert.match(src, /Keep syncing=true through save/);
+  // Cover uses expected card label, not raw DOM cardLabel on CARD_SWITCHED.
+  const switched = src.match(
+    /if \(data\.type === 'CARD_SWITCHED'\) \{[\s\S]*?if \(bank === 'chase'\)/,
+  )?.[0] || '';
+  assert.match(switched, /amexCardDisplayLabel/);
+  assert.match(switched, /scheduleAmexCaptureWait/);
+  assert.match(switched, /ignore stale CARD_SWITCHED/);
 });

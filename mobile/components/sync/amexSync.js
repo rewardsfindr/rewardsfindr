@@ -118,8 +118,124 @@ export const AMEX_OPEN_AND_DETECT_JS = `
 
 // Wait after clicking an Amex card option before posting CARD_SWITCHED.
 export const AMEX_SWITCH_TIMEOUT_MS = 3500;
+/** First wait for CAPTURE_JSON after arm/switch; then one nudge + second wait. */
+export const AMEX_CAPTURE_NUDGE_AFTER_MS = 5000;
+export const AMEX_CAPTURE_READY_TIMEOUT_MS = 12000;
 
-export const buildAmexSwitchCardJs = (testId, timeoutMs = AMEX_SWITCH_TIMEOUT_MS) => `
+/** Display label for cover / save attribution (matches detect last4 shape). */
+export function amexCardDisplayLabel(card) {
+  if (!card || !card.label) return '';
+  return card.label + (card.last4 ? ` (...${card.last4})` : '');
+}
+
+/**
+ * Re-click the expected card to force a fresh ReadOffersHubPresentation when the
+ * SPA reused a cached card (common when returning to the initially selected card).
+ * Keeps capture armed; bumps generation so prior-card replies stay ignored.
+ */
+export const buildAmexNudgeRecaptureJs = (testId) => `
+  (function() {
+    try {
+      var requested = ${JSON.stringify(testId || '')};
+      if (!requested) return;
+      window.__amexCaptureGeneration = (window.__amexCaptureGeneration || 0) + 1;
+      window.__amexBest = null;
+      clearTimeout(window.__amexQuietTimer);
+      window.__amexJsonCaptureArmed = true;
+      var combobox = document.querySelector('[data-testid="simple_switcher_combobox"]');
+      function clickOption() {
+        var option = document.querySelector('[data-testid="' + requested + '"]');
+        if (option) option.click();
+      }
+      var option = document.querySelector('[data-testid="' + requested + '"]');
+      if (option) {
+        option.click();
+        return;
+      }
+      if (combobox) {
+        combobox.click();
+        setTimeout(clickOption, 600);
+      }
+    } catch (e) { /* best-effort nudge */ }
+  })();
+  true;
+`;
+
+/**
+ * Shared filter-chip poke used to force ReadOffersHubPresentation.
+ * Amex offer filters are role=option with multiSelect* / selectCustom* testIds
+ * (not data-testid*="filter") — those are what live CDP counted as "phantom cards".
+ */
+const AMEX_FORCE_OFFERS_REFRESH_INNER = `
+  window.__amexJsonCaptureArmed = true;
+  function amexOfferFilterChip(selectedOnly) {
+    var selected = document.querySelector(
+      '[role="option"][data-testid^="multiSelect"][aria-selected="true"],' +
+      '[role="option"][data-testid^="selectCustom"][aria-selected="true"],' +
+      '[data-testid*="filter"][aria-pressed="true"],' +
+      '[data-testid*="filter"][aria-selected="true"]'
+    );
+    if (selectedOnly) return selected;
+    return selected
+      || document.querySelector(
+        '[role="option"][data-testid^="multiSelect"],' +
+        '[role="option"][data-testid^="selectCustom"],' +
+        '[data-testid*="filter-all"],' +
+        '[data-testid*="RECOMMENDED"]'
+      );
+  }
+  function toggleChip(chip) {
+    if (!chip) return false;
+    chip.click();
+    setTimeout(function() {
+      try { chip.click(); } catch (e2) {}
+    }, 450);
+    return true;
+  }
+  if (toggleChip(amexOfferFilterChip(false))) {
+    /* toggled */
+  }
+`;
+
+/**
+ * After the target card is selected, poke Amex filters so ReadOffersHubPresentation
+ * fires even when the SPA would otherwise reuse a cached card payload.
+ */
+export const buildAmexForceOffersRefreshJs = () => `
+  (function() {
+    try {
+      ${AMEX_FORCE_OFFERS_REFRESH_INNER}
+    } catch (e) { /* best-effort */ }
+  })();
+  true;
+`;
+
+/**
+ * @param {string} testId
+ * @param {number} [timeoutMs]
+ * @param {{ refreshAfterClick?: boolean }} [opts]
+ *   When refreshAfterClick, poke offer filters ~600ms after the option click so a
+ *   cached card still emits ReadOffersHubPresentation before CARD_SWITCHED.
+ */
+export const buildAmexSwitchCardJs = (
+  testId,
+  timeoutMs = AMEX_SWITCH_TIMEOUT_MS,
+  opts = {},
+) => {
+  const refreshAfterClick = Boolean(opts && opts.refreshAfterClick);
+  const refreshHelper = refreshAfterClick
+    ? `
+      function pokeOffersRefresh() {
+        try {
+          ${AMEX_FORCE_OFFERS_REFRESH_INNER}
+        } catch (eRefresh) { /* best-effort */ }
+      }
+    `
+    : '';
+  const refreshCall = refreshAfterClick
+    ? 'setTimeout(pokeOffersRefresh, 600);'
+    : '';
+  return `
   (function() {
     try {
       var combobox = document.querySelector('[data-testid="simple_switcher_combobox"]');
@@ -128,6 +244,7 @@ export const buildAmexSwitchCardJs = (testId, timeoutMs = AMEX_SWITCH_TIMEOUT_MS
         return;
       }
       var requested = ${JSON.stringify(testId)};
+      ${refreshHelper}
       function choose(attempt) {
         var option = document.querySelector('[data-testid="' + requested + '"]');
         if (!option) {
@@ -145,6 +262,7 @@ export const buildAmexSwitchCardJs = (testId, timeoutMs = AMEX_SWITCH_TIMEOUT_MS
         window.__amexBest = null;
         clearTimeout(window.__amexQuietTimer);
         option.click();
+        ${refreshCall}
         setTimeout(function() {
           var displayEl = document.querySelector('[data-testid="simple_switcher_selected_option_display"]');
           var nameEl    = displayEl ? displayEl.querySelector('[data-testid="simple_switcher_display_name"]') : null;
@@ -171,6 +289,7 @@ export const buildAmexSwitchCardJs = (testId, timeoutMs = AMEX_SWITCH_TIMEOUT_MS
   })();
   true;
 `;
+};
 
 export const AMEX_READ_CARD_LABEL_JS = `
   (function() {
@@ -189,11 +308,19 @@ export const buildAmexClearFiltersJs = () => `
   (function() {
     try {
       var activeFilters = document.querySelectorAll(
-        '[data-testid*="filter"][aria-pressed="true"], [data-testid*="filter"][aria-selected="true"]'
+        '[role="option"][data-testid^="multiSelect"][aria-selected="true"],' +
+        '[role="option"][data-testid^="selectCustom"][aria-selected="true"],' +
+        '[data-testid*="filter"][aria-pressed="true"],' +
+        '[data-testid*="filter"][aria-selected="true"]'
       );
       activeFilters.forEach(function(chip) { chip.click(); });
-      var allChip = document.querySelector('[data-testid*="filter-all"], [data-testid*="RECOMMENDED"]');
-      if (allChip && allChip.getAttribute('aria-pressed') !== 'true') {
+      var allChip = document.querySelector(
+        '[data-testid*="filter-all"], [data-testid*="RECOMMENDED"],' +
+        '[role="option"][data-testid^="multiSelect"],' +
+        '[role="option"][data-testid^="selectCustom"]'
+      );
+      if (allChip && allChip.getAttribute('aria-selected') !== 'true'
+          && allChip.getAttribute('aria-pressed') !== 'true') {
         allChip.click();
       }
     } catch(e) { /* silent — filter clear is best-effort */ }
@@ -352,6 +479,120 @@ export const amexHandleLoadEnd = ({
 
   return { onOffersPage, onLogin: !!onLogin, detectedPhase };
 };
+
+/**
+ * Attribute a CAPTURE_JSON to the card we switched to, not the DOM label.
+ *
+ * Amex can keep the previous card's display name for a beat after click, while
+ * ReadOffersHubPresentation already returned the new card's offers. Trusting
+ * DOM cardLabel then collapses both saves onto one name via replaceCardPass
+ * (Home tile "1 card" after an of-2 walk). Prefer expectedTestId from
+ * CARD_SWITCHED / buildAmexSwitchCardJs.
+ */
+export function resolveAmexCaptureAttribution({
+  cards = [],
+  expectedTestId = null,
+  pendingCardLabel = null,
+  domCardLabel = null,
+} = {}) {
+  const list = Array.isArray(cards) ? cards : [];
+  const labelFor = (card) => {
+    if (!card) return null;
+    const name = card.label || '';
+    return name + (card.last4 ? ` (...${card.last4})` : '');
+  };
+  const byExpected = expectedTestId
+    ? list.find((c) => c && c.testId === expectedTestId)
+    : null;
+  if (byExpected) {
+    const cardLabel = labelFor(byExpected);
+    return {
+      capturedTestId: byExpected.testId,
+      cardLabel,
+      source: 'expectedTestId',
+      domCardLabel: domCardLabel || null,
+      labelMismatch: Boolean(domCardLabel && cardLabel && domCardLabel !== cardLabel),
+    };
+  }
+  const byDom = domCardLabel
+    ? list.find((c) => c && labelFor(c) === domCardLabel)
+    : null;
+  if (byDom) {
+    return {
+      capturedTestId: byDom.testId,
+      cardLabel: domCardLabel,
+      source: 'domCardLabel',
+      domCardLabel,
+      labelMismatch: false,
+    };
+  }
+  const cardLabel = pendingCardLabel || domCardLabel || null;
+  return {
+    capturedTestId: null,
+    cardLabel,
+    source: pendingCardLabel ? 'pendingCardLabel' : (domCardLabel ? 'domOnly' : 'none'),
+    domCardLabel: domCardLabel || null,
+    labelMismatch: Boolean(
+      pendingCardLabel && domCardLabel && pendingCardLabel !== domCardLabel,
+    ),
+  };
+}
+
+/** Stable key for a card across eligible/enrolled listboxes (testIds often differ). */
+export function amexCardKey(card) {
+  if (!card) return null;
+  if (card.last4) return `4:${card.last4}`;
+  if (card.label) return `n:${card.label}`;
+  if (card.testId) return `t:${card.testId}`;
+  return null;
+}
+
+/** Match a pending cycle card in a newly detected list (testId → last4 → label). */
+export function matchAmexCard(cards, pending) {
+  const list = Array.isArray(cards) ? cards : [];
+  if (!pending) return null;
+  return list.find((c) => c?.testId && c.testId === pending.testId)
+    || list.find((c) => c?.last4 && pending.last4 && c.last4 === pending.last4)
+    || list.find((c) => c?.label && pending.label && c.label === pending.label)
+    || null;
+}
+
+/**
+ * After MFA / NeedsInput, pick which Amex card to capture next.
+ * Prefer the active per-card cycle (eligible→enrolled) over "first unvisited"
+ * — mid-cycle resume must not skip to Blue Cash while Platinum enrolled is pending.
+ */
+export function resolveAmexResumeCapture({
+  cards = [],
+  cycleCard = null,
+  visitedKeys = null,
+  eligibleOrder = [],
+} = {}) {
+  const list = Array.isArray(cards) ? cards : [];
+  const order = list.length
+    ? list
+    : (Array.isArray(eligibleOrder) ? eligibleOrder : []);
+  const visited = visitedKeys instanceof Set
+    ? visitedKeys
+    : new Set(Array.isArray(visitedKeys) ? visitedKeys : []);
+
+  if (cycleCard) {
+    const match = matchAmexCard(list.length ? list : order, cycleCard);
+    if (match) {
+      return { action: 'capture_card', card: match, reason: 'cycle' };
+    }
+    return { action: 'redetect', card: null, reason: 'cycle_missing', cycleCard };
+  }
+
+  const next = order.find((c) => {
+    const key = amexCardKey(c);
+    return c?.testId && key && !visited.has(key);
+  });
+  if (next) {
+    return { action: 'capture_card', card: next, reason: 'next_unvisited' };
+  }
+  return { action: 'done', card: null, reason: 'all_visited' };
+}
 
 /**
  * Apply one AMEX_CARDS_DETECTED message to RN walk state.

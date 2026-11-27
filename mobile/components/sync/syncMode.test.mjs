@@ -22,6 +22,7 @@ import {
   shouldForceCitiOffersRedirect,
   chaseCoverProgress,
   amexCoverProgress,
+  amexCoverStatusLine,
   urlMatchesAnyPath,
 } from './syncMode.js';
 import { BANK_CONFIG } from './bankConfig.js';
@@ -751,7 +752,46 @@ test('non-Amex banks never pass shouldAutoStartAmex', () => {
   }
 });
 
-test('Amex NeedsInput resume continues walk without Chase planner', () => {
+test('Amex NeedsInput resume prefers cycle / continue_walk; enrolled-complete is full_start', () => {
+  assert.deepEqual(
+    planAmexNeedsInputResume({
+      cardOptionsLength: 2,
+      visitedKeyCount: 0,
+      totalCards: 2,
+      syncPhase: 'enrolled',
+      hasCycleCard: true,
+    }),
+    { action: 'continue_cycle', phase: 'enrolled' },
+  );
+  assert.deepEqual(
+    planAmexNeedsInputResume({
+      cardOptionsLength: 2,
+      visitedKeyCount: 1,
+      totalCards: 2,
+      syncPhase: 'eligible',
+      hasCycleCard: false,
+    }),
+    { action: 'continue_walk', phase: 'eligible' },
+  );
+  assert.deepEqual(
+    planAmexNeedsInputResume({
+      cardOptionsLength: 2,
+      visitedKeyCount: 2,
+      totalCards: 2,
+      syncPhase: 'enrolled',
+      hasCycleCard: false,
+    }),
+    { action: 'full_start' },
+  );
+  assert.deepEqual(
+    planAmexNeedsInputResume({
+      cardOptionsLength: 0,
+      visitedKeyCount: 0,
+      syncPhase: 'eligible',
+    }),
+    { action: 'full_start' },
+  );
+  // Legacy visitedCount still works as alias.
   assert.deepEqual(
     planAmexNeedsInputResume({
       cardOptionsLength: 4,
@@ -760,23 +800,7 @@ test('Amex NeedsInput resume continues walk without Chase planner', () => {
     }),
     { action: 'continue_walk', phase: 'eligible' },
   );
-  assert.deepEqual(
-    planAmexNeedsInputResume({
-      cardOptionsLength: 4,
-      visitedCount: 4,
-      syncPhase: 'eligible',
-    }),
-    { action: 'phase_to_enrolled' },
-  );
-  assert.deepEqual(
-    planAmexNeedsInputResume({
-      cardOptionsLength: 0,
-      visitedCount: 0,
-      syncPhase: 'eligible',
-    }),
-    { action: 'full_start' },
-  );
-  // Enrolled-complete → full_start (visited >= total on enrolled phase).
+  // Enrolled-complete via legacy visitedCount → full_start (not phase_to_enrolled).
   assert.deepEqual(
     planAmexNeedsInputResume({
       cardOptionsLength: 4,
@@ -793,6 +817,14 @@ test('Amex NeedsInput resume continues walk without Chase planner', () => {
     }).action,
     'arm_capture',
   );
+  assert.notEqual(
+    planAmexNeedsInputResume({
+      cardOptionsLength: 4,
+      visitedCount: 4,
+      syncPhase: 'eligible',
+    }).action,
+    'phase_to_enrolled',
+  );
 });
 
 test('amexCoverProgress matches Chase math; AMEX_SWITCH_TIMEOUT_MS stays 3500', () => {
@@ -804,6 +836,65 @@ test('amexCoverProgress matches Chase math; AMEX_SWITCH_TIMEOUT_MS stays 3500', 
   assert.equal(
     amexCoverProgress({ syncedCount: 0, totalCards: 4, inFlight: true }).coverIndex,
     1,
+  );
+});
+
+test('amexCoverStatusLine is blank unless actively capturing; no eligible/saved noise', () => {
+  assert.equal(
+    amexCoverStatusLine({
+      active: false,
+      cardLabel: 'Blue Cash Preferred®',
+      cardIndex: 1,
+      cardsInPhase: 2,
+    }),
+    '',
+  );
+  assert.equal(
+    amexCoverStatusLine({
+      syncing: false,
+      switching: true,
+      cardLabel: 'Platinum Card®',
+      cardIndex: 1,
+      cardsInPhase: 2,
+    }),
+    '',
+  );
+  assert.equal(
+    amexCoverStatusLine({
+      syncing: true,
+      switching: true,
+      cardLabel: 'Platinum Card®',
+      cardIndex: 1,
+      cardsInPhase: 2,
+    }),
+    '',
+  );
+  assert.equal(
+    amexCoverStatusLine({
+      active: true,
+      cardLabel: 'Platinum Card®',
+      cardIndex: 1,
+      cardsInPhase: 2,
+    }),
+    'Syncing Platinum Card® · 1 of 2',
+  );
+  assert.equal(
+    amexCoverStatusLine({
+      syncing: true,
+      cardLabel: 'Blue Cash Preferred®',
+      cardIndex: 2,
+      cardsInPhase: 2,
+    }),
+    'Syncing Blue Cash Preferred® · 2 of 2',
+  );
+  assert.doesNotMatch(
+    amexCoverStatusLine({
+      active: true,
+      cardLabel: 'Platinum Card®',
+      cardIndex: 1,
+      cardsInPhase: 2,
+    }),
+    /eligible|activated|saved/i,
   );
 });
 
@@ -839,15 +930,19 @@ test('SyncWebView wires Amex auto-start with cards-ready gate and arm-before-swi
     /const startAmexCapture = \(\) => \{[\s\S]*?startingAmexRef\.current = false;\r?\n  \};/,
   )?.[0] || '';
   assert.match(startAmexBlock, /buildAmexJsonCaptureJs/);
-  assert.match(startAmexBlock, /switchToNextAmexCard/);
+  assert.match(startAmexBlock, /captureNextAmexCardInOrder/);
   assert.match(startAmexBlock, /__amexJsonCaptureArmed = false/);
   assert.match(startAmexBlock, /AMEX_OPEN_AND_DETECT_JS/);
-  // NeedsInput resume must not call Chase planner.
+  // NeedsInput resume must prefer cycle card — not Chase planner / blind next.
   const resumeAmexBlock = src.match(
     /const resumeAmexCapture = \(\) => \{[\s\S]*?startingAmexRef\.current = false;\r?\n  \};/,
   )?.[0] || '';
   assert.match(resumeAmexBlock, /planAmexNeedsInputResume/);
+  assert.match(resumeAmexBlock, /resolveAmexResumeCapture/);
+  assert.match(resumeAmexBlock, /amexCycleCardRef/);
+  assert.match(resumeAmexBlock, /hasCycleCard/);
   assert.doesNotMatch(resumeAmexBlock, /planChaseNeedsInputResume/);
+  assert.doesNotMatch(resumeAmexBlock, /phase_to_enrolled/);
   // Cap One / US Bank auto-start must not appear.
   assert.doesNotMatch(src, /shouldAutoStartUsBank/);
   assert.doesNotMatch(src, /shouldAutoStartCapitalOne|capital_one.*autoStart/);

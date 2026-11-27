@@ -309,25 +309,67 @@ export function amexCoverProgress(args) {
 }
 
 /**
- * After MFA / NeedsInput, plan Amex resume without Chase walk semantics.
- * Continue the current eligible→enrolled walk from the next unsaved card;
- * never claim planChaseNeedsInputResume.
+ * Amex cover subtitle from an explicit active-capture detail.
+ * Blank while detail is null (pre-sync bounce / arming switch).
+ * No "eligible"/"activated", no mid-walk "N saved".
+ */
+export function amexCoverStatusLine({
+  active,
+  cardLabel = '',
+  cardIndex = 1,
+  cardsInPhase = 1,
+  // Legacy: syncing && !switching when `active` is omitted.
+  syncing,
+  switching = false,
+} = {}) {
+  const show = typeof active === 'boolean'
+    ? active
+    : Boolean(syncing) && !switching;
+  if (!show) return '';
+  const index = Math.max(1, Number(cardIndex) || 1);
+  const total = Math.max(1, Number(cardsInPhase) || 1);
+  return `Syncing ${cardLabel || 'card'} · ${index} of ${total}`;
+}
+
+/**
+ * After MFA / NeedsInput, plan Amex resume for the per-card walk
+ * (eligible→enrolled under one cover line, then next card).
+ * Prefer an active cycle card over "next unvisited" / all-phase hops.
+ * Never claim planChaseNeedsInputResume.
+ *
+ * @param {object} args
+ * @param {number} [args.cardOptionsLength]
+ * @param {number} [args.visitedKeyCount] completed card cycles (amexVisitedKeys)
+ * @param {number} [args.totalCards] cards in the walk (eligible order length)
+ * @param {string} [args.syncPhase]
+ * @param {boolean} [args.hasCycleCard] amexCycleCardRef set mid eligible→enrolled
+ * @param {number} [args.visitedCount] legacy alias for visitedKeyCount
  */
 export function planAmexNeedsInputResume({
   cardOptionsLength = 0,
-  visitedCount = 0,
+  visitedKeyCount = 0,
+  totalCards = 0,
   syncPhase = 'eligible',
+  hasCycleCard = false,
+  visitedCount = 0,
 } = {}) {
-  const total = Number(cardOptionsLength) || 0;
-  const visited = Number(visitedCount) || 0;
+  const total = Math.max(
+    Number(totalCards) || 0,
+    Number(cardOptionsLength) || 0,
+  );
+  const done = Math.max(Number(visitedKeyCount) || 0, Number(visitedCount) || 0);
+  const phase = syncPhase || 'eligible';
+
+  // Mid-cycle (e.g. eligible saved, enrolled pending) — resume that card.
+  if (hasCycleCard) {
+    return { action: 'continue_cycle', phase };
+  }
   if (total < 1) {
     return { action: 'full_start' };
   }
-  if (visited < total) {
-    return { action: 'continue_walk', phase: syncPhase || 'eligible' };
+  if (done < total) {
+    return { action: 'continue_walk', phase };
   }
-  if (syncPhase === 'eligible') {
-    return { action: 'phase_to_enrolled' };
-  }
+  // All per-card cycles finished (enrolled-complete → full_start).
   return { action: 'full_start' };
 }
