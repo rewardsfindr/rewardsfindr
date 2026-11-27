@@ -592,6 +592,7 @@ test('SyncWebView never advances Amex walk on capture timeout; walks display ord
   assert.match(src, /AMEX_CAPTURE_NUDGE_AFTER_MS/);
   assert.match(src, /AMEX_CAPTURE_READY_TIMEOUT_MS/);
   assert.match(src, /amexCoverStatusLine/);
+  assert.match(src, /switching,/);
   assert.match(src, /captureNextAmexCardInOrder/);
   assert.match(src, /beginAmexCardCapture/);
   assert.doesNotMatch(src, /switchToNextAmexCard/);
@@ -605,6 +606,8 @@ test('SyncWebView never advances Amex walk on capture timeout; walks display ord
   assert.doesNotMatch(src, /advanceAmexSync\(amexExpectedRef\.current\)/);
   // Opaque cover (no WebView flash through alpha).
   assert.match(src, /backgroundColor: '#F0F7EE'/);
+  // Keep cover stable through Amex save — do not blank before advance.
+  assert.match(src, /Keep syncing=true through save/);
   // Cover uses expected card label, not raw DOM cardLabel on CARD_SWITCHED.
   const switched = src.match(
     /if \(data\.type === 'CARD_SWITCHED'\) \{[\s\S]*?if \(bank === 'chase'\)/,

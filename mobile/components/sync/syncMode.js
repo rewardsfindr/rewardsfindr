@@ -309,19 +309,22 @@ export function amexCoverProgress(args) {
 }
 
 /**
- * Amex cover subtitle. Blank unless actively capturing.
- * No "eligible"/"activated", no mid-walk "N saved" — just card name + monotonic N of M.
+ * Amex cover subtitle. Blank unless that card is actively capturing
+ * (not during bounce / arming switch). No "eligible"/"activated", no mid-walk
+ * "N saved" — `Syncing {card} · {n} of {N}` with monotonic n.
  */
 export function amexCoverStatusLine({
   syncing = false,
+  switching = false,
   cardLabel = '',
   cardIndex = 1,
   cardsInPhase = 1,
 } = {}) {
-  if (!syncing) return '';
+  // Bounce / arm-before-switch: keep cover blank (no card text).
+  if (!syncing || switching) return '';
   const index = Math.max(1, Number(cardIndex) || 1);
   const total = Math.max(1, Number(cardsInPhase) || 1);
-  return `${cardLabel || 'card'} · card ${index} of ${total}`;
+  return `Syncing ${cardLabel || 'card'} · ${index} of ${total}`;
 }
 
 /**

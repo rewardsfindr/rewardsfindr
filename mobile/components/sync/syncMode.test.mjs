@@ -808,11 +808,31 @@ test('amexCoverProgress matches Chase math; AMEX_SWITCH_TIMEOUT_MS stays 3500', 
   );
 });
 
-test('amexCoverStatusLine is blank unless syncing; no eligible/saved noise', () => {
+test('amexCoverStatusLine is blank unless actively capturing; no eligible/saved noise', () => {
   assert.equal(
     amexCoverStatusLine({
       syncing: false,
       cardLabel: 'Blue Cash Preferred®',
+      cardIndex: 1,
+      cardsInPhase: 2,
+    }),
+    '',
+  );
+  assert.equal(
+    amexCoverStatusLine({
+      syncing: false,
+      switching: true,
+      cardLabel: 'Platinum Card®',
+      cardIndex: 1,
+      cardsInPhase: 2,
+    }),
+    '',
+  );
+  assert.equal(
+    amexCoverStatusLine({
+      syncing: true,
+      switching: true,
+      cardLabel: 'Platinum Card®',
       cardIndex: 1,
       cardsInPhase: 2,
     }),
@@ -825,7 +845,7 @@ test('amexCoverStatusLine is blank unless syncing; no eligible/saved noise', () 
       cardIndex: 1,
       cardsInPhase: 2,
     }),
-    'Platinum Card® · card 1 of 2',
+    'Syncing Platinum Card® · 1 of 2',
   );
   assert.equal(
     amexCoverStatusLine({
@@ -834,7 +854,7 @@ test('amexCoverStatusLine is blank unless syncing; no eligible/saved noise', () 
       cardIndex: 2,
       cardsInPhase: 2,
     }),
-    'Blue Cash Preferred® · card 2 of 2',
+    'Syncing Blue Cash Preferred® · 2 of 2',
   );
   assert.doesNotMatch(
     amexCoverStatusLine({

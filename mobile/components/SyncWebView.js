@@ -1455,9 +1455,9 @@ export default function SyncWebView({ visible, bank, onClose, onSuccess }) {
       phase: isWells || isCiti || isUsBank ? '' : phase,
     };
     syncedCardsRef.current = replaceCardPass(syncedCardsRef.current, savedCard);
-    setSyncing(false);
 
     if (bank === 'wells_fargo' || bank === 'citi' || bank === 'us_bank') {
+      setSyncing(false);
       const total = syncedCardsRef.current.reduce((sum, card) => sum + card.count, 0);
       setMode(SYNC_MODES.DONE);
       onSuccess(total, syncedCardsRef.current);
@@ -1466,12 +1466,16 @@ export default function SyncWebView({ visible, bank, onClose, onSuccess }) {
     }
 
     if (bank === 'amex') {
+      // Keep syncing=true through save so cover does not blank/flicker mid-card.
+      // beginAmexCardCapture / phase transition clears it when the next switch starts.
       syncedCountRef.current += 1;
       setSyncedUiCount(syncedCountRef.current);
       armStepTimer();
       advanceAmexSync(capturedTestId);
       return;
     }
+
+    setSyncing(false);
 
     syncedCountRef.current += 1;
     setSyncedUiCount(syncedCountRef.current);
@@ -1611,7 +1615,11 @@ export default function SyncWebView({ visible, bank, onClose, onSuccess }) {
           if (selected?.testId) amexDomSelectedRef.current = selected.testId;
         }
         cardsDiscovered.current = applied.cardsDiscovered;
-        setCurrentCard(data.selectedLabel || null);
+        // Do not overwrite cover/expected card from detect while a walk is in flight —
+        // selectedLabel can lag and disagree with WebView / expectedTestId.
+        if (!syncStartedRef.current) {
+          setCurrentCard(data.selectedLabel || null);
+        }
         if (applied.amexCardsReady) {
           setAmexCardsReady(true);
           amexCardsReadyRef.current = true;
@@ -1983,9 +1991,26 @@ export default function SyncWebView({ visible, bank, onClose, onSuccess }) {
     cardsInPhase,
     (cardIndexUi >= 0 ? cardIndexUi : 0) + 1,
   );
+  // Cover label follows the walk target (pending/expected), not lagging DOM selectedLabel.
+  const amexCoverLabel = (() => {
+    if (bank !== 'amex') return cardName || currentCard || 'card';
+    const expected = amexExpectedRef.current
+      ? cardOptionsRef.current.find((c) => c?.testId === amexExpectedRef.current)
+      : null;
+    if (expected) {
+      const { cardName: expectedName } = parseCardLabel(amexCardDisplayLabel(expected));
+      return expectedName || amexCardDisplayLabel(expected);
+    }
+    if (pendingCardLabelRef.current) {
+      const { cardName: pendingName } = parseCardLabel(pendingCardLabelRef.current);
+      return pendingName || pendingCardLabelRef.current;
+    }
+    return cardName || currentCard || 'card';
+  })();
   const amexCoverSub = amexCoverStatusLine({
     syncing,
-    cardLabel: cardName || currentCard || 'card',
+    switching,
+    cardLabel: amexCoverLabel,
     cardIndex: phaseCardIndex,
     cardsInPhase,
   });
@@ -1993,7 +2018,7 @@ export default function SyncWebView({ visible, bank, onClose, onSuccess }) {
     ? (bank === 'amex' ? '' : 'Switching card...')
     : syncing
       ? bank === 'amex'
-        ? `Syncing offers — ${cardName || 'card'} (${phaseCardIndex} of ${cardsInPhase})...`
+        ? amexCoverSub || 'Syncing Amex offers…'
         : `Syncing ${phaseLabel} offers — ${cardName || 'card'} (${coverProgress.coverIndex} of ${totalCards})...`
       : `Processing...`;
 
