@@ -995,16 +995,25 @@ export default function SyncWebView({ visible, bank, onClose, onSuccess }) {
     startingCitiRef.current = false;
   };
 
-  /** Shared US Bank start path for auto-start, Sync Offers, and Try again. */
+  /** Shared US Bank start path for auto-start, Sync Offers, and Try again.
+   * Cash Back Deals URL only — never capture from customer-dashboard / home. */
   const startUsBankCapture = () => {
     if (bank !== 'us_bank') return;
     if (startingUsBankRef.current || syncStartedRef.current) return;
+    if (!onOffersPageRef.current || onLoginPageRef.current || usBankSignedInRef.current !== true) {
+      console.log('[us-bank-capture] refuse — not on signed-in Cash Back Deals', {
+        onOffersPage: onOffersPageRef.current,
+        onLoginPage: onLoginPageRef.current,
+        signedIn: usBankSignedInRef.current,
+      });
+      return;
+    }
     startingUsBankRef.current = true;
     autoStartConsumedRef.current = true;
     setCurrentCard('US Bank');
     enterCapturing();
-    // Install/refresh hook, then poll stash like Wells/Chase when-ready —
-    // first auto-start often races US_BANK_ON_OFFERS before getInsights lands.
+    // Install/refresh deals-only hook (clears home stash), then poll until the
+    // OfferHub getInsights count settles — first auto-start often races the stash.
     webViewRef.current?.injectJavaScript(buildUsBankOfferCaptureJs());
     webViewRef.current?.injectJavaScript(
       buildUsBankCaptureWhenReadyJs(
@@ -1180,6 +1189,13 @@ export default function SyncWebView({ visible, bank, onClose, onSuccess }) {
     }
 
     if (bank === 'us_bank') {
+      if (!onOffersPage || onLoginPage || usBankSignedIn !== true) {
+        Alert.alert(
+          'Cash Back Deals required',
+          'Open US Bank Cash Back Deals (not Home / customer-dashboard), then tap Sync Offers.',
+        );
+        return;
+      }
       if (syncModeRef.current === SYNC_MODES.FAILED) {
         setMode(nextSyncMode(SYNC_MODES.FAILED, 'sync_offers'));
       }

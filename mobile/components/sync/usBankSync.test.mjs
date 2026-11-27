@@ -98,9 +98,10 @@ class FakeXHR {
   }
 }
 
-function installHook() {
+function installHook(href = US_BANK_OFFERS_URL) {
   const messages = [];
   const window = {
+    location: { href },
     XMLHttpRequest: FakeXHR,
     ReactNativeWebView: {
       postMessage(raw) { messages.push(JSON.parse(raw)); },
@@ -111,6 +112,7 @@ function installHook() {
 }
 
 function readOffers(window, messages) {
+  if (!window.location) window.location = { href: US_BANK_OFFERS_URL };
   new Function('window', 'document', buildUsBankReadJs())(window, {});
   return messages.at(-1);
 }
@@ -338,6 +340,17 @@ test('customer-dashboard after login is onHomeShell + signedIn (Last login must 
   assert.equal(dash.onHomeShell, true);
   assert.equal(dash.signedIn, true, 'Log out + Last login must still be signedIn');
   assert.equal(dash.expired, false);
+
+  // Nav label "Cash Back Deals" on home must NOT flip onOffers (that started
+  // capture against the short dashboard getInsights list).
+  const dashNav = run(
+    'https://onlinebanking.usbank.com/digital/servicing/shellapp/#/customer-dashboard',
+    'Welcome back.\nCash Back Deals\nAccounts\nLog out\nLast login: November 27, 12:13 a.m. CT',
+  );
+  assert.ok(dashNav);
+  assert.equal(dashNav.onOffers, false, 'body text Cash Back Deals is not OfferHub');
+  assert.equal(dashNav.onHomeShell, true);
+  assert.equal(dashNav.signedIn, true);
 });
 
 test('US_BANK_ON_OFFERS posts signedIn true on OfferHub deals without Log out chrome', () => {
@@ -408,7 +421,7 @@ test('stripUsBankOffers keeps offer fields and strips tokens and tracking', () =
 });
 
 test('hooks getInsights / v2 XHR and posts fields without secrets', () => {
-  const { window, messages } = installHook();
+  const { window, messages } = installHook(US_BANK_OFFERS_URL);
   const fixture = loadFixtureWithSecrets();
   const xhr = new window.XMLHttpRequest();
   xhr.open('POST', 'https://onlinebanking.usbank.com/graphql/v2');
@@ -429,11 +442,25 @@ test('does not capture a failed response or an unrecognized body', () => {
   xhr.status = 500;
   xhr.responseText = JSON.stringify(loadFixture());
   xhr.send('{"operationName":"getInsights"}');
-  assert.equal(window.__usBankLastOffers, undefined);
+  assert.equal(window.__usBankLastOffers, null);
 
   xhr.status = 200;
   xhr.responseText = JSON.stringify({ status: 'ok', hello: 'world' });
   xhr.send('{"operationName":"getInsights"}');
+  const message = readOffers(window, messages);
+  assert.equal(message.type, 'US_BANK_CAPTURE_UNAVAILABLE');
+});
+
+test('customer-dashboard getInsights is never stashed or captured', () => {
+  const { window, messages } = installHook(
+    'https://onlinebanking.usbank.com/digital/servicing/shellapp/#/customer-dashboard',
+  );
+  const xhr = new window.XMLHttpRequest();
+  xhr.open('POST', 'https://onlinebanking.usbank.com/graphql/v2');
+  xhr.responseText = JSON.stringify(loadFixture());
+  xhr.send(JSON.stringify({ operationName: 'getInsights', useCaseId: 'CardLytics' }));
+  assert.equal(window.__usBankLastOffers, null);
+
   const message = readOffers(window, messages);
   assert.equal(message.type, 'US_BANK_CAPTURE_UNAVAILABLE');
 });
@@ -600,6 +627,7 @@ test('hooks getInsights on fetch and ignores a non-2xx response', async () => {
   const messages = [];
   const fixture = loadFixture();
   const window = {
+    location: { href: US_BANK_OFFERS_URL },
     fetch(input) {
       const url = typeof input === 'string' ? input : input.url;
       return Promise.resolve({
@@ -617,13 +645,14 @@ test('hooks getInsights on fetch and ignores a non-2xx response', async () => {
   };
   new Function('window', 'document', buildUsBankOfferCaptureJs())(window, {});
   await window.fetch('https://onlinebanking.usbank.com/graphql/v2-fail');
-  assert.equal(window.__usBankLastOffers, undefined);
+  assert.equal(window.__usBankLastOffers, null);
   await window.fetch('https://onlinebanking.usbank.com/graphql/v2-ok', {
     body: '{"operationName":"getInsights"}',
   });
   // give clone().text() a tick
   await new Promise((resolve) => setTimeout(resolve, 0));
   assert.ok(window.__usBankLastOffers?.ads?.length >= 4);
+  assert.equal(window.__usBankLastOffers.fromDeals, true);
 });
 
 function flatOffer(offerId, merchantName = 'Ready Cafe') {
@@ -648,6 +677,7 @@ test('capture-when-ready waits until getInsights stash count stays stable', asyn
 
   const messages = [];
   const window = {
+    location: { href: US_BANK_OFFERS_URL },
     __usBankLastOffers: null,
     ReactNativeWebView: { postMessage(raw) { messages.push(JSON.parse(raw)); } },
     scrollBy() {},
@@ -665,12 +695,13 @@ test('capture-when-ready waits until getInsights stash count stays stable', asyn
   await new Promise((r) => setTimeout(r, 60));
   assert.equal(messages.length, 0);
 
-  window.__usBankLastOffers = { ads: [flatOffer('READYOFFER1')] };
+  window.__usBankLastOffers = { ads: [flatOffer('READYOFFER1')], fromDeals: true };
   await new Promise((r) => setTimeout(r, 100));
   assert.equal(messages.length, 0, 'first partial page must not capture yet');
 
   window.__usBankLastOffers = {
     ads: [flatOffer('READYOFFER1'), flatOffer('READYOFFER2', 'Second Spot')],
+    fromDeals: true,
   };
   await new Promise((r) => setTimeout(r, 100));
   assert.equal(messages.length, 0, 'count just grew — settle clock resets');
@@ -681,9 +712,37 @@ test('capture-when-ready waits until getInsights stash count stays stable', asyn
   assert.equal(messages.at(-1)?.offers.ads[0].offerId, 'READYOFFER1');
 });
 
+test('capture-when-ready refuses customer-dashboard even with a home stash', async () => {
+  const messages = [];
+  const window = {
+    location: {
+      href: 'https://onlinebanking.usbank.com/digital/servicing/shellapp/#/customer-dashboard',
+    },
+    __usBankLastOffers: {
+      ads: [flatOffer('HOME1'), flatOffer('HOME2')],
+      fromDeals: false,
+    },
+    ReactNativeWebView: { postMessage(raw) { messages.push(JSON.parse(raw)); } },
+    scrollBy() {},
+    scrollTo() {},
+    innerHeight: 800,
+  };
+  const document = {
+    scrollingElement: { scrollTop: 0, scrollHeight: 100 },
+    documentElement: { scrollTop: 0, scrollHeight: 100 },
+    body: { scrollTop: 0, scrollHeight: 100 },
+    querySelectorAll() { return []; },
+  };
+  new Function('window', 'document', buildUsBankCaptureWhenReadyJs(400, 40, 80))(window, document);
+  await new Promise((r) => setTimeout(r, 80));
+  assert.equal(messages.at(-1)?.type, 'US_BANK_CAPTURE_UNAVAILABLE');
+  assert.equal(messages.some((m) => m.type === 'US_BANK_OFFERS'), false);
+});
+
 test('capture-when-ready times out with US_BANK_CAPTURE_UNAVAILABLE when stash never lands', async () => {
   const messages = [];
   const window = {
+    location: { href: US_BANK_OFFERS_URL },
     ReactNativeWebView: { postMessage(raw) { messages.push(JSON.parse(raw)); } },
     scrollBy() {},
     scrollTo() {},

@@ -147,9 +147,17 @@ const unwrapUsBankPayloadSource = `function unwrapUsBankPayload(parsed) {
 export const buildUsBankOfferCaptureJs = () => `
   (function() {
     try {
-      if (window.__usBankOfferHookVersion === 1) return;
+      if (window.__usBankOfferHookVersion === 2) return;
+      // Drop any home/dashboard getInsights stash from older hooks before we
+      // install deals-only remember.
+      window.__usBankLastOffers = null;
       var stripUsBankOffers = ${stripUsBankOffersSource};
       var unwrapUsBankPayload = ${unwrapUsBankPayloadSource};
+
+      function onCashBackDealsPage() {
+        var href = String((window.location && window.location.href) || '').toLowerCase();
+        return href.indexOf('cashback-deals') !== -1;
+      }
 
       function looksLikeOffers(text) {
         var probe = String(text || '').toLowerCase();
@@ -158,10 +166,12 @@ export const buildUsBankOfferCaptureJs = () => `
           || probe.indexOf('cardlytics') !== -1;
       }
 
-      // Several responses can match (dashboard insight, a filtered refetch, another
-      // v2 call). Keep every offer id seen so far. A later shorter list must not
-      // become the snapshot that replaces the card. Newer fields for the same id win.
+      // Only stash while on Cash Back Deals. customer-dashboard / home also call
+      // getInsights with a short promo list (~9 ads) — never capture that.
+      // Several deals responses can match; merge by offerId so a later shorter
+      // page does not drop ids already seen. Newer fields for the same id win.
       function remember(text) {
+        if (!onCashBackDealsPage()) return;
         var raw = String(text || '');
         if (!looksLikeOffers(raw)) {
           if (!window.__usBankLastOffers) window.__usBankHookError = 'unrecognized';
@@ -193,7 +203,7 @@ export const buildUsBankOfferCaptureJs = () => `
         take(incoming);
         var ads = [];
         for (var j = 0; j < order.length; j++) ads.push(map[order[j]]);
-        window.__usBankLastOffers = { ads: ads };
+        window.__usBankLastOffers = { ads: ads, fromDeals: true };
         window.__usBankHookError = '';
       }
 
@@ -288,7 +298,7 @@ export const buildUsBankOfferCaptureJs = () => `
           });
         };
       }
-      window.__usBankOfferHookVersion = 1;
+      window.__usBankOfferHookVersion = 2;
     } catch (e) {
       window.__usBankHookError = 'unreadable';
     }
@@ -334,9 +344,10 @@ export const buildUsBankOffersVisibleJs = () => `
       var href = String((window.location && window.location.href) || '').toLowerCase();
       var text = document.body ? (document.body.innerText || '') : '';
       var leading = text.slice(0, 1200);
+      // URL only — customer-dashboard / home often show a "Cash Back Deals" nav
+      // link in body text; that must NOT count as the OfferHub surface.
       var onOffers = href.indexOf('cashback-deals') !== -1
-        || href.indexOf('dominjection/cashback-deals') !== -1
-        || /cash\\s*back\\s*deals/i.test(text);
+        || href.indexOf('dominjection/cashback-deals') !== -1;
       // "Log in" / "Sign on" prompts only — never match "Last login" (\\s* would).
       var hasLoginPrompt = /account\\s*login/i.test(leading)
         || /\\blog\\s+in\\b/i.test(leading)
@@ -487,9 +498,18 @@ const usBankCaptureBodySource = `
         return null;
       }
 
+      function onCashBackDealsPage() {
+        var href = String((window.location && window.location.href) || '').toLowerCase();
+        return href.indexOf('cashback-deals') !== -1;
+      }
+
       function resolveStash() {
-        var stash = window.__usBankLastOffers && Array.isArray(window.__usBankLastOffers.ads)
-          ? stripUsBankOffers(window.__usBankLastOffers)
+        // Never read a home/dashboard promo list into US_BANK_OFFERS.
+        if (!onCashBackDealsPage()) return null;
+        var raw = window.__usBankLastOffers;
+        if (raw && raw.fromDeals === false) return null;
+        var stash = raw && Array.isArray(raw.ads)
+          ? stripUsBankOffers(raw)
           : null;
         if (!stash || !hasOffers(stash)) {
           try { stash = usable(window); } catch (e) { stash = null; }
@@ -501,10 +521,14 @@ const usBankCaptureBodySource = `
       }
 
       function usBankCaptureReady() {
-        return !!resolveStash();
+        return onCashBackDealsPage() && !!resolveStash();
       }
 
       function runUsBankCapture() {
+        if (!onCashBackDealsPage()) {
+          window.ReactNativeWebView.postMessage(JSON.stringify({ type: 'US_BANK_CAPTURE_UNAVAILABLE' }));
+          return;
+        }
         var stash = resolveStash();
         if (!stash) {
           window.ReactNativeWebView.postMessage(JSON.stringify({ type: 'US_BANK_CAPTURE_UNAVAILABLE' }));
@@ -544,6 +568,16 @@ export const buildUsBankCaptureWhenReadyJs = (
   (async function() {
     try {
       ${usBankCaptureBodySource}
+      if (!onCashBackDealsPage()) {
+        window.ReactNativeWebView.postMessage(JSON.stringify({
+          type: 'US_BANK_CAPTURE_UNAVAILABLE',
+        }));
+        return;
+      }
+      // Ignore any leftover home/dashboard stash; wait for deals-page getInsights.
+      if (window.__usBankLastOffers && window.__usBankLastOffers.fromDeals !== true) {
+        window.__usBankLastOffers = null;
+      }
       function stashCount() {
         var stash = resolveStash();
         return stash && Array.isArray(stash.ads) ? stash.ads.length : 0;
