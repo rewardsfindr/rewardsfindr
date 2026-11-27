@@ -356,6 +356,43 @@ test('pageNotFound / signed-out shell marks expired; login form and Sign Off do 
   assert.equal(happy.signedIn, true);
   assert.equal(happy.expired, false);
   assert.equal(happy.onLoginForm, false);
+
+  // "Last sign on" is account chrome, not a Sign On button. Treating it as
+  // logged-out marks the offers page expired and force-login wipes the session.
+  const lastSignOn = probe(
+    'https://online.citi.com/US/nga/products-offers/merchantoffers',
+    'Good afternoon\nLast sign on November 26, 2026 9:41 AM ET\nSign Off\nMerchant Offers\nCVS',
+  );
+  assert.equal(lastSignOn.onOffers, true);
+  assert.equal(lastSignOn.signedIn, true);
+  assert.equal(lastSignOn.expired, false);
+  assert.equal(lastSignOn.onLoginForm, false);
+
+  const lastSignOnHyphen = probe(
+    'https://online.citi.com/US/nga/products-offers/merchantoffers',
+    'Previous sign-on: Nov 26, 2026\nSign Off\nMerchant Offers',
+  );
+  assert.equal(lastSignOnHyphen.signedIn, true);
+  assert.equal(lastSignOnHyphen.expired, false);
+
+  // MFA stays on online.citi.com and still says Sign On, without User ID +
+  // Password. That must not be an expired shell — force-login clears storage.
+  const mfa = probe(
+    'https://online.citi.com/US/ag/otp',
+    'Citi Sign On\nEnter the verification code we sent to your phone\nContinue',
+  );
+  assert.equal(mfa.onOffers, false);
+  assert.equal(mfa.signedIn, false);
+  assert.equal(mfa.onLoginForm, false);
+  assert.equal(mfa.expired, false);
+
+  const marketing = probe(
+    'https://www.citi.com/',
+    'Sign On\nCredit Cards\nBanking',
+  );
+  assert.equal(marketing.onOffers, false);
+  assert.equal(marketing.signedIn, false);
+  assert.equal(marketing.expired, true);
 });
 
 test('force-login clears storage best-effort and navigates to official sign-on', () => {

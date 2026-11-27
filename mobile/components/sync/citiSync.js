@@ -249,18 +249,30 @@ export const buildCitiOffersVisibleJs = () => `
       var head = text.slice(0, 1200);
       var onOffers = href.indexOf('/nga/products-offers/merchantoffers') !== -1
         || href.indexOf('merchantoffers') !== -1;
+      // "Last sign on" / "Previous sign-on" is signed-in chrome, not a Sign On
+      // button. A raw /sign\\s*on/ test treats that header as logged-out.
+      function citiSignOnPrompt(value) {
+        var cleaned = String(value || '')
+          .replace(/last\\s+sign[\\s-]*on/ig, ' ')
+          .replace(/previous\\s+sign[\\s-]*on/ig, ' ');
+        return /sign[\\s-]*on/i.test(cleaned);
+      }
       // Honest signed-in chrome only — never force true from URL match alone
       // (auto-start must require signedIn === true; see citi-pr-67 guideline).
-      var signedIn = /sign\\s*off/i.test(text) && !/sign\\s*on/i.test(text.slice(0, 800));
+      var signedIn = /sign\\s*off/i.test(text) && !citiSignOnPrompt(text.slice(0, 800));
       var onLoginForm = /user\\s*id/i.test(text) && /password/i.test(text)
         && /sign\\s*on/i.test(text);
       var pageNotFound = href.indexOf('pagenotfound') !== -1
         || /looks like that information isn.?t here/i.test(text);
-      // Stale cookie: pageNotFound, or Sign On chrome without a real login form
-      // and without Sign Off (covers merchantoffers shells + public chrome).
+      // Dead session: page-not-found, signed-out Merchant Offers, or the public
+      // marketing site. Do NOT treat every online.citi.com page that says
+      // "sign on" as expired — MFA / soft-token / security-question steps use
+      // that wording, and force-login clears storage.
+      var onPublicSite = href.indexOf('www.citi.com') !== -1
+        && href.indexOf('online.citi.com') === -1;
       var expired = !signedIn && !onLoginForm && (
         pageNotFound
-        || (/sign\\s*on/i.test(head) && (onOffers || pageNotFound || href.indexOf('online.citi.com') !== -1 || href.indexOf('www.citi.com') !== -1))
+        || (citiSignOnPrompt(head) && (onOffers || onPublicSite))
       );
       if (window.ReactNativeWebView) {
         window.ReactNativeWebView.postMessage(JSON.stringify({
