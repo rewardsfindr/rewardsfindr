@@ -15,6 +15,7 @@ import {
   signInWithCredential, signInWithPopup, signInWithRedirect,
 } from 'firebase/auth';
 import { getAuthInstance } from '../lib/firebaseClient.js';
+import { getGoogleWebClientId } from '../lib/googleWebClientId.js';
 import { colors, radii, shadow } from '../shared/theme.js';
 
 let AppleAuthentication = null;
@@ -26,9 +27,11 @@ if (Platform.OS === 'ios') {
   }
 }
 
-if (Platform.OS !== 'web') {
+const googleWebClientId = Platform.OS !== 'web' ? getGoogleWebClientId() : null;
+
+if (Platform.OS !== 'web' && googleWebClientId) {
   GoogleSignin.configure({
-    webClientId: process.env.EXPO_PUBLIC_GOOGLE_CLIENT_ID,
+    webClientId: googleWebClientId,
     scopes: ['profile', 'email'],
     offlineAccess: false,
   });
@@ -81,6 +84,11 @@ export default function LoginScreen() {
           await signInWithRedirect(auth, provider);
         }
         return;
+      }
+      if (!googleWebClientId) {
+        throw new Error(
+          'Google Sign-In is not configured (missing web client id). Rebuild with EXPO_PUBLIC_GOOGLE_CLIENT_ID or google-services.json type-3 client.',
+        );
       }
       await GoogleSignin.hasPlayServices({ showPlayServicesUpdateDialog: true });
       const userInfo = await GoogleSignin.signIn();
