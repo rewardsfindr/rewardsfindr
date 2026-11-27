@@ -146,6 +146,7 @@ export default function SyncWebView({ visible, bank, onClose, onSuccess }) {
   const amexNudgeUsedRef    = useRef(false);
   const amexDomSelectedRef  = useRef(null);
   const amexBounceTargetRef = useRef(null);
+  const amexCoverRevealRef  = useRef(null);
   const syncModeRef         = useRef(SYNC_MODES.AUTH);
   const autoStartConsumedRef = useRef(false);
   const stepTimerRef        = useRef(null);
@@ -177,6 +178,8 @@ export default function SyncWebView({ visible, bank, onClose, onSuccess }) {
   const [progressPeak, setProgressPeak]     = useState(0);
   const [syncPhaseUi, setSyncPhaseUi]       = useState('eligible');
   const [failMessage, setFailMessage]       = useState('');
+  /** Explicit Amex cover card line; null = blank (bounce / arming). */
+  const [amexCoverDetail, setAmexCoverDetail] = useState(null);
 
   const config = BANK_CONFIG[bank] || BANK_CONFIG.chase;
 
@@ -261,6 +264,45 @@ export default function SyncWebView({ visible, bank, onClose, onSuccess }) {
     amexWaitRef.current = null;
   };
 
+  const clearAmexCoverReveal = () => {
+    if (amexCoverRevealRef.current) clearTimeout(amexCoverRevealRef.current);
+    amexCoverRevealRef.current = null;
+  };
+
+  const publishAmexCoverDetail = (card) => {
+    if (!card?.testId) return;
+    const cards = cardOptionsRef.current;
+    const idx = Math.max(0, cards.findIndex((c) => c.testId === card.testId));
+    const full = amexCardDisplayLabel(card);
+    const { cardName: name } = parseCardLabel(full);
+    setAmexCoverDetail({
+      label: name || full || 'card',
+      index: idx + 1,
+      total: Math.max(1, cards.length || cardCount || 1),
+    });
+  };
+
+  const clearAmexCoverDetail = () => {
+    clearAmexCoverReveal();
+    setAmexCoverDetail(null);
+  };
+
+  /** After a short arming blank, show Syncing {card} · n of N while waiting for CAPTURE_JSON. */
+  const scheduleAmexCoverReveal = (card) => {
+    clearAmexCoverReveal();
+    if (!card?.testId) return;
+    const revealFor = card.testId;
+    amexCoverRevealRef.current = setTimeout(() => {
+      amexCoverRevealRef.current = null;
+      if (!syncStartedRef.current) return;
+      if (amexBounceTargetRef.current) return;
+      if (amexExpectedRef.current !== revealFor) return;
+      publishAmexCoverDetail(card);
+      setSwitching(false);
+      setSyncing(true);
+    }, 800);
+  };
+
   const clearAmexArm = () => {
     clearAmexWait();
     captureArmed.current = false;
@@ -275,6 +317,13 @@ export default function SyncWebView({ visible, bank, onClose, onSuccess }) {
    */
   const scheduleAmexCaptureWait = (allowNudge) => {
     clearAmexWait();
+    // Active capture wait — ensure first card (and later) show Syncing n of N.
+    const expectedCard = amexExpectedRef.current
+      ? cardOptionsRef.current.find((c) => c?.testId === amexExpectedRef.current)
+      : null;
+    if (expectedCard) publishAmexCoverDetail(expectedCard);
+    setSwitching(false);
+    setSyncing(true);
     const waitMs = allowNudge
       ? AMEX_CAPTURE_NUDGE_AFTER_MS
       : AMEX_CAPTURE_READY_TIMEOUT_MS;
@@ -302,6 +351,7 @@ export default function SyncWebView({ visible, bank, onClose, onSuccess }) {
   const disarmAmexCapture = () => {
     clearStepTimer();
     clearAmexArm();
+    clearAmexCoverDetail();
     syncStartedRef.current = false;
     startingAmexRef.current = false;
     setSyncStarted(false);
@@ -405,6 +455,8 @@ export default function SyncWebView({ visible, bank, onClose, onSuccess }) {
       amexNudgeUsedRef.current    = false;
       amexDomSelectedRef.current  = null;
       amexBounceTargetRef.current = null;
+      clearAmexCoverReveal();
+      setAmexCoverDetail(null);
       setMode(SYNC_MODES.AUTH);
       setCurrentCard(null);
       setCurrentUrl('');
@@ -464,7 +516,9 @@ export default function SyncWebView({ visible, bank, onClose, onSuccess }) {
    * Capture one Amex card by list order. Cover index = position in cardOptions
    * (monotonic 1..N). If already on that card in the DOM, bounce via another
    * card (or force-refresh) so ReadOffersHubPresentation actually fires.
-   * Cover stays blank until syncing=true (active wait).
+   * Cover subtitle blank during bounce/arming; reveals Syncing {card} · n of N
+   * once active capture starts (do not wait solely on CARD_SWITCHED — first card
+   * often gets CAPTURE_JSON first and never painted the line).
    */
   const beginAmexCardCapture = (card) => {
     if (!card?.testId) return false;
@@ -497,6 +551,7 @@ export default function SyncWebView({ visible, bank, onClose, onSuccess }) {
         });
         amexBounceTargetRef.current = card.testId;
         captureArmed.current = false;
+        clearAmexCoverDetail();
         webViewRef.current?.injectJavaScript(
           `clearTimeout(window.__amexQuietTimer); window.__amexBest = null; window.__amexJsonCaptureArmed = false; true;`,
         );
@@ -507,11 +562,12 @@ export default function SyncWebView({ visible, bank, onClose, onSuccess }) {
         );
         return true;
       }
-      // Sole card: force a filter poke while armed.
+      // Sole card: force a filter poke while armed — show cover immediately.
       captureArmed.current = true;
       webViewRef.current?.injectJavaScript(
         `clearTimeout(window.__amexQuietTimer); window.__amexBest = null; window.__amexJsonCaptureArmed = true; true;`,
       );
+      publishAmexCoverDetail(card);
       setSwitching(false);
       setSyncing(true);
       webViewRef.current?.injectJavaScript(buildAmexForceOffersRefreshJs());
@@ -521,6 +577,7 @@ export default function SyncWebView({ visible, bank, onClose, onSuccess }) {
     }
 
     captureArmed.current = true;
+    clearAmexCoverDetail();
     webViewRef.current?.injectJavaScript(
       `clearTimeout(window.__amexQuietTimer); window.__amexBest = null; window.__amexJsonCaptureArmed = true; true;`,
     );
@@ -531,6 +588,8 @@ export default function SyncWebView({ visible, bank, onClose, onSuccess }) {
         refreshAfterClick: true,
       }),
     );
+    // Reveal first-card (and later) cover without waiting for CARD_SWITCHED.
+    scheduleAmexCoverReveal(card);
     return true;
   };
 
@@ -558,6 +617,7 @@ export default function SyncWebView({ visible, bank, onClose, onSuccess }) {
       cardsDiscovered.current  = false;
       setAmexCardsReady(false);
       amexCardsReadyRef.current = false;
+      clearAmexCoverDetail();
       setSyncing(false);
       setSwitching(false);
       armStepTimer();
@@ -1683,6 +1743,8 @@ export default function SyncWebView({ visible, bank, onClose, onSuccess }) {
             pendingCardLabelRef.current = label;
             setCurrentCard(label);
           }
+          if (expectedCard) publishAmexCoverDetail(expectedCard);
+          clearAmexCoverReveal();
           setSyncing(true);
           amexNudgeUsedRef.current = false;
           // Poke filters so cached cards still emit ReadOffersHubPresentation.
@@ -1905,8 +1967,13 @@ export default function SyncWebView({ visible, bank, onClose, onSuccess }) {
         });
         clearAmexWait();
         clearStepTimer();
+        clearAmexCoverReveal();
         amexNudgeUsedRef.current = false;
         amexBounceTargetRef.current = null;
+        const expectedCard = capturedTestId
+          ? cardOptionsRef.current.find((c) => c?.testId === capturedTestId)
+          : cardOptionsRef.current.find((c) => c?.testId === amexExpectedRef.current);
+        if (expectedCard) publishAmexCoverDetail(expectedCard);
         setSwitching(false);
         setSyncing(true);
         if (capturedTestId) markAmexDomSelected(capturedTestId);
@@ -1991,28 +2058,11 @@ export default function SyncWebView({ visible, bank, onClose, onSuccess }) {
     cardsInPhase,
     (cardIndexUi >= 0 ? cardIndexUi : 0) + 1,
   );
-  // Cover label follows the walk target (pending/expected), not lagging DOM selectedLabel.
-  const amexCoverLabel = (() => {
-    if (bank !== 'amex') return cardName || currentCard || 'card';
-    const expected = amexExpectedRef.current
-      ? cardOptionsRef.current.find((c) => c?.testId === amexExpectedRef.current)
-      : null;
-    if (expected) {
-      const { cardName: expectedName } = parseCardLabel(amexCardDisplayLabel(expected));
-      return expectedName || amexCardDisplayLabel(expected);
-    }
-    if (pendingCardLabelRef.current) {
-      const { cardName: pendingName } = parseCardLabel(pendingCardLabelRef.current);
-      return pendingName || pendingCardLabelRef.current;
-    }
-    return cardName || currentCard || 'card';
-  })();
   const amexCoverSub = amexCoverStatusLine({
-    syncing,
-    switching,
-    cardLabel: amexCoverLabel,
-    cardIndex: phaseCardIndex,
-    cardsInPhase,
+    active: Boolean(amexCoverDetail),
+    cardLabel: amexCoverDetail?.label || '',
+    cardIndex: amexCoverDetail?.index || phaseCardIndex,
+    cardsInPhase: amexCoverDetail?.total || cardsInPhase,
   });
   const statusText = switching && !syncing
     ? (bank === 'amex' ? '' : 'Switching card...')
@@ -2064,7 +2114,9 @@ export default function SyncWebView({ visible, bank, onClose, onSuccess }) {
             : bank === 'citi'
               ? 'Waiting for Merchant Offers to load for sync to begin'
               : bank === 'amex'
-                ? 'Waiting for Amex cards to load for sync to begin'
+                ? (amexCardsReady
+                  ? 'Amex cards ready — starting sync…'
+                  : 'Waiting for Amex cards to load for sync to begin')
                 : 'Waiting for the offers page to load for sync to begin'}
         </Text>
       );
