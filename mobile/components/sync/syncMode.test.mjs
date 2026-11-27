@@ -732,6 +732,19 @@ test('force US Bank Cash Back Deals after login (fresh or expired→login)', () 
   assert.equal(
     shouldForceUsBankOffersRedirect({
       onOffers: false,
+      signedIn: true,
+      onLoginForm: false,
+      leftLogin: true,
+      onHomeShell: true,
+      syncStarted: false,
+      offersRedirected: false,
+    }),
+    true,
+    'customer-dashboard with Log out → Cash Back Deals',
+  );
+  assert.equal(
+    shouldForceUsBankOffersRedirect({
+      onOffers: false,
       signedIn: false,
       onLoginForm: true,
       syncStarted: false,

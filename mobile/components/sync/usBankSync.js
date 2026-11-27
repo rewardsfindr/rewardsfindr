@@ -337,31 +337,42 @@ export const buildUsBankOffersVisibleJs = () => `
       var onOffers = href.indexOf('cashback-deals') !== -1
         || href.indexOf('dominjection/cashback-deals') !== -1
         || /cash\\s*back\\s*deals/i.test(text);
+      // "Log in" / "Sign on" prompts only — never match "Last login" (\\s* would).
+      var hasLoginPrompt = /account\\s*login/i.test(leading)
+        || /\\blog\\s+in\\b/i.test(leading)
+        || /\\bsign\\s+on\\b/i.test(leading);
       // Honest signed-in chrome — Log out is often hidden in a closed menu on
       // OfferHub / post-login home, so also accept authenticated deals UI.
       var signedIn = (/log\\s*out/i.test(text) || /sign\\s*off/i.test(text))
-        && !/log\\s*in/i.test(leading)
-        && !/sign\\s*on/i.test(leading);
+        && !hasLoginPrompt;
       // Real Account login form (or already on /auth/login). Arkose overlays this.
       var onLoginForm = href.indexOf('/auth/login') !== -1
         || ((/username/i.test(text) || /user\\s*id/i.test(text))
           && /password/i.test(text)
-          && /log\\s*in/i.test(text));
+          && (/\\blog\\s+in\\b/i.test(text) || /account\\s*login/i.test(text)));
       var pageNotFound = href.indexOf('pagenotfound') !== -1
         || href.indexOf('page-not-found') !== -1
         || /page\\s*not\\s*found/i.test(text)
         || /looks like that information isn.?t here/i.test(text);
-      var onHomeShell = /\\/(home|dashboard|overview|accounts?)(\\b|\\/|\\?|#|$)/i.test(href)
-        || /welcome\\s*to\\s*online\\s*banking/i.test(leading);
+      // Post-login lands on shellapp/#/customer-dashboard (not /home|/dashboard alone).
+      var onHomeShell = /customer-dashboard/i.test(href)
+        || /\\/shellapp/i.test(href)
+        || /\\/(home|dashboard|overview|accounts?)(\\b|\\/|\\?|#|$)/i.test(href)
+        || /welcome\\s*(back[,]?|to\\s*online\\s*banking)/i.test(leading);
       // Public marketing site (www.usbank.com) after deals bounce — not Account login.
       var onMarketingHome = href.indexOf('www.usbank.com') !== -1
         || (/^https?:\\/\\/([^/]*\\.)?usbank\\.com(\\/|$)/i.test(href)
           && href.indexOf('onlinebanking.usbank.com') === -1);
       // OfferHub with live deals and no Account login / Log in chrome ≈ session ok.
       if (!signedIn && onOffers && !onLoginForm
-          && !/account\\s*login/i.test(leading)
-          && !/log\\s*in/i.test(leading)
+          && !hasLoginPrompt
           && (/cash\\s*back/i.test(text) || /\\d+\\s*%/.test(text) || /activate/i.test(text))) {
+        signedIn = true;
+      }
+      // Customer dashboard / shellapp after login — Log out may lag; still hop.
+      if (!signedIn && onHomeShell && !onLoginForm && !hasLoginPrompt
+          && href.indexOf('onlinebanking.usbank.com') !== -1
+          && href.indexOf('/auth/login') === -1) {
         signedIn = true;
       }
       // Stale cookie: not-found, logged-out deals, Log-in home shell, or marketing.
@@ -369,8 +380,8 @@ export const buildUsBankOffersVisibleJs = () => `
       // Do NOT treat MFA / soft-token pages (non-login, non-offers) as expired.
       var expired = !signedIn && !onLoginForm && (
         pageNotFound
-        || (onOffers && /log\\s*in/i.test(leading))
-        || (onHomeShell && /log\\s*in/i.test(leading))
+        || (onOffers && hasLoginPrompt)
+        || (onHomeShell && hasLoginPrompt)
         || onMarketingHome
       );
       if (window.ReactNativeWebView) {

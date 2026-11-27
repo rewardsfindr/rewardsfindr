@@ -813,16 +813,20 @@ export default function SyncWebView({ visible, bank, onClose, onSuccess }) {
       }
       return;
     }
-    // US Bank: login from URL only; offers-ready stays message/signedIn gated.
+    // US Bank: login from URL; re-probe PAGE_STATE on every nav (SPA shellapp
+    // hash routes like #/customer-dashboard may not remount loadEnd alone).
     if (bank === 'us_bank') {
       if (onLogin) {
         setOnLoginPage(true);
         setOnOffersPage(false);
         setUsBankSignedIn(false);
         offersRedirectRef.current = false;
+        usBankSawLoginRef.current = true;
       } else {
         setOnLoginPage(false);
       }
+      webViewRef.current?.injectJavaScript(buildUsBankOffersVisibleJs());
+      webViewRef.current?.injectJavaScript(buildUsBankChallengeVisibleJs());
       return;
     }
     if (onOffers || onLogin || !config.useCardsDetectedAsOffersSignal) {

@@ -316,6 +316,29 @@ test('US_BANK_ON_OFFERS posts signedIn false on logged-out deals URL', () => {
   assert.equal(onOffers.signedIn, false);
 });
 
+test('customer-dashboard after login is onHomeShell + signedIn (Last login must not block)', () => {
+  function run(href, text) {
+    const messages = [];
+    const window = {
+      location: { href },
+      ReactNativeWebView: { postMessage(raw) { messages.push(JSON.parse(raw)); } },
+    };
+    const document = { body: { innerText: text } };
+    new Function('window', 'document', buildUsBankOffersVisibleJs())(window, document);
+    return messages.find((m) => m.type === 'US_BANK_PAGE_STATE');
+  }
+  const dash = run(
+    'https://onlinebanking.usbank.com/digital/servicing/shellapp/#/customer-dashboard',
+    'Welcome back, Rakesh.\nTax documents\nRewards\nLog out\nLast login: November 27, 12:13 a.m. CT\nAccounts\nChecking',
+  );
+  assert.ok(dash);
+  assert.equal(dash.onOffers, false);
+  assert.equal(dash.onLoginForm, false);
+  assert.equal(dash.onHomeShell, true);
+  assert.equal(dash.signedIn, true, 'Log out + Last login must still be signedIn');
+  assert.equal(dash.expired, false);
+});
+
 test('US_BANK_ON_OFFERS posts signedIn true on OfferHub deals without Log out chrome', () => {
   const messages = [];
   const window = {
