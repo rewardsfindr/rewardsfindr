@@ -379,6 +379,16 @@ function usBankOffersReady(json) {
   return Array.isArray(json.ads);
 }
 
+// CardLytics offerCount is the full list. A shorter ads[] page is partial.
+function usBankDeclaredCount(json) {
+  const value = json?.offerCount;
+  let n = NaN;
+  if (typeof value === 'number') n = value;
+  else if (value != null && String(value).trim() !== '') n = parseInt(String(value).trim(), 10);
+  if (!Number.isFinite(n) || n <= 0) return null;
+  return Math.floor(n);
+}
+
 function mapUsBankReward(ad) {
   const rewardType = String(ad?.rewardType ?? '').trim().toUpperCase();
   const raw = ad?.rewardAmount;
@@ -471,6 +481,28 @@ export function buildSnapshotRecords(input) {
   if (input.bank === 'citi') return citiRecords(input);
   if (input.bank === 'us_bank') return usBankRecords(input);
   throw new Error('bank must be chase, amex, wells_fargo, citi, or us_bank');
+}
+
+/**
+ * A CardLytics page can declare offerCount (for example 75) and only include
+ * the first ads. Saving that list is fine when the phone has nothing longer.
+ * Replacing a longer saved US Bank card with it drops offers the user already has.
+ */
+export function refuseShorterUsBankPartial(existing, input) {
+  if (!input || input.bank !== 'us_bank') return;
+  const declared = usBankDeclaredCount(input.json);
+  if (declared == null) return;
+  const ads = Array.isArray(input.json?.ads) ? input.json.ads.length : 0;
+  if (ads >= declared) return;
+  const phaseKey = input.phase || '';
+  const saved = (existing || []).filter(offer =>
+    offer.bank === 'us_bank'
+    && offer.cardName === input.cardName
+    && (offer.phase || '') === phaseKey
+  ).length;
+  if (saved > ads) {
+    refuseSnapshot('US Bank returned a partial offer list. Nothing was changed.');
+  }
 }
 
 export function replaceCardOffers(existing, { bank, cardName, phase, records }) {

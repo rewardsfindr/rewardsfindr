@@ -7,6 +7,7 @@ import {
   chaseRecords,
   citiRecords,
   filterOffers,
+  refuseShorterUsBankPartial,
   replaceCardOffers,
   usBankRecords,
   wellsFargoRecords,
@@ -871,4 +872,55 @@ test('an unrecognized or empty US Bank body is refused before storage is written
     (err) => err.code === 'SNAPSHOT_REFUSED' && /no offer id/.test(err.message)
   );
   assert.equal(storage.value, before);
+});
+
+test('a shorter US Bank page does not replace a longer saved card', () => {
+  const saved = [
+    { id: 'c', bank: 'chase', cardName: 'Freedom', phase: '', merchantName: 'Nike' },
+    { id: 'u1', bank: 'us_bank', cardName: 'US Bank', phase: '', merchantName: 'Alpha' },
+    { id: 'u2', bank: 'us_bank', cardName: 'US Bank', phase: '', merchantName: 'Bravo' },
+    { id: 'u3', bank: 'us_bank', cardName: 'US Bank', phase: '', merchantName: 'Charlie' },
+  ];
+  const partial = {
+    bank: 'us_bank',
+    cardName: 'US Bank',
+    phase: '',
+    json: {
+      offerCount: 75,
+      ads: [{
+        offerId: 'PARTIAL0001',
+        merchantName: 'Chevron',
+        activationState: 'SERVED',
+        endDate: '2027-01-01T04:59:59Z',
+        headline: '2% cash back',
+        rewardType: 'PERCENT_AMOUNT_PURCHASE',
+        rewardAmount: 2,
+      }],
+    },
+  };
+
+  assert.throws(
+    () => refuseShorterUsBankPartial(saved, partial),
+    (err) => err.code === 'SNAPSHOT_REFUSED' && /partial offer list/.test(err.message)
+  );
+
+  // replaceCardOffers itself still overwrites. The save path must refuse first.
+  const records = usBankRecords({ json: partial.json, now: NOW });
+  const wiped = replaceCardOffers(saved, {
+    bank: 'us_bank',
+    cardName: 'US Bank',
+    phase: '',
+    records,
+  });
+  assert.equal(wiped.filter(offer => offer.bank === 'us_bank').length, 1);
+
+  refuseShorterUsBankPartial([], partial);
+  refuseShorterUsBankPartial(saved, {
+    ...partial,
+    json: { ...partial.json, offerCount: partial.json.ads.length },
+  });
+  refuseShorterUsBankPartial(
+    [{ id: 'u', bank: 'us_bank', cardName: 'US Bank', phase: '', merchantName: 'Only' }],
+    partial,
+  );
 });

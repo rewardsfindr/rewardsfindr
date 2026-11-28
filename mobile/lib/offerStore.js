@@ -2,7 +2,12 @@
 // Keyed by Firebase uid so a second account on the same device stays separate.
 
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { buildSnapshotRecords, filterOffers, replaceCardOffers } from './catalog/deviceCatalog.js';
+import {
+  buildSnapshotRecords,
+  filterOffers,
+  refuseShorterUsBankPartial,
+  replaceCardOffers,
+} from './catalog/deviceCatalog.js';
 
 const storageKey = (uid) => `rewardsfindr_offers_v1_${uid}`;
 
@@ -21,6 +26,7 @@ export async function loadOffers(uid) {
 export async function saveCardSnapshot(uid, input) {
   if (!uid) throw new Error('You must be signed in to sync offers.');
   const existing = await loadOffers(uid);
+  refuseShorterUsBankPartial(existing, input);
   const records = buildSnapshotRecords(input);
   const next = replaceCardOffers(existing, {
     bank: input.bank,
